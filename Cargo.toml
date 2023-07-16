@@ -3,18 +3,18 @@ name = "tbox"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 egui = "0.21.0"
 eframe = { version = "0.21.0", default-features = false, features = [
-    "accesskit",     # Make egui comptaible with screen readers. NOTE: adds a lot of dependencies.
-    "default_fonts", # Embed the default egui fonts.
-    "glow",          # Use the glow rendering backend. Alternative: "wgpu".
-    "persistence",   # Enable restoring app state when restarting the app.
+    "accesskit",     # egui适配屏幕（会加入许多依赖）
+    "default_fonts", # 嵌入egui默认字体
+    "glow",          # 使用glow渲染
+    "persistence",   # 持久化
 ] }
+tracing = "0.1.29"
+egui_extras = { version = "0.21.0"}
 
-# You only need serde if you want app persistence:
+# 使用serde实现持久化
 serde = { version = "1", features = ["derive"] }
 
 # native:
@@ -28,20 +28,13 @@ tracing-wasm = "0.2"
 wasm-bindgen-futures = "0.4"
 
 
+# 发布模式下优化级别
 [profile.release]
-opt-level = 2 # fast and small wasm
+opt-level = 2
 
-# Optimize all dependencies even in debug builds:
+# debug模式下优化级别
 [profile.dev.package."*"]
 opt-level = 2
 
 
 [patch.crates-io]
-
-# If you want to use the bleeding edge version of egui and eframe:
-# egui = { git = "https://github.com/emilk/egui", branch = "master" }
-# eframe = { git = "https://github.com/emilk/egui", branch = "master" }
-
-# If you fork https://github.com/emilk/egui you can test with:
-# egui = { path = "../egui/crates/egui" }
-# eframe = { path = "../egui/crates/eframe" }

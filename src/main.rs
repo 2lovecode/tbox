@@ -3,13 +3,13 @@
 mod tbox;
 
 fn main() -> eframe::Result<()> {
-    // Log to stdout (if you run with `RUST_LOG=debug`).
-    tracing_subscriber::fmt::init();
+    // 日志级别
+    tracing_subscriber::fmt().with_max_level(tracing::Level::DEBUG).init();
 
     let mut native_options = eframe::NativeOptions::default();
     native_options.decorated = false;
     eframe::run_native(
-        "eframe template",
+        "工具箱",
         native_options,
         Box::new(|cc| Box::new(tbox::App::new(cc))),
     )

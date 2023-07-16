@@ -5,6 +5,7 @@ pub struct App {}
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
         setup_custom_fonts(&cc.egui_ctx);
         Self {}
     }
@@ -17,13 +18,60 @@ impl eframe::App for App {
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         custom_window_frame(ctx, frame, "工具箱", |ui| {
-            ui.columns(2, |ui| {
-                ui[0].label("First column");
-                ui[1].horizontal(|ui| {
-                    ui.label("egui theme:");
-                    egui::widgets::global_dark_light_mode_buttons(ui);
+            use egui_extras::{Column, TableBuilder};
+
+            let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
+
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+                .column(Column::auto())
+                .column(Column::initial(100.0).range(40.0..=300.0))
+                .column(Column::initial(100.0).at_least(40.0).clip(true))
+                .column(Column::remainder())
+                .min_scrolled_height(0.0);
+
+            table
+                .header(20.0, |mut header| {
+                    header.col(|ui| {
+                        ui.strong("Row");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Expanding content");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Clipped text");
+                    });
+                    header.col(|ui| {
+                        ui.strong("Content");
+                    });
+                })
+                .body(|mut body| {
+                    for row_index in 0..10 {
+                        let is_thick = thick_row(row_index);
+                        let row_height = if is_thick { 30.0 } else { 18.0 };
+                        body.row(row_height, |mut row| {
+                            row.col(|ui| {
+                                ui.label(row_index.to_string());
+                            });
+                            row.col(|ui| {
+                                expanding_content(ui);
+                            });
+                            row.col(|ui| {
+                                ui.label(long_text(row_index));
+                            });
+                            row.col(|ui| {
+                                ui.style_mut().wrap = Some(false);
+                                if is_thick {
+                                    ui.heading("Extra thick row");
+                                } else {
+                                    ui.label("Normal row");
+                                }
+                            });
+                        });
+                    }
                 });
-            });
         });
     }
 }
@@ -79,6 +127,8 @@ fn title_bar_ui(
 
     let title_bar_response = ui.interact(title_bar_rect, Id::new("title_bar"), Sense::click());
 
+    
+
     // Paint the title:
     painter.text(
         title_bar_rect.center(),
@@ -105,6 +155,12 @@ fn title_bar_ui(
     }
 
     ui.allocate_ui_at_rect(title_bar_rect, |ui| {
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            egui::widgets::global_dark_light_mode_switch(ui);
+        });
+    });
+
+    ui.allocate_ui_at_rect(title_bar_rect, |ui| {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 0.0;
             ui.visuals_mut().button_frame = false;
@@ -114,7 +170,7 @@ fn title_bar_ui(
     });
 }
 
-/// Show some close/maximize/minimize buttons for the native window.
+/// 展示最大化，最小化，关闭按钮
 fn close_maximize_minimize(ui: &mut egui::Ui, frame: &mut eframe::Frame) {
     use egui::{Button, RichText};
 
@@ -122,7 +178,7 @@ fn close_maximize_minimize(ui: &mut egui::Ui, frame: &mut eframe::Frame) {
 
     let close_response = ui
         .add(Button::new(RichText::new("❌").size(button_height)))
-        .on_hover_text("Close the window");
+        .on_hover_text("关闭");
     if close_response.clicked() {
         frame.close();
     }
@@ -130,14 +186,14 @@ fn close_maximize_minimize(ui: &mut egui::Ui, frame: &mut eframe::Frame) {
     if frame.info().window_info.maximized {
         let maximized_response = ui
             .add(Button::new(RichText::new("🗗").size(button_height)))
-            .on_hover_text("Restore window");
+            .on_hover_text("恢复");
         if maximized_response.clicked() {
             frame.set_maximized(false);
         }
     } else {
         let maximized_response = ui
             .add(Button::new(RichText::new("🗗").size(button_height)))
-            .on_hover_text("Maximize window");
+            .on_hover_text("最大化");
         if maximized_response.clicked() {
             frame.set_maximized(true);
         }
@@ -145,7 +201,7 @@ fn close_maximize_minimize(ui: &mut egui::Ui, frame: &mut eframe::Frame) {
 
     let minimized_response = ui
         .add(Button::new(RichText::new("🗕").size(button_height)))
-        .on_hover_text("Minimize the window");
+        .on_hover_text("最小化");
     if minimized_response.clicked() {
         frame.set_minimized(true);
     }
@@ -181,4 +237,24 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 
     // Tell egui to use these fonts:
     ctx.set_fonts(fonts);
+}
+
+
+fn expanding_content(ui: &mut egui::Ui) {
+    let width = ui.available_width().clamp(20.0, 200.0);
+    let height = ui.available_height();
+    let (rect, _response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
+    ui.painter().hline(
+        rect.x_range(),
+        rect.center().y,
+        (1.0, ui.visuals().text_color()),
+    );
+}
+
+fn long_text(row_index: usize) -> String {
+    format!("Row {row_index} has some long text that you may want to clip, or it will take up too much horizontal space!")
+}
+
+fn thick_row(row_index: usize) -> bool {
+    row_index % 6 == 0
 }
