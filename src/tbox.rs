@@ -1,15 +1,30 @@
 use eframe::egui;
 
-#[derive(Default)]
-pub struct App {}
+
+enum Page {
+    HomePage,
+    PushBoxGame
+}
+
+pub struct App {
+    current_page: Page,
+    current_page_title: String,
+    text: String,
+}
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         setup_custom_fonts(&cc.egui_ctx);
-        Self {}
+        Self {
+            current_page: Page::HomePage,
+            current_page_title: String::from("工具箱"),
+            text: String::from("操作：")
+        }
     }
 }
+
+
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -17,61 +32,43 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        custom_window_frame(ctx, frame, "工具箱", |ui| {
-            use egui_extras::{Column, TableBuilder};
-
-            let text_height = egui::TextStyle::Body.resolve(ui.style()).size;
-
-            let mut table = TableBuilder::new(ui)
-                .striped(true)
-                .resizable(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::auto())
-                .column(Column::initial(100.0).range(40.0..=300.0))
-                .column(Column::initial(100.0).at_least(40.0).clip(true))
-                .column(Column::remainder())
-                .min_scrolled_height(0.0);
-
-            table
-                .header(20.0, |mut header| {
-                    header.col(|ui| {
-                        ui.strong("Row");
-                    });
-                    header.col(|ui| {
-                        ui.strong("Expanding content");
-                    });
-                    header.col(|ui| {
-                        ui.strong("Clipped text");
-                    });
-                    header.col(|ui| {
-                        ui.strong("Content");
-                    });
-                })
-                .body(|mut body| {
-                    for row_index in 0..10 {
-                        let is_thick = thick_row(row_index);
-                        let row_height = if is_thick { 30.0 } else { 18.0 };
-                        body.row(row_height, |mut row| {
-                            row.col(|ui| {
-                                ui.label(row_index.to_string());
-                            });
-                            row.col(|ui| {
-                                expanding_content(ui);
-                            });
-                            row.col(|ui| {
-                                ui.label(long_text(row_index));
-                            });
-                            row.col(|ui| {
-                                ui.style_mut().wrap = Some(false);
-                                if is_thick {
-                                    ui.heading("Extra thick row");
-                                } else {
-                                    ui.label("Normal row");
-                                }
-                            });
-                        });
+        let title = String::from(self.current_page_title.as_str());
+        custom_window_frame(ctx, frame, title.as_str() , |ui| {
+            match self.current_page {
+                Page::HomePage => {
+                    if ui.button("推箱子").clicked() {
+                        self.current_page = Page::PushBoxGame;
+                        ui.heading("text");
+                        self.current_page_title = String::from("推箱子");
                     }
-                });
+                },
+                Page::PushBoxGame => {
+                    if ui.button("主界面").clicked() {
+                        self.current_page = Page::HomePage;
+                        self.current_page_title = String::from("工具箱");
+                    }
+
+                    ui.label(&self.text);
+
+                    
+
+                    if ctx.input(|i| i.key_pressed(egui::Key::W)) {
+                        self.text.push_str("上");
+                    }
+
+                    if ctx.input(|i| i.key_down(egui::Key::S)) {
+                        self.text.push_str("下");
+                    }
+
+                    if ctx.input(|i| i.key_released(egui::Key::A)) {
+                        self.text.push_str("左");
+                    }
+
+                    if ctx.input(|i| i.key_released(egui::Key::D)) {
+                        self.text.push_str("右");
+                    }
+                }
+            }
         });
     }
 }
@@ -237,24 +234,4 @@ fn setup_custom_fonts(ctx: &egui::Context) {
 
     // Tell egui to use these fonts:
     ctx.set_fonts(fonts);
-}
-
-
-fn expanding_content(ui: &mut egui::Ui) {
-    let width = ui.available_width().clamp(20.0, 200.0);
-    let height = ui.available_height();
-    let (rect, _response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    ui.painter().hline(
-        rect.x_range(),
-        rect.center().y,
-        (1.0, ui.visuals().text_color()),
-    );
-}
-
-fn long_text(row_index: usize) -> String {
-    format!("Row {row_index} has some long text that you may want to clip, or it will take up too much horizontal space!")
-}
-
-fn thick_row(row_index: usize) -> bool {
-    row_index % 6 == 0
 }

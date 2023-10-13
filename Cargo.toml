@@ -4,15 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-egui = "0.21.0"
-eframe = { version = "0.21.0", default-features = false, features = [
-    "accesskit",     # egui适配屏幕（会加入许多依赖）
+egui = "0.23.0"
+eframe = { version = "0.23.0", default-features = false, features = [
     "default_fonts", # 嵌入egui默认字体
     "glow",          # 使用glow渲染
     "persistence",   # 持久化
 ] }
 tracing = "0.1.29"
-egui_extras = { version = "0.21.0"}
+egui_extras = { version = "0.23.0"}
 
 # 使用serde实现持久化
 serde = { version = "1", features = ["derive"] }
