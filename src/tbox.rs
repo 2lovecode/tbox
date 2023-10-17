@@ -1,4 +1,6 @@
-use eframe::egui;
+use eframe::{egui, glow::FALSE};
+use egui::{Color32, Painter, Pos2};
+use egui_extras::{Size, StripBuilder};
 
 
 enum Page {
@@ -6,20 +8,42 @@ enum Page {
     PushBoxGame
 }
 
+struct Position {
+    x: i32,
+    y: i32,
+}
+
 pub struct App {
     current_page: Page,
     current_page_title: String,
     text: String,
+    info: String,
+    current_map: [[i32; 10]; 10],
 }
 
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::light());
         setup_custom_fonts(&cc.egui_ctx);
+        let game_map: [[i32; 10]; 10]  = [
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 2, 2, 2, 2, 1, 1, 1],
+            [1, 1, 2, 2, 4, 2, 2, 2, 1, 1],
+            [1, 1, 2, 3, 2, 2, 2, 2, 1, 1], 
+            [1, 1, 2, 2, 2, 1, 1, 1, 1, 1],
+            [1, 1, 2, 2, 2, 1, 1, 1, 1, 1],
+            [1, 1, 2, 2, 2, 5, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+            [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+        ];
+
         Self {
             current_page: Page::HomePage,
             current_page_title: String::from("工具箱"),
-            text: String::from("操作：")
+            text: String::from("操作："),
+            info: String::from("结果："),
+            current_map: game_map,
         }
     }
 }
@@ -49,23 +73,197 @@ impl eframe::App for App {
                     }
 
                     ui.label(&self.text);
-
+                    ui.label(&self.info);
                     
 
+                    // 绘制地图
+                    let rows = self.current_map.len();
+                    let cols = self.current_map[0].len();
+
+                    let frows: f32 = rows as f32;
+                    let fcols: f32 = cols as f32;
+                    
+                   // 计算总的容器大小
+                    let grid_rect = ui.available_rect_before_wrap();
+                    let total_size = grid_rect.width().min(grid_rect.height());
+                    // 计算每个格子的大小
+                    let cell_size = total_size / f32::from(frows).min(fcols);
+                    
+                    
+                    let dark_mode = ui.visuals().dark_mode;
+                    let faded_color = ui.visuals().window_fill();
+                    let faded_color = |color: Color32| -> Color32 {
+                        use egui::Rgba;
+                        let t = if dark_mode { 0.7 } else { 0.55 };
+                        egui::lerp(Rgba::from(color)..=Rgba::from(faded_color), t).into()
+                    };
+
+                    
+                    // 绘制格子
+                    for row in 0..rows {
+                        ui.horizontal(|ui| {
+                            for col in 0..cols {
+                                let x0 = grid_rect.left() + (col+1) as f32 * cell_size ;
+                                let x1 = x0 + cell_size;
+                                let y0 = grid_rect.top() + row as f32 * cell_size;
+                                let y1 = y0 + cell_size;
+
+                                // 绘制一个格子
+                                // let mut rect = ui.available_rect_before_wrap();
+                                // rect.set_height(cell_size);
+                                // rect.set_width(cell_size);
+                                let mut rect_color = faded_color(Color32::GOLD);
+                                if self.current_map[row][col] == 2 {
+                                    rect_color = faded_color(Color32::WHITE);
+                                } else if self.current_map[row][col] == 3 {
+                                    rect_color = faded_color(Color32::RED);
+                                } else if self.current_map[row][col] == 4 {
+                                    rect_color = faded_color(Color32::GREEN);
+                                } else if self.current_map[row][col] == 5 {
+                                    rect_color = faded_color(Color32::BLUE);
+                                }
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1)),
+                                    0.0,
+                                    rect_color,
+                                )
+                            }
+                        });
+                    }
                     if ctx.input(|i| i.key_pressed(egui::Key::W)) {
                         self.text.push_str("上");
+                        let mut change = false;
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                if self.current_map[row][col] == 3 {
+                                    if self.current_map[row-1][col] != 1 {
+                                        if self.current_map[row-1][col] == 4 {
+                                            if (row - 2) >= 0 && self.current_map[row-2][col] != 1{
+                                                self.current_map[row-2][col] = 4;
+                                                self.current_map[row-1][col] = 3;
+                                                self.current_map[row][col] = 2;
+                                            }
+                                        } else {
+                                            self.current_map[row-1][col] = 3;
+                                            self.current_map[row][col] = 2;
+                                        }
+                                    }
+                                    
+                                    change = true;
+                                    break;
+                                }
+                            }
+                            if change {
+                                break;
+                            }
+                        }
                     }
 
-                    if ctx.input(|i| i.key_down(egui::Key::S)) {
+                    if ctx.input(|i| i.key_pressed(egui::Key::S)) {
                         self.text.push_str("下");
+                        let mut change = false;
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                if self.current_map[row][col] == 3 {
+                                    if (row + 1) <= 10 && self.current_map[row+1][col] != 1{
+                                        if self.current_map[row+1][col] == 4 {
+                                            if (row + 2) <= 10 && self.current_map[row+2][col] != 1 {
+                                                self.current_map[row+2][col] = 4;
+                                                self.current_map[row+1][col] = 3;
+                                                self.current_map[row][col] = 2;
+                                            }
+                                        } else {
+                                            self.current_map[row+1][col] = 3;
+                                            self.current_map[row][col] = 2;
+                                        }
+                                        
+                                    }
+                                    
+                                    change = true;
+                                    break;
+                                }
+                            }
+                            if change {
+                                break;
+                            }
+                        }
                     }
 
                     if ctx.input(|i| i.key_released(egui::Key::A)) {
                         self.text.push_str("左");
+                        let mut change = false;
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                if self.current_map[row][col] == 3 {
+                                    if self.current_map[row][col-1] != 1 {
+                                        if self.current_map[row][col-1] == 4 {
+                                            if col -2 >= 0 && self.current_map[row][col-2] != 1 {
+                                                self.current_map[row][col-2] = 4;
+                                                self.current_map[row][col-1] = 3;
+                                                self.current_map[row][col] = 2;
+                                            }
+                                        } else {
+                                            self.current_map[row][col-1] = 3;
+                                            self.current_map[row][col] = 2;
+                                        }
+                                        
+                                    }
+                                    
+                                    change = true;
+                                    break;
+                                }
+                            }
+                            if change {
+                                break;
+                            }
+                        }
                     }
 
                     if ctx.input(|i| i.key_released(egui::Key::D)) {
                         self.text.push_str("右");
+                        let mut change = false;
+                        for row in 0..rows {
+                            for col in 0..cols {
+                                if self.current_map[row][col] == 3 {
+                                    if (col+1) <= 10 && self.current_map[row][col+1] != 1 {
+                                        if  self.current_map[row][col+1] == 4 {
+                                            if col + 2 <= 10 && self.current_map[row][col+2] != 1 {
+                                                self.current_map[row][col+2] = 4;
+                                                self.current_map[row][col+1] = 3;
+                                                self.current_map[row][col] = 2;
+                                            }
+                                        } else {
+                                            self.current_map[row][col+1] = 3;
+                                            self.current_map[row][col] = 2;
+                                        }
+                                       
+                                    }
+                                    
+                                    change = true;
+                                    break;
+                                }
+                            }
+                            if change {
+                                break;
+                            }
+                        }
+                    }
+
+                    let mut has_target = false;
+
+                    for row in 0..rows {
+                        for col in 0..cols {
+                            if self.current_map[row][col] == 5 {
+                                has_target = true;
+                                break;
+                            }
+                        }
+                        if has_target {
+                            break;
+                        }
+                    }
+                    if !has_target {
+                        self.info = String::from("结果：过关！");
                     }
                 }
             }
