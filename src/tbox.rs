@@ -1,16 +1,12 @@
-use eframe::{egui, glow::FALSE};
-use egui::{Color32, Painter, Pos2};
-use egui_extras::{Size, StripBuilder};
+use eframe::egui;
+use egui::Color32;
+
+// 看我丑陋的代码。。。。
 
 
 enum Page {
     HomePage,
     PushBoxGame
-}
-
-struct Position {
-    x: i32,
-    y: i32,
 }
 
 pub struct App {
@@ -138,7 +134,7 @@ impl eframe::App for App {
                                 if self.current_map[row][col] == 3 {
                                     if self.current_map[row-1][col] != 1 {
                                         if self.current_map[row-1][col] == 4 {
-                                            if (row - 2) >= 0 && self.current_map[row-2][col] != 1{
+                                            if row - 1 >= 1 && self.current_map[row-2][col] != 1{
                                                 self.current_map[row-2][col] = 4;
                                                 self.current_map[row-1][col] = 3;
                                                 self.current_map[row][col] = 2;
@@ -197,7 +193,7 @@ impl eframe::App for App {
                                 if self.current_map[row][col] == 3 {
                                     if self.current_map[row][col-1] != 1 {
                                         if self.current_map[row][col-1] == 4 {
-                                            if col -2 >= 0 && self.current_map[row][col-2] != 1 {
+                                            if col - 1 >= 1 && self.current_map[row][col-2] != 1 {
                                                 self.current_map[row][col-2] = 4;
                                                 self.current_map[row][col-1] = 3;
                                                 self.current_map[row][col] = 2;
