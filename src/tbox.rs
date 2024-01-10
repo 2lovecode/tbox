@@ -1,20 +1,32 @@
+use std::collections::HashMap;
 use eframe::egui;
 use egui::Color32;
+use crate::tbox::Page::{HomePage, PushBoxGame};
 
 // 看我丑陋的代码。。。。
 
 
+#[derive(Eq, PartialEq, Hash)]
 enum Page {
     HomePage,
     PushBoxGame
 }
 
 pub struct App {
-    current_page: Page,
-    current_page_title: String,
+    state: GlobalState,
     text: String,
     info: String,
     current_map: [[i32; 10]; 10],
+}
+
+pub struct GlobalState {
+    current_page: Page,
+    page_state_map: HashMap<Page, PageState>,
+}
+
+pub struct PageState {
+    id: Page,
+    title: String,
 }
 
 impl App {
@@ -34,17 +46,25 @@ impl App {
             [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
         ];
 
+        let mut state_map = HashMap::new();
+        state_map.insert(HomePage, PageState{id:HomePage, title:String::from("首页")});
+        state_map.insert(PushBoxGame, PageState{id:PushBoxGame, title:String::from("推箱子")});
+
         Self {
-            current_page: Page::HomePage,
-            current_page_title: String::from("工具箱"),
+            state: GlobalState{current_page:HomePage, page_state_map: state_map},
             text: String::from("操作："),
             info: String::from("结果："),
             current_map: game_map,
         }
     }
+
+    fn get_current_page_title(&mut self) -> String {
+        match self.state.page_state_map.get(&(self.state.current_page)) {
+            Some(x) => String::from(&(x.title)),
+            None => String::from(""),
+        }
+    }
 }
-
-
 
 impl eframe::App for App {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
@@ -52,20 +72,18 @@ impl eframe::App for App {
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        let title = String::from(self.current_page_title.as_str());
-        custom_window_frame(ctx, frame, title.as_str() , |ui| {
-            match self.current_page {
-                Page::HomePage => {
+
+        custom_window_frame(ctx, frame, self.get_current_page_title().as_str() , |ui| {
+            match self.state.current_page {
+                HomePage => {
                     if ui.button("推箱子").clicked() {
-                        self.current_page = Page::PushBoxGame;
+                        self.state.current_page = PushBoxGame;
                         ui.heading("text");
-                        self.current_page_title = String::from("推箱子");
                     }
                 },
-                Page::PushBoxGame => {
+                PushBoxGame => {
                     if ui.button("主界面").clicked() {
-                        self.current_page = Page::HomePage;
-                        self.current_page_title = String::from("工具箱");
+                        self.state.current_page = HomePage;
                     }
 
                     ui.label(&self.text);
