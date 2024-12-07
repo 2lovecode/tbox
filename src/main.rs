@@ -31,7 +31,7 @@ impl TBox {
             Self {
                 windows: BTreeMap::new(),
             },
-            open.map(app::window::Message::WindowOpened),
+            open.map(|id| app::window::Message::WindowOpened(id, app::window::WindowCategory::Main)),
         )
     }
 
@@ -44,7 +44,7 @@ impl TBox {
 
     fn update(&mut self, message: app::window::Message) -> Task<app::window::Message> {
         match message {
-            app::window::Message::OpenWindow => {
+            app::window::Message::OpenWindow(category) => {
                 let Some(last_window) = self.windows.keys().last() else {
                     return Task::none();
                 };
@@ -66,43 +66,11 @@ impl TBox {
                         });
                         println!("Window opened: {:?}", _id);
                         open
-                    }).map(app::window::Message::WindowOpened)
+                    }).map(move |id| app::window::Message::WindowOpened(id, category.clone()))
             }
-            app::window::Message::OpenToolsJson2CsvWindow => {
-                let Some(last_window) = self.windows.keys().last() else {
-                    return Task::none();
-                };
-
-                window::get_position(*last_window)
-                    .then(|last_position| {
-                        let position = last_position.map_or(
-                            window::Position::Default,
-                            |last_position| {
-                                window::Position::Specific(
-                                    last_position + Vector::new(20.0, 20.0),
-                                )
-                            },
-                        );
-
-                        let (_id, open) = window::open(window::Settings {
-                            position,
-                            ..window::Settings::default()
-                        });
-                        println!("Window opened: {:?}", _id);
-                        open
-                    }).map(app::window::Message::ToolsJson2CsvWindowOpened)
-            },
-            app::window::Message::ToolsJson2CsvWindowOpened(id) => {
+            app::window::Message::WindowOpened(id, category) => {
                 let mut window = app::window::Window::new(self.windows.len() + 1);
-                window.category = app::window::WindowCategory::ToolsJson2Csv;
-                let focus_input = text_input::focus(format!("input-{id}"));
-
-                self.windows.insert(id, window);
-
-                focus_input
-            },
-            app::window::Message::WindowOpened(id) => {
-                let window = app::window::Window::new(self.windows.len() + 1);
+                window.category = category;
                 let focus_input = text_input::focus(format!("input-{id}"));
 
                 self.windows.insert(id, window);

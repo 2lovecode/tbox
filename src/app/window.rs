@@ -1,6 +1,6 @@
 use iced::window;
 use iced::widget::{
-    button, column, container, scrollable, text,
+    button, column, row, container, scrollable, text,
 };
 use iced::{Center, Element, Fill, Theme};
 
@@ -13,25 +13,24 @@ pub struct Window {
     pub theme: Theme,
 }
 
-
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    OpenWindow,
-    WindowOpened(window::Id),
-    WindowClosed(window::Id),
-    ScaleInputChanged(window::Id, String),
-    ScaleChanged(window::Id, String),
-    TitleChanged(window::Id, String),
-    OpenToolsJson2CsvWindow,
-    ToolsJson2CsvWindowOpened(window::Id)
-}
-
 #[derive(Debug, Clone)]
 pub enum WindowCategory {
     Main,
     ToolsJson2Csv,
 }
+
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    OpenWindow(WindowCategory),
+    WindowOpened(window::Id, WindowCategory),
+    WindowClosed(window::Id),
+    ScaleInputChanged(window::Id, String),
+    ScaleChanged(window::Id, String),
+    TitleChanged(window::Id, String),
+}
+
+
 
 
 impl Window {
@@ -50,15 +49,19 @@ impl Window {
         let content = match self.category {
             WindowCategory::Main => {
                 let btn = button (text("Json转Csv").shaping(text::Shaping::Advanced))
-                    .on_press(Message::OpenToolsJson2CsvWindow);
+                    .on_press(Message::OpenWindow(WindowCategory::ToolsJson2Csv));
                 scrollable(
-                    column![btn]
-                        .spacing(50)
+                    column![
+                        btn,
+                        row!["Left", "Right"].spacing(10),
+                        "Bottom"
+                    ].spacing(50)
                         .width(Fill)
                         .align_x(Center),
                 )
             }
             WindowCategory::ToolsJson2Csv => {
+                // Message::TitleChanged(id, String::from("aaa"));
                 scrollable(
                     column![text("json2csv")]
                         .spacing(50)
