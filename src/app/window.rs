@@ -1,3 +1,4 @@
+use iced::alignment::Horizontal::{Left, Right};
 use iced::window;
 use iced::widget::{
     button, column, row, container, scrollable, text,
@@ -16,6 +17,7 @@ pub struct Window {
 #[derive(Debug, Clone)]
 pub enum WindowCategory {
     Main,
+    ToolsTime,
     ToolsJson2Csv,
 }
 
@@ -50,12 +52,22 @@ impl Window {
             WindowCategory::Main => {
                 let btn = button (text("Json转Csv").shaping(text::Shaping::Advanced))
                     .on_press(Message::OpenWindow(WindowCategory::ToolsJson2Csv));
+                let btn2 = button (text("时间转换").shaping(text::Shaping::Advanced))
+                    .on_press(Message::OpenWindow(WindowCategory::ToolsTime));
                 scrollable(
-                    column![
-                        btn,
-                        row!["Left", "Right"].spacing(10),
-                        "Bottom"
-                    ].spacing(50)
+                    container(
+                        column![
+                            row!(text("功能列表").shaping(text::Shaping::Advanced)),
+                            row!(column![btn], column![btn2]),
+                        ]
+                        .spacing(10),
+                    ).width(Fill).align_x(Left),
+                )
+            }
+            WindowCategory::ToolsTime => {
+                scrollable(
+                    column![text("时间工具").shaping(text::Shaping::Advanced)]
+                        .spacing(50)
                         .width(Fill)
                         .align_x(Center),
                 )

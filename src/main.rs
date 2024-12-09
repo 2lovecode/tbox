@@ -71,6 +71,17 @@ impl TBox {
             app::window::Message::WindowOpened(id, category) => {
                 let mut window = app::window::Window::new(self.windows.len() + 1);
                 window.category = category;
+                match window.category {
+                    app::window::WindowCategory::Main => {
+                        window.title = "主页".to_string();
+                    },
+                    app::window::WindowCategory::ToolsTime => {
+                        window.title = "时间工具".to_string();
+                    },
+                    app::window::WindowCategory::ToolsJson2Csv => {
+                        window.title = "Json转Csv".to_string();
+                    }
+                }
                 let focus_input = text_input::focus(format!("input-{id}"));
 
                 self.windows.insert(id, window);
@@ -115,7 +126,7 @@ impl TBox {
 
     fn view(&self, window_id: window::Id) -> Element<app::window::Message> {
         if let Some(window) = self.windows.get(&window_id) {
-            center(window.view(window_id)).into()
+            window.view(window_id)
         } else {
             horizontal_space().into()
         }
