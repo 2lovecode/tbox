@@ -1,4 +1,4 @@
-use iced::alignment::Horizontal::{Left, Right};
+use iced::alignment::{Horizontal, Vertical};
 use iced::window;
 use iced::widget::{
     button, column, row, container, scrollable, text,
@@ -21,7 +21,6 @@ pub enum WindowCategory {
     ToolsJson2Csv,
 }
 
-
 #[derive(Debug, Clone)]
 pub enum Message {
     OpenWindow(WindowCategory),
@@ -31,9 +30,6 @@ pub enum Message {
     ScaleChanged(window::Id, String),
     TitleChanged(window::Id, String),
 }
-
-
-
 
 impl Window {
     pub fn new(count: usize) -> Self {
@@ -47,42 +43,42 @@ impl Window {
     }
 
     pub fn view(&self, id: window::Id) -> Element<Message> {
-        
         let content = match self.category {
             WindowCategory::Main => {
-                let btn = button (text("Json转Csv").shaping(text::Shaping::Advanced))
+                let btn = button(text("Json转Csv").shaping(text::Shaping::Advanced))
                     .on_press(Message::OpenWindow(WindowCategory::ToolsJson2Csv));
-                let btn2 = button (text("时间转换").shaping(text::Shaping::Advanced))
+                let btn2 = button(text("时间转换").shaping(text::Shaping::Advanced))
                     .on_press(Message::OpenWindow(WindowCategory::ToolsTime));
                 scrollable(
-                    container(
-                        column![
+                    container(column![
                             row!(text("功能列表").shaping(text::Shaping::Advanced)),
                             row!(column![btn], column![btn2]),
-                        ]
-                        .spacing(10),
-                    ).width(Fill).align_x(Left),
+                    ])
+                    // .spacing(10)
+                    .width(Fill)
+                    .align_x(Horizontal::Left),
                 )
             }
             WindowCategory::ToolsTime => {
                 scrollable(
-                    column![text("时间工具").shaping(text::Shaping::Advanced)]
-                        .spacing(50)
-                        .width(Fill)
+                    column![
+                        text("时间工具").shaping(text::Shaping::Advanced)
+                    ]
+                    .spacing(50)
+                    .width(Fill)
                         .align_x(Center),
                 )
             }
             WindowCategory::ToolsJson2Csv => {
-                // Message::TitleChanged(id, String::from("aaa"));
                 scrollable(
                     column![text("json2csv")]
                         .spacing(50)
                         .width(Fill)
-                        .align_x(Center),
+                        .align_x(Horizontal::Center),
                 )
-            }
+    }
         };
 
         container(content).center_x(200).into()
-    }
+}
 }
