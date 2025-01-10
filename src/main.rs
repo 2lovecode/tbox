@@ -80,6 +80,9 @@ impl TBox {
                     },
                     app::window::WindowCategory::ToolsJson2Csv => {
                         window.title = "Json转Csv".to_string();
+                    },
+                    app::window::WindowCategory::ToolsJson2Query => {
+                        window.title = "Json转Query".to_string();
                     }
                 }
                 let focus_input = text_input::focus(format!("input-{id}"));
@@ -121,6 +124,14 @@ impl TBox {
 
                 Task::none()
             }
+            app::window::Message::ContentChanged(id, message) => {
+                if let Some(window) = self.windows.get_mut(&id) {
+                    window.update(message);
+                }
+
+                Task::none()
+            }
+
         }
     }
 
