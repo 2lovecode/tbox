@@ -1,6 +1,6 @@
 use iced::alignment::Horizontal::Left;
+use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};
 use iced::window;
-use iced::widget::{button, column, row, container, scrollable, text, text_input, text_editor};
 use iced::{Center, Element, Fill, Theme};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ pub enum WindowCategory {
 #[derive(Debug, Clone)]
 pub enum WindowContentMessage {
     Json2QueryInputChange(String),
-    Json2QueryTransfer()
+    Json2QueryTransfer(),
 }
 
 #[derive(Debug, Clone)]
@@ -40,8 +40,6 @@ pub enum Message {
     TitleChanged(window::Id, String),
     ContentChanged(window::Id, WindowContentMessage),
 }
-
-
 
 impl Window {
     pub fn new(count: usize) -> Self {
@@ -56,7 +54,7 @@ impl Window {
         }
     }
 
-    pub fn view(&self, id: window::Id) -> Element<Message> {        
+    pub fn view(&self, id: window::Id) -> Element<Message> {
         let content = match self.category {
             WindowCategory::Main => {
                 let btn = button(text("Json转Csv").shaping(text::Shaping::Advanced))
@@ -74,60 +72,64 @@ impl Window {
                         ]
                         .spacing(10),
                     )
-                        .width(Fill)
+                    .width(Fill)
                     .align_x(Left),
                 )
             }
-            WindowCategory::ToolsTime => {
-                scrollable(
-                    column![text("时间工具").shaping(text::Shaping::Advanced)]
-                        .spacing(50)
-                        .width(Fill)
-                        .align_x(Center),
-                )
-            }
-            WindowCategory::ToolsJson2Csv => {
-                scrollable(
-                    column![text("json2csv")]
-                        .spacing(50)
+            WindowCategory::ToolsTime => scrollable(
+                column![text("时间工具").shaping(text::Shaping::Advanced)]
+                    .spacing(50)
                     .width(Fill)
-                        .align_x(Center),
-                )
-            }
+                    .align_x(Center),
+            ),
+            WindowCategory::ToolsJson2Csv => scrollable(
+                column![text("json2csv")]
+                    .spacing(50)
+                    .width(Fill)
+                    .align_x(Center),
+            ),
             WindowCategory::ToolsJson2Query => {
                 let input = text_input("输入JSON", &self.json_input)
                     .id("json-input")
-                    .on_input(move |s| Message::ContentChanged(id, WindowContentMessage::Json2QueryInputChange(s)))
-                    .padding(15)
-                    .size(20)  // Increased the size of the input text
-                    .width(iced::Length::Fill)  // Make the input box fill the available width
+                    .on_input(move |s| {
+                        Message::ContentChanged(id, WindowContentMessage::Json2QueryInputChange(s))
+                    })
+                    .padding(20) // Increased padding
+                    .size(20)
+                    .width(iced::Length::Fill)
                     .align_x(Center);
 
                 let convert_button = button(text("转换").shaping(text::Shaping::Advanced))
-                    .on_press(Message::ContentChanged(id, WindowContentMessage::Json2QueryTransfer()))
+                    .on_press(Message::ContentChanged(
+                        id,
+                        WindowContentMessage::Json2QueryTransfer(),
+                    ))
                     .padding(10)
-                    .width(iced::Length::Fill);  // Make the button fill the available width
-                
+                    .width(iced::Length::Fixed(100.0));
+
                 let output = text_input("", &self.query_output)
                     .padding(15)
-                    .size(20)  // Increased the size of the input text
-                    .width(iced::Length::Fill)  // Make the input box fill the available width
+                    .size(20) // Increased the size of the input text
+                    .width(iced::Length::Fill) // Make the input box fill the available width
                     .align_x(Center);
                 scrollable(
                     column![
-                        row![input].width(iced::Length::Fill).padding(10),  // Center the input row
-                        row![convert_button].width(iced::Length::Fill).padding(10),
+                        row![input].width(iced::Length::Fill).padding(10), // Center the input row
+                        row![convert_button]
+                            .width(iced::Length::Fill)
+                            .padding(10)
+                            .align_y(Center),
                         row![output].width(iced::Length::Fill).padding(10),
                     ]
-                    .spacing(20)  // Reduced spacing for a more compact layout
+                    .spacing(20)
                     .width(iced::Length::Fill)
                     .align_x(Center),
                 )
-    }
+            }
         };
 
-        container(content).center_x(200).into()
-}
+        container(content).into()
+    }
 
     pub fn update(&mut self, message: WindowContentMessage) {
         match message {
@@ -160,3 +162,4 @@ impl Window {
         query_pairs.join("&")
     }
 }
+
