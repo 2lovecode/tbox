@@ -67,8 +67,11 @@ impl Window {
                     container(
                         column![
                             row!(text("功能列表").shaping(text::Shaping::Advanced)),
-                            row!(column![btn], column![btn2]),
-                            row!(column![btn3])
+                            row!(
+                                column![btn].padding(10),
+                                column![btn2].padding(10),
+                                column![btn3].padding(10)
+                            ),
                         ]
                         .spacing(10),
                     )
@@ -94,11 +97,9 @@ impl Window {
                     .on_input(move |s| {
                         Message::ContentChanged(id, WindowContentMessage::Json2QueryInputChange(s))
                     })
-                    .padding(20) // Increased padding
+                    .padding(5) // Increased padding
                     .size(20)
-                    .width(iced::Length::Fill)
-                    .align_x(Center);
-
+                    .width(iced::Length::Fill);
                 let convert_button = button(text("转换").shaping(text::Shaping::Advanced))
                     .on_press(Message::ContentChanged(
                         id,
@@ -108,10 +109,10 @@ impl Window {
                     .width(iced::Length::Fixed(100.0));
 
                 let output = text_input("", &self.query_output)
-                    .padding(15)
+                    .padding(5)
                     .size(20) // Increased the size of the input text
-                    .width(iced::Length::Fill) // Make the input box fill the available width
-                    .align_x(Center);
+                    .width(iced::Length::Fill);
+
                 scrollable(
                     column![
                         row![input].width(iced::Length::Fill).padding(10), // Center the input row
@@ -122,8 +123,7 @@ impl Window {
                         row![output].width(iced::Length::Fill).padding(10),
                     ]
                     .spacing(20)
-                    .width(iced::Length::Fill)
-                    .align_x(Center),
+                    .width(iced::Length::Fill),
                 )
             }
         };
@@ -162,4 +162,3 @@ impl Window {
         query_pairs.join("&")
     }
 }
-
