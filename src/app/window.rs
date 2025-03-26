@@ -1,16 +1,14 @@
-use iced::alignment::Horizontal::Left;
-use iced::widget::{button, column, container, row, scrollable, text, text_editor, text_input};
+use iced::widget::container;
 use iced::window;
-use iced::{Center, Element, Fill, Theme};
+use iced::{ Element, Theme };
 use serde_json::Value;
-use std::collections::HashMap;
 use crate::app::message::{WindowCategory, Message, WindowContentMessage};
 
 #[derive(Debug)]
 pub struct Window {
     pub category: WindowCategory,
     pub title: String,
-    pub scale_input: String,
+    // pub scale_input: String,
     pub current_scale: f64,
     pub theme: Theme,
     pub input: String,
@@ -24,7 +22,7 @@ impl Window {
         Self {
             category: WindowCategory::Homepage,
             title: format!("Window_{}", count),
-            scale_input: "1.0".to_string(),
+            // scale_input: "1.0".to_string(),
             current_scale: 1.0,
             theme: Theme::ALL[count % Theme::ALL.len()].clone(),
             input: String::new(),
@@ -67,10 +65,6 @@ impl Window {
         }
     }
 
-
-    fn update_output(&mut self, output: String) {
-        self.output = output;
-    }
     fn json_to_query(&self, json: &Value) -> String {
         let mut query_pairs = Vec::new();
         if let Some(obj) = json.as_object() {

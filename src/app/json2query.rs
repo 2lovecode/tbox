@@ -1,5 +1,5 @@
-use iced::widget::{button, column, container, row, scrollable, text, text_input};
-use iced::{Fill, Theme, Renderer, Center};
+use iced::widget::{button, column, row, scrollable, text, text_input};
+use iced::{Theme, Renderer, Center};
 use iced::widget::Scrollable;
 use iced::window::Id;
 use crate::app::message::{Message, WindowContentMessage};

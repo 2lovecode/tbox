@@ -19,8 +19,8 @@ pub enum Message {
     OpenWindow(WindowCategory),
     WindowOpened(window::Id, WindowCategory),
     WindowClosed(window::Id),
-    ScaleInputChanged(window::Id, String),
-    ScaleChanged(window::Id, String),
-    TitleChanged(window::Id, String),
+    // ScaleInputChanged(window::Id, String),
+    // ScaleChanged(window::Id, String),
+    // TitleChanged(window::Id, String),
     ContentChanged(window::Id, WindowContentMessage),
 }

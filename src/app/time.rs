@@ -1,7 +1,7 @@
-use iced::widget::{button, column, container, row, scrollable, text};
+use iced::widget::{column, scrollable, text};
 use iced::{Fill, Theme, Renderer, Center};
 use iced::widget::Scrollable;
-use crate::app::message::{Message, WindowCategory};
+use crate::app::message::Message;
 
 pub fn view<'a>() -> Scrollable<'a, Message, Theme, Renderer> {
     scrollable(

@@ -1,6 +1,6 @@
 mod app;
 use iced::widget::{
-    center, horizontal_space, text_input,
+    horizontal_space, text_input,
 };
 use iced::window;
 use iced::{Element, Subscription, Task, Theme, Vector};
@@ -20,8 +20,6 @@ fn main() -> iced::Result {
 struct TBox {
     windows: BTreeMap<window::Id, app::window::Window>,
 }
-
-
 
 
 impl TBox {
@@ -101,30 +99,30 @@ impl TBox {
                     Task::none()
                 }
             }
-            Message::ScaleInputChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.scale_input = scale;
-                }
+            // Message::ScaleInputChanged(id, scale) => {
+            //     if let Some(window) = self.windows.get_mut(&id) {
+            //         window.scale_input = scale;
+            //     }
 
-                Task::none()
-            }
-            Message::ScaleChanged(id, scale) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.current_scale = scale
-                        .parse::<f64>()
-                        .unwrap_or(window.current_scale)
-                        .clamp(0.5, 5.0);
-                }
+            //     Task::none()
+            // }
+            // Message::ScaleChanged(id, scale) => {
+            //     if let Some(window) = self.windows.get_mut(&id) {
+            //         window.current_scale = scale
+            //             .parse::<f64>()
+            //             .unwrap_or(window.current_scale)
+            //             .clamp(0.5, 5.0);
+            //     }
 
-                Task::none()
-            }
-            Message::TitleChanged(id, title) => {
-                if let Some(window) = self.windows.get_mut(&id) {
-                    window.title = title;
-                }
+            //     Task::none()
+            // }
+            // Message::TitleChanged(id, title) => {
+            //     if let Some(window) = self.windows.get_mut(&id) {
+            //         window.title = title;
+            //     }
 
-                Task::none()
-            }
+            //     Task::none()
+            // }
             Message::ContentChanged(id, message) => {
                 if let Some(window) = self.windows.get_mut(&id) {
                     window.update(message);
