@@ -1,0 +1,112 @@
+name: Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+
+          - os: macos
+            arch: amd64
+            target: x86_64-apple-darwin
+          - os: macos
+            arch: arm64
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Clippy (release mode)
+        run: |
+          cargo clippy --release -- -D warnings &&
+          cargo clean
+      - name: Check crate
+        if: matrix.os == 'macos' && matrix.arch == 'amd64'
+        run: |
+          cargo publish --dry-run --target ${{ matrix.target }} &&
+          cargo clean
+
+      - name: Build binary (macOS/Windows)
+        if: matrix.os == 'macos' || matrix.os == 'windows'
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}-${{ matrix.target }}
+          path: |
+            target/*/release/tbox
+            target/*/release/tbox.exe
+          if-no-files-found: error
+  dmg:
+    runs-on: macos-latest
+    needs: build
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - arch: Intel
+            target: x86_64-apple-darwin
+          - arch: AppleSilicon
+            target: aarch64-apple-darwin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install packaging tools
+        run: |
+          cargo install toml-cli
+          brew install create-dmg
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-macos-${{ matrix.target }}
+          path: target/
+
+      - name: Package for macOS
+        shell: bash
+        run: |
+          VERSION=$(toml get Cargo.toml package.version --raw)
+          sed -i'.bak' -e "s/0\.0\.0/${VERSION}/g" -e "s/fffffff/${GITHUB_SHA:0:7}/g" resources/packaging/macos/Info.plist
+          mkdir artifacts
+          mkdir -p target/release/bundle/osx/Sniffnet.app/Contents/{MacOS,Resources}
+          cp resources/packaging/macos/Info.plist \
+            target/release/bundle/osx/Sniffnet.app/Contents/
+          cp resources/packaging/macos/graphics/sniffnet.icns \
+            target/release/bundle/osx/Sniffnet.app/Contents/Resources/
+          chmod +x target/${{ matrix.target }}/release/sniffnet
+          cp target/${{ matrix.target }}/release/sniffnet \
+            target/release/bundle/osx/Sniffnet.app/Contents/MacOS/
+          cp resources/packaging/macos/wrapper.sh \
+            target/release/bundle/osx/Sniffnet.app/Contents/MacOS/
+          create-dmg \
+            --volname "Sniffnet Installer" \
+            --background "resources/packaging/macos/graphics/dmg_bg.png" \
+            --window-pos 200 120 \
+            --window-size 900 450 \
+            --icon-size 100 \
+            --app-drop-link 620 240 \
+            --icon "Sniffnet.app" 300 240 \
+            --hide-extension "Sniffnet.app" \
+            "artifacts/Sniffnet_macOS_${{ matrix.arch }}.dmg" \
+            "target/release/bundle/osx/"
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dmg-${{ matrix.arch }}
+          path: artifacts/
+          if-no-files-found: error
