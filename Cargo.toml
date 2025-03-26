@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 iced = { version = "0.13.0", features = ["debug", "multi-window"] }
+iced_aw = { version = "0.12.0", default-features = false, features = ["badge", "card", "color_picker", "date_picker", "number_input", "selection_list", "tab_bar", "tabs", "time_picker", "menu", "slide_bar", "sidebar"] }
 tracing = "0.1.29"
 
 # 使用serde实现持久化

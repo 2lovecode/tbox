@@ -1,4 +1,4 @@
-use iced::window;
+use iced::{widget::text_editor, window};
 
 #[derive(Debug, Clone)]
 pub enum WindowCategory {
@@ -10,8 +10,9 @@ pub enum WindowCategory {
 
 #[derive(Debug, Clone)]
 pub enum WindowContentMessage {
-    Json2QueryInputChange(String),
+    Json2QueryInputAction(text_editor::Action),
     Json2QueryTransfer(),
+    None,
 }
 
 #[derive(Debug, Clone)]

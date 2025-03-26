@@ -1,4 +1,4 @@
-use iced::widget::container;
+use iced::widget::{container, text_editor};
 use iced::window;
 use iced::{ Element, Theme };
 use serde_json::Value;
@@ -13,6 +13,7 @@ pub struct Window {
     pub theme: Theme,
     pub input: String,
     pub output: String,
+    pub content: text_editor::Content,
 }
 
 
@@ -27,6 +28,7 @@ impl Window {
             theme: Theme::ALL[count % Theme::ALL.len()].clone(),
             input: String::new(),
             output: String::new(),
+            content: text_editor::Content::new(),
         }
     }
 
@@ -42,7 +44,7 @@ impl Window {
                 super::json2csv::view()
             },
             WindowCategory::ToolsJson2Query => {
-                let view_content = super::json2query::view(id, self.input.clone(), self.output.clone());
+                let view_content = super::json2query::view(id, self.input.clone(), self.output.clone(), &self.content);
                 view_content
             }
         };
@@ -52,8 +54,12 @@ impl Window {
 
     pub fn update(&mut self, message: WindowContentMessage) {
         match message {
-            WindowContentMessage::Json2QueryInputChange(input) => {
-                self.input = input;
+            WindowContentMessage::None => {}
+            WindowContentMessage::Json2QueryInputAction(input) => {
+                  // 
+                  self.content.perform(input);
+                // self.content = iced::widget::text_editor::Content::with_text(&input);
+                self.input = self.content.text();
             }
             WindowContentMessage::Json2QueryTransfer() => {
                 if let Ok(json_value) = serde_json::from_str(&self.input) {
