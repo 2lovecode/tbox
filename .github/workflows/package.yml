@@ -83,26 +83,26 @@ jobs:
           VERSION=$(toml get Cargo.toml package.version --raw)
           sed -i'.bak' -e "s/0\.0\.0/${VERSION}/g" -e "s/fffffff/${GITHUB_SHA:0:7}/g" resources/packaging/macos/Info.plist
           mkdir artifacts
-          mkdir -p target/release/bundle/osx/Sniffnet.app/Contents/{MacOS,Resources}
+          mkdir -p target/release/bundle/osx/Tbox.app/Contents/{MacOS,Resources}
           cp resources/packaging/macos/Info.plist \
-            target/release/bundle/osx/Sniffnet.app/Contents/
-          cp resources/packaging/macos/graphics/sniffnet.icns \
-            target/release/bundle/osx/Sniffnet.app/Contents/Resources/
-          chmod +x target/${{ matrix.target }}/release/sniffnet
-          cp target/${{ matrix.target }}/release/sniffnet \
-            target/release/bundle/osx/Sniffnet.app/Contents/MacOS/
+            target/release/bundle/osx/Tbox.app/Contents/
+          cp resources/packaging/macos/images/tbox.icns \
+            target/release/bundle/osx/Tbox.app/Contents/Resources/
+          chmod +x target/${{ matrix.target }}/release/tbox
+          cp target/${{ matrix.target }}/release/tbox \
+            target/release/bundle/osx/Tbox.app/Contents/MacOS/
           cp resources/packaging/macos/wrapper.sh \
-            target/release/bundle/osx/Sniffnet.app/Contents/MacOS/
+            target/release/bundle/osx/Tbox.app/Contents/MacOS/
           create-dmg \
-            --volname "Sniffnet Installer" \
-            --background "resources/packaging/macos/graphics/dmg_bg.png" \
+            --volname "Tbox Installer" \
+            --background "resources/packaging/macos/images/dmg_bg.png" \
             --window-pos 200 120 \
             --window-size 900 450 \
             --icon-size 100 \
             --app-drop-link 620 240 \
-            --icon "Sniffnet.app" 300 240 \
-            --hide-extension "Sniffnet.app" \
-            "artifacts/Sniffnet_macOS_${{ matrix.arch }}.dmg" \
+            --icon "Tbox.app" 300 240 \
+            --hide-extension "Tbox.app" \
+            "artifacts/Tbox${{ matrix.arch }}.dmg" \
             "target/release/bundle/osx/"
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
