@@ -3,10 +3,10 @@ import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 
 interface Category {
-  id: string;
+  id: number;
   name: string;
   icon: string;
-  toolCount: number;
+  count: number;
 }
 
 interface Tool {
@@ -14,111 +14,48 @@ interface Tool {
   name: string;
   description: string;
   icon: string;
-  category?: string; // 可选属性
+  category?: Category; // 可选属性
   tags: string[];
   gradient: string;
 }
+
+const categories = ref<Category[]>([]);
+
+// 工具数据
+const tools = ref<Tool[]>([]);
 
 // 加载categories
 // 加载tools
 onMounted(() => {
   invoke('get_categories').then((res) => {
-    console.log(res)
+    const fetchCategories = (res as Array<Category>).map((item: Category) => ({
+      id: item.id,
+      name: item.name,
+      icon: "",
+      count: item.count,
+    }))
+   categories.value = [
+      { id: 0, name: '全部工具', icon: 'fas fa-star', count: fetchCategories.reduce((sum, cat) => sum + cat.count, 0) },
+      ...fetchCategories
+    ];
   })
 
   invoke('get_all_tools').then((res) => {
-    console.log(res)
+    const fetchTools = (res as Array<Tool>).map((item: Tool) => ({
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      icon: item.icon,
+      category: item.category,
+      tags: item.tags,
+      gradient: item.gradient,
+    }))
+    tools.value = fetchTools
   })
 
 
 })
-const categories = ref([
-  { id: 'all', name: '全部工具', icon: 'fas fa-star', toolCount: 24 },
-  { id: 'system', name: '系统优化', icon: 'fas fa-laptop', toolCount: 5 },
-  { id: 'file', name: '文件管理', icon: 'fas fa-file', toolCount: 6 },
-  { id: 'image', name: '图片处理', icon: 'fas fa-image', toolCount: 4 },
-  { id: 'video', name: '视频工具', icon: 'fas fa-video', toolCount: 3 },
-  { id: 'network', name: '网络工具', icon: 'fas fa-network-wired', toolCount: 3 },
-  { id: 'security', name: '安全工具', icon: 'fas fa-lock', toolCount: 2 },
-  { id: 'dev', name: '开发工具', icon: 'fas fa-code', toolCount: 4 },
-  { id: 'calc', name: '计算工具', icon: 'fas fa-calculator', toolCount: 3 }
-]);
 
-// 工具数据
-const tools = ref([
-  {
-    id: 1,
-    name: '图片压缩工具',
-    description: '快速压缩图片大小而不损失质量，支持JPG、PNG等格式。',
-    icon: 'fas fa-compress-arrows-alt',
-    category: 'image',
-    tags: ['图片处理', '优化'],
-    gradient: 'linear-gradient(135deg, #4361ee, #4895ef)'
-  },
-  {
-    id: 2,
-    name: '视频格式转换',
-    description: '支持多种视频格式转换，包括MP4, AVI, MOV等常见格式。',
-    icon: 'fas fa-video',
-    category: 'video',
-    tags: ['视频处理', '转换'],
-    gradient: 'linear-gradient(135deg, #f72585, #b5179e)'
-  },
-  {
-    id: 3,
-    name: '密码管理器',
-    description: '安全存储和管理所有密码，自动生成强密码，保护您的账户安全。',
-    icon: 'fas fa-key',
-    category: 'security',
-    tags: ['安全工具', '加密'],
-    gradient: 'linear-gradient(135deg, #4cc9f0, #4895ef)'
-  },
-  {
-    id: 4,
-    name: 'PDF工具箱',
-    description: '合并、分割、压缩PDF文件，添加水印和密码保护等实用功能。',
-    icon: 'fas fa-file-pdf',
-    category: 'file',
-    tags: ['文件管理', 'PDF'],
-    gradient: 'linear-gradient(135deg, #2ec4b6, #1a936f)'
-  },
-  {
-    id: 5,
-    name: '屏幕标尺',
-    description: '在屏幕上测量元素尺寸，支持像素、厘米、英寸等多种单位。',
-    icon: 'fas fa-ruler-combined',
-    category: 'dev',
-    tags: ['设计工具', '测量'],
-    gradient: 'linear-gradient(135deg, #ff9e00, #ff5400)'
-  },
-  {
-    id: 6,
-    name: '代码格式化',
-    description: '美化您的代码，支持多种编程语言，提高代码可读性和规范性。',
-    icon: 'fas fa-code',
-    category: 'dev',
-    tags: ['开发工具', '编程'],
-    gradient: 'linear-gradient(135deg, #7209b7, #560bad)'
-  },
-  {
-    id: 7,
-    name: '文件恢复工具',
-    description: '恢复误删除的文件，支持多种文件系统和存储设备。',
-    icon: 'fas fa-undo',
-    category: 'file',
-    tags: ['文件管理', '恢复'],
-    gradient: 'linear-gradient(135deg, #3a0ca3, #4cc9f0)'
-  },
-  {
-    id: 8,
-    name: '网络测速',
-    description: '测试您的网络下载、上传速度和延迟，提供详细分析报告。',
-    icon: 'fas fa-wifi',
-    category: 'network',
-    tags: ['网络工具', '测速'],
-    gradient: 'linear-gradient(135deg, #4361ee, #3a0ca3)'
-  }
-]);
 // 推荐工具数据
 const featuredTools = ref([
   {
@@ -138,15 +75,15 @@ const featuredTools = ref([
     gradient: 'linear-gradient(135deg, #f72585, #b5179e)'
   }
 ]);
-const activeCategory = ref('all');
+const activeCategory = ref<Category>();
 const searchQuery = ref('');
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
   let result = tools.value;
   // 按分类过滤
-  if (activeCategory.value !== 'all') {
-    result = result.filter(tool => tool.category === activeCategory.value);
+  if (activeCategory.value && activeCategory.value.id !== 0) {
+    result = result.filter(tool => tool.category?.id === activeCategory.value?.id);
   }
   
   // 按搜索词过滤
@@ -159,23 +96,19 @@ const filteredTools = computed(() => {
 });
 
 // 方法
-const setActiveCategory = (categoryId: string) => {
-  activeCategory.value = categoryId;
+const setActiveCategory = (category: Category) => {
+  activeCategory.value = category;
   searchQuery.value = ''; // 切换分类时清空搜索
 };
 
 const openTool = (tool: Tool) => {
+  console.log('openTool', tool);
   alert(`即将打开: ${tool.name}\n${tool.description}`);
 };
 
 const searchTools = () => {
   // 实际项目中这里可以执行搜索逻辑
   console.log(`搜索工具: ${searchQuery.value}`);
-};
-
-const getCategoryName = (id: string) => {
-  const category = categories.value.find(c => c.id === id);
-  return category ? category.name : '';
 };
 
 </script>
@@ -207,12 +140,12 @@ const getCategoryName = (id: string) => {
             v-for="category in categories" 
             :key="category.id"
             class="category" 
-            :class="{ active: activeCategory === category.id }"
-            @click="setActiveCategory(category.id)"
+            :class="{ active: activeCategory?.id === category.id }"
+            @click="setActiveCategory(category)"
           >
             <i :class="category.icon"></i>
             <span>{{ category.name }}</span>
-            <span class="tool-count">{{ category.toolCount }}</span>
+            <span class="tool-count">{{ category.count }}</span>
           </div>
         </div>
       </aside>
@@ -220,7 +153,7 @@ const getCategoryName = (id: string) => {
       <main class="main-content">
         <div class="section-header">
           <h2 class="section-title">
-            {{ activeCategory === 'all' ? '全部工具' : getCategoryName(activeCategory) }}
+            {{ activeCategory?.id === 0 ? '全部工具' : activeCategory?.name }}
           </h2>
           <a href="#" class="view-all">查看全部 <i class="fas fa-arrow-right"></i></a>
         </div>
