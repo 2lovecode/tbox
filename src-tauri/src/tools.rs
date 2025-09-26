@@ -163,10 +163,10 @@ pub fn init_db_if_needed() -> Result<()> {
     let tool_categories = vec![
         (1, 1),
         (2, 2),
-        (3, 3),
+        (3, 6),
         (4, 4),
         (5, 5),
-        (6, 6),
+        (6, 5),
         (7, 7),
         (8, 8),
     ];
