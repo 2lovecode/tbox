@@ -90,4 +90,14 @@ const fetchCategories = (): Category[] => {
     text-align: center;
     font-size: 18px;
   }
+
+  .tool-count {
+    background: rgba(67, 97, 238, 0.1);
+    color: var(--primary);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    margin-left: 8px;
+  }
 </style>

@@ -60,7 +60,6 @@ const openTool = (tool: Tool) => {
         </div>
         
         <div class="tools-grid">
-            <transition-group name="fade">
             <div 
                 v-for="tool in filteredTools" 
                 :key="tool.id"
@@ -78,7 +77,6 @@ const openTool = (tool: Tool) => {
                 </div>
                 </div>
             </div>
-            </transition-group>
             
             <div v-if="filteredTools.length === 0" class="empty-state">
             <i class="fas fa-search"></i>
@@ -108,3 +106,173 @@ const openTool = (tool: Tool) => {
         </div>
     </main>
 </template>
+<style scoped> 
+  /* 主内容区域 */
+  .main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+  }
+  
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .section-title {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--dark);
+  }
+  
+  .view-all {
+    color: var(--primary);
+    font-weight: 500;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  
+  .tools-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 25px;
+  }
+  
+  /* 工具卡片样式 */
+  .tool-card {
+    background: white;
+    border-radius: var(--border-radius);
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    transition: var(--transition);
+    cursor: pointer;
+  }
+  
+  .tool-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1);
+  }
+  
+  .card-header {
+    height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+  }
+  
+  .card-header i {
+    font-size: 48px;
+    color: white;
+  }
+  
+  .card-content {
+    padding: 20px;
+  }
+  
+  .card-content h3 {
+    font-size: 18px;
+    margin-bottom: 10px;
+    color: var(--dark);
+  }
+  
+  .card-content p {
+    color: var(--gray);
+    font-size: 14px;
+    line-height: 1.6;
+    margin-bottom: 15px;
+  }
+  
+  .tool-tags {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  
+  .tag {
+    background: rgba(67, 97, 238, 0.1);
+    color: var(--primary);
+    padding: 4px 10px;
+    border-radius: 50px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+  
+  /* 推荐工具区域 */
+  .featured-tools {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 25px;
+  }
+  
+  .featured-card {
+    background: white;
+    border-radius: var(--border-radius);
+    display: flex;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  
+  .featured-icon {
+    width: 120px;
+    background: linear-gradient(135deg, #4cc9f0, #4895ef);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    color: white;
+  }
+  
+  .featured-content {
+    padding: 25px;
+    flex: 1;
+  }
+  
+  .featured-content h3 {
+    font-size: 20px;
+    margin-bottom: 10px;
+    color: var(--dark);
+  }
+  
+  .featured-content p {
+    color: var(--gray);
+    line-height: 1.6;
+    margin-bottom: 15px;
+  }
+  
+  .featured-btn {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+  
+  .featured-btn:hover {
+    background: var(--secondary);
+  }
+    
+  .empty-state {
+    grid-column: 1 / -1;
+    text-align: center;
+    padding: 50px 0;
+  }
+  
+  .empty-state i {
+    font-size: 48px;
+    color: var(--gray);
+    opacity: 0.5;
+    margin-bottom: 20px;
+  }
+  
+  .empty-state p {
+    color: var(--gray);
+    font-size: 16px;
+  }
+</style>
