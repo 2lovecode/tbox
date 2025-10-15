@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
-import HomePage from "@/views/HomePage.vue";
+import { RouterView } from "vue-router";
 
 
 
@@ -68,7 +68,7 @@ const searchTools = () => {
           </div>
         </header>
       <SideBar></SideBar>      
-      <HomePage></HomePage>
+      <RouterView></RouterView>
       <footer>
         <p>© 2025 万能工具箱 | 版本: 3.0.0 | 已收录 {{ tools.length }} 个实用工具</p>
       </footer>

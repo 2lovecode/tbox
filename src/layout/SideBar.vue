@@ -2,14 +2,22 @@
 import { Category } from '@/types/tools';
 import { ref } from 'vue';
 import { useToolStore } from '@/stores/tools';
+import { useRouter } from 'vue-router';
 
 const store = useToolStore()
+const router = useRouter()
+
 const fetchCategories = (): Category[] => {
     const remoteCategories = store.categories
     return [
       { id: 0, name: '全部工具', icon: 'fas fa-star', count: remoteCategories.reduce((sum, cat) => sum + cat.count, 0) },
       ...remoteCategories
     ]
+}
+
+const openCategory = (category: Category) => {
+  store.setActiveCategory(category);
+  router.push({ path: "/" })
 }
 
 
@@ -23,7 +31,7 @@ const fetchCategories = (): Category[] => {
             :key="category.id"
             class="category" 
             :class="{ active: store.activeCategory?.id === category.id }"
-            @click="store.setActiveCategory(category)"
+            @click="openCategory(category)"
           >
             <i :class="category.icon"></i>
             <span>{{ category.name }}</span>

@@ -2,10 +2,12 @@
 import { Tool } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
 import { ref, computed, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 
 
 const store = useToolStore();
 const searchQuery = ref('');
+const router = useRouter();
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
@@ -44,7 +46,14 @@ const featuredTools = ref([
   }
 ]);
 
+const routerMap: Record<number, string> = {
+  1: 'image-compression'
+}
+
 const openTool = (tool: Tool) => {
+  router.push({ path: `/${routerMap[tool.id]}` });
+ 
+  // tool.id
   console.log('openTool', tool);
   alert(`即将打开: ${tool.name}\n${tool.description}`);
 };
