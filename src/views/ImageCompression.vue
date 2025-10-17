@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { ref, reactive } from 'vue'
+import { invoke } from "@tauri-apps/api/core";
 
 // 类型定义
 interface ImageInfo {
@@ -141,14 +142,10 @@ const compressImage = () => {
 const downloadCompressedImage = () => {
   if (!compressedImage.value) return
   
-  const link = document.createElement('a')
-  link.href = compressedImage.value.url
-  link.download = compressedImage.value.name
-  
-  // 修复：需要将链接添加到DOM中再点击，然后移除
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+  invoke('download_file', {
+    url: compressedImage.value.url,
+    savePath: "/tmp/123"
+  })
 }
 
 // 触发文件选择

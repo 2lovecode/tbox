@@ -5,13 +5,14 @@ mod commands;
 mod utils2;
 
 fn main() {
-    commands::tools::init_db_if_needed().unwrap();
+    commands::tool::init_db_if_needed().unwrap();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
-            commands::tools::get_categories, 
-            commands::tools::get_all_tools,
+            commands::tool::get_categories, 
+            commands::tool::get_all_tools,
+            commands::file::download_file,
         ]
         )
         .run(tauri::generate_context!())

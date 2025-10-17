@@ -24,4 +24,5 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 dirs = "3.0"
+reqwest = "0.12.24"
 
