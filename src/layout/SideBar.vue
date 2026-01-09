@@ -81,16 +81,40 @@ const openCategory = (category: Category) => {
     transition: var(--transition);
     color: var(--gray);
     font-weight: 500;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .category::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--primary);
+    transform: scaleY(0);
+    transition: var(--transition);
   }
   
   .category:hover {
     background: rgba(67, 97, 238, 0.05);
     color: var(--primary);
+    transform: translateX(5px);
+  }
+
+  .category:hover::before {
+    transform: scaleY(1);
   }
   
   .category.active {
     background: rgba(67, 97, 238, 0.1);
     color: var(--primary);
+    font-weight: 600;
+  }
+
+  .category.active::before {
+    transform: scaleY(1);
   }
   
   .category i {

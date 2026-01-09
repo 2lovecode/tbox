@@ -20,9 +20,17 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rusqlite = { version = "0.37.0", features = ["bundled"] }
 dirs = "3.0"
-reqwest = "0.12.24"
+reqwest = { version = "0.12.24", features = ["json"] }
+image = "0.25"
+pdf = "0.9"
+lopdf = "0.32"
+base64 = "0.22"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
 

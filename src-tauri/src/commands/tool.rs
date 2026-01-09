@@ -39,13 +39,13 @@ pub struct Tag {
 
 pub fn init_db_if_needed() -> Result<()> {
     let db_path = get_db_path();
+    let conn = Connection::open(&db_path)?;
 
     if db_path.exists() {
-        // 已存在数据库文件，跳过初始化
+        // 已存在数据库文件，检查并添加缺失的工具
+        add_missing_tools(&conn)?;
         return Ok(());
     }
-
-    let conn = Connection::open(&db_path)?;
 
     // 创建 categories 表
     conn.execute(
@@ -140,6 +140,7 @@ pub fn init_db_if_needed() -> Result<()> {
         (6, "代码格式化", "美化您的代码，支持多种编程语言，提高代码可读性和规范性。", "fas fa-code", "linear-gradient(135deg, #7209b7, #560bad)"),
         (7, "文件恢复工具", "恢复误删除的文件，支持多种文件系统和存储设备。", "fas fa-undo", "linear-gradient(135deg, #3a0ca3, #4cc9f0)"),
         (8, "网络测速", "测试您的网络下载、上传速度和延迟，提供详细分析报告。", "fas fa-wifi", "linear-gradient(135deg, #4361ee, #3a0ca3)"),
+        (9, "JSON处理工具", "JSON美化、压缩、转义、去转义、验证和信息查看等实用功能。", "fas fa-brackets-curly", "linear-gradient(135deg, #06ffa5, #00d4ff)"),
     ];
 
     let tool_tags = vec![
@@ -157,7 +158,9 @@ pub fn init_db_if_needed() -> Result<()> {
         (7, 7),
         (7, 13),
         (8, 14),
-        (8, 15)
+        (8, 15),
+        (9, 11),  // 开发工具
+        (9, 12),  // 编程
     ];
 
     let tool_categories = vec![
@@ -169,6 +172,7 @@ pub fn init_db_if_needed() -> Result<()> {
         (6, 5),
         (7, 7),
         (8, 8),
+        (9, 5),  // JSON工具属于开发工具
     ];
     for (id, name, description, sort) in categories {
         conn.execute(
@@ -219,6 +223,46 @@ pub fn init_db_if_needed() -> Result<()> {
         conn.execute(
             "INSERT INTO tool_tags (tool_id, tag_id) VALUES (?1, ?2)",
             params![tool_id, tag_id],
+        )?;
+    }
+
+    Ok(())
+}
+
+// 添加缺失的工具到现有数据库
+fn add_missing_tools(conn: &Connection) -> Result<()> {
+    // 检查工具ID 9（JSON处理工具）是否存在
+    let mut stmt = conn.prepare("SELECT COUNT(*) FROM tools WHERE id = 9")?;
+    let count: i32 = stmt.query_row([], |row| row.get(0))?;
+
+    if count == 0 {
+        // 添加JSON处理工具
+        conn.execute(
+            "INSERT INTO tools (id, name, description, icon, gradient)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                9,
+                "JSON处理工具",
+                "JSON美化、压缩、转义、去转义、验证和信息查看等实用功能。",
+                "fas fa-brackets-curly",
+                "linear-gradient(135deg, #06ffa5, #00d4ff)"
+            ],
+        )?;
+
+        // 添加工具分类关联
+        conn.execute(
+            "INSERT OR IGNORE INTO tool_categories (tool_id, category_id) VALUES (9, 5)",
+            [],
+        )?;
+
+        // 添加工具标签关联
+        conn.execute(
+            "INSERT OR IGNORE INTO tool_tags (tool_id, tag_id) VALUES (9, 11)",
+            [],
+        )?;
+        conn.execute(
+            "INSERT OR IGNORE INTO tool_tags (tool_id, tag_id) VALUES (9, 12)",
+            [],
         )?;
     }
 

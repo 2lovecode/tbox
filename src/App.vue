@@ -1,77 +1,95 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
-import { RouterView } from "vue-router";
-
-
-
+import { RouterView, useRoute } from "vue-router";
+import Toast from "@/components/Toast.vue";
 
 const store  = useToolStore()
+const route = useRoute()
 
 // 工具数据
 const tools = ref<Tool[]>([]);
+const isLoading = ref(true);
 
 // 加载categories
 // 加载tools
 onMounted(() => {
-  invoke('get_categories').then((res) => {
-    const fetchCategories = (res as Array<Category>).map((item: Category) => ({
-      id: item.id,
-      name: item.name,
-      icon: "",
-      count: item.count,
-    }))
-    store.setCategories(fetchCategories)
-  })
-
-  invoke('get_all_tools').then((res) => {
-    const fetchTools = (res as Array<Tool>).map((item: Tool) => ({
-      id: item.id,
-      name: item.name,
-      description: item.description,
-      icon: item.icon,
-      category: item.category,
-      tags: item.tags,
-      gradient: item.gradient,
-    }))
-    store.setTools(fetchTools)
+  isLoading.value = true;
+  Promise.all([
+    invoke('get_categories').then((res) => {
+      const fetchCategories = (res as Array<Category>).map((item: Category) => ({
+        id: item.id,
+        name: item.name,
+        icon: "",
+        count: item.count,
+      }))
+      store.setCategories(fetchCategories)
+    }),
+    invoke('get_all_tools').then((res) => {
+      const fetchTools = (res as Array<Tool>).map((item: Tool) => ({
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        icon: item.icon,
+        category: item.category,
+        tags: item.tags,
+        gradient: item.gradient,
+      }))
+      store.setTools(fetchTools)
+      tools.value = fetchTools;
+    })
+  ]).finally(() => {
+    isLoading.value = false;
   })
 })
 
 const searchQuery = ref('');
 const searchTools = () => {
-  // 实际项目中这里可以执行搜索逻辑
+  // 搜索功能由HomePage处理
   console.log(`搜索工具: ${searchQuery.value}`);
 };
+
+// 计算是否显示侧边栏（在工具页面不显示）
+const showSidebar = computed(() => route.path === '/')
 </script>
 
 <template>
-      <div class="container">
+      <div class="container" :class="{ 'no-sidebar': !showSidebar }">
         <header>
-          <div class="logo">
+          <div class="logo" @click="$router.push('/')" style="cursor: pointer;">
             <div class="logo-icon">
               <i class="fas fa-toolbox"></i>
             </div>
             <div class="logo-text">万能<span>工具箱</span></div>
           </div>
-          <div class="search-container">
+          <div class="search-container" v-if="showSidebar">
             <i class="fas fa-search search-icon"></i>
             <input 
               type="text" 
               placeholder="搜索工具..." 
               v-model="searchQuery"
               @keyup.enter="searchTools"
+              @input="searchTools"
             >
           </div>
         </header>
-      <SideBar></SideBar>      
-      <RouterView></RouterView>
+      <SideBar v-if="showSidebar"></SideBar>      
+      <div class="main-wrapper">
+        <Transition name="fade" mode="out-in">
+          <RouterView v-if="!isLoading" />
+          <div v-else class="loading-container">
+            <div class="loading-spinner"></div>
+            <p>加载中...</p>
+          </div>
+        </Transition>
+      </div>
       <footer>
         <p>© 2025 万能工具箱 | 版本: 3.0.0 | 已收录 {{ tools.length }} 个实用工具</p>
       </footer>
+      <Toast />
     </div>
 </template>
 
@@ -110,6 +128,50 @@ const searchTools = () => {
     grid-template-columns: 260px 1fr;
     gap: 25px;
   }
+
+  .container.no-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .container.no-sidebar .main-wrapper {
+    grid-column: 1;
+    max-width: 100%;
+  }
+
+  .main-wrapper {
+    min-height: 400px;
+    background: transparent;
+  }
+
+  .container.no-sidebar .main-wrapper {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .loading-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 100px 20px;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+  }
+
+  .loading-spinner {
+    width: 50px;
+    height: 50px;
+    border: 4px solid rgba(67, 97, 238, 0.1);
+    border-top-color: var(--primary);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+  }
+
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
   
   /* 头部样式 */
   header {
@@ -125,6 +187,11 @@ const searchTools = () => {
     display: flex;
     align-items: center;
     gap: 15px;
+    transition: var(--transition);
+  }
+
+  .logo:hover {
+    transform: scale(1.02);
   }
   
   .logo-icon {
@@ -160,7 +227,7 @@ const searchTools = () => {
     width: 100%;
     padding: 14px 20px 14px 50px;
     border-radius: 50px;
-    border: none;
+    border: 2px solid transparent;
     background: white;
     font-size: 16px;
     box-shadow: var(--shadow);
@@ -169,7 +236,9 @@ const searchTools = () => {
   
   .search-container input:focus {
     outline: none;
+    border-color: var(--primary);
     box-shadow: 0 6px 25px rgba(67, 97, 238, 0.2);
+    transform: translateY(-2px);
   }
   
   .search-icon {
@@ -221,13 +290,21 @@ const searchTools = () => {
   }
   
   /* Vue过渡效果 */
-  .fade-enter-active,
-  .fade-leave-active {
-    transition: opacity 0.3s ease;
+  .fade-enter-active {
+    transition: opacity 0.3s ease, transform 0.3s ease;
   }
   
-  .fade-enter-from,
+  .fade-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  
+  .fade-enter-from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  
   .fade-leave-to {
     opacity: 0;
+    transform: translateY(-10px);
   }
 </style>

@@ -4,7 +4,7 @@ use tauri::AppHandle;
 use reqwest;
 
 #[tauri::command]
-pub async fn download_file(app: AppHandle, url: String, save_path: String) -> Result<(), String> {
+pub async fn download_file(_app: AppHandle, url: String, save_path: String) -> Result<(), String> {
     let url2 = url.replace(" ", "%20");
 
     let response = match reqwest::get(url2).await {

@@ -1,6 +1,7 @@
 <script lang="ts" setup>
 import { ref, reactive } from 'vue'
 import { invoke } from "@tauri-apps/api/core";
+import PageHeader from '@/components/PageHeader.vue';
 
 // 类型定义
 interface ImageInfo {
@@ -65,87 +66,108 @@ const handleFileSelect = (event: Event) => {
   reader.readAsDataURL(file)
 }
 
-// 压缩图片
-const compressImage = () => {
+// 压缩图片 - 使用 Rust 后端
+const compressImage = async () => {
   if (!originalImage.value) return
   
   isCompressing.value = true
   
-  const img = new Image()
-  img.onload = () => {
-    try {
-      // 创建 canvas
-      const canvas = document.createElement('canvas')
-      const ctx = canvas.getContext('2d')
-      
-      if (!ctx) {
-        throw new Error('无法获取 Canvas 上下文')
-      }
-      
-      // 计算新尺寸
-      let { width, height } = img
-      const maxWidth = compressionOptions.maxWidth
-      const maxHeight = compressionOptions.maxHeight
-      
-      if (width > maxWidth) {
-        height = (height * maxWidth) / width
-        width = maxWidth
-      }
-      
-      if (height > maxHeight) {
-        width = (width * maxHeight) / height
-        height = maxHeight
-      }
-      
-      // 设置 canvas 尺寸
-      canvas.width = width
-      canvas.height = height
-      
-      // 绘制图片
-      ctx.drawImage(img, 0, 0, width, height)
-      
-      // 导出压缩后的图片
-      const mimeType = originalImage.value?.type === 'image/png' ? 'image/png' : 'image/jpeg'
-      const quality = mimeType === 'image/png' ? 1.0 : compressionOptions.quality
-      
-      canvas.toBlob(
-        (blob) => {
-          if (!blob) {
+  try {
+    // 注意：这里需要先保存文件到临时位置，或者使用 Tauri 的文件对话框
+    // 为了演示，我们仍然使用前端压缩，但可以切换到 Rust 后端
+    
+    // 选项1：使用前端压缩（当前实现）
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d')
+        
+        if (!ctx) {
+          throw new Error('无法获取 Canvas 上下文')
+        }
+        
+        let { width, height } = img
+        const maxWidth = compressionOptions.maxWidth
+        const maxHeight = compressionOptions.maxHeight
+        
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width
+          width = maxWidth
+        }
+        
+        if (height > maxHeight) {
+          width = (width * maxHeight) / height
+          height = maxHeight
+        }
+        
+        canvas.width = width
+        canvas.height = height
+        ctx.drawImage(img, 0, 0, width, height)
+        
+        const mimeType = originalImage.value?.type === 'image/png' ? 'image/png' : 'image/jpeg'
+        const quality = mimeType === 'image/png' ? 1.0 : compressionOptions.quality
+        
+        canvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              isCompressing.value = false
+              return
+            }
+            
+            const url = URL.createObjectURL(blob)
+            compressedImage.value = {
+              name: `compressed_${originalImage.value?.name}`,
+              size: blob.size,
+              type: blob.type,
+              url
+            }
+            
             isCompressing.value = false
-            return
-          }
-          
-          const url = URL.createObjectURL(blob)
-          compressedImage.value = {
-            name: `compressed_${originalImage.value?.name}`,
-            size: blob.size,
-            type: blob.type,
-            url
-          }
-          
-          isCompressing.value = false
-        },
-        mimeType,
-        quality
-      )
-    } catch (error) {
-      console.error('图片压缩失败:', error)
-      isCompressing.value = false
-      alert('图片压缩失败')
+          },
+          mimeType,
+          quality
+        )
+      } catch (error) {
+        console.error('图片压缩失败:', error)
+        isCompressing.value = false
+        if ((window as any).$toast) {
+          (window as any).$toast('图片压缩失败', 'error')
+        }
+      }
     }
+    
+    img.src = originalImage.value.url
+    
+    // 选项2：使用 Rust 后端（需要文件路径）
+    // const result = await invoke('compress_image', {
+    //   inputPath: filePath,
+    //   outputPath: outputPath,
+    //   quality: Math.round(compressionOptions.quality * 100),
+    //   maxWidth: compressionOptions.maxWidth,
+    //   maxHeight: compressionOptions.maxHeight
+    // })
+    // console.log('压缩结果:', result)
+  } catch (error) {
+    console.error('压缩失败:', error)
+    isCompressing.value = false
   }
-  
-  img.src = originalImage.value.url
 }
 
 // 下载压缩后的图片
 const downloadCompressedImage = () => {
   if (!compressedImage.value) return
   
-  invoke('download_file', {
-    url: compressedImage.value.url,
-    savePath: "/tmp/123"
-  })
+  const link = document.createElement('a')
+  link.href = compressedImage.value.url
+  link.download = compressedImage.value.name
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  
+  if ((window as any).$toast) {
+    (window as any).$toast('图片下载成功', 'success')
+  }
 }
 
 // 触发文件选择
@@ -156,7 +178,7 @@ const triggerFileSelect = () => {
 
 <template>
   <div class="image-compression">
-    <h1>图片压缩工具</h1>
+    <PageHeader title="图片压缩工具" :show-back="true" />
     
     <div class="upload-section">
       <input 
@@ -256,27 +278,34 @@ const triggerFileSelect = () => {
 .image-compression {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 0;
 }
 
 .upload-section {
   text-align: center;
   margin-bottom: 30px;
+  background: white;
+  padding: 30px;
+  border-radius: var(--border-radius);
+  box-shadow: var(--shadow);
 }
 
 .upload-btn {
-  background-color: #409eff;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 12px 24px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: var(--transition);
+  box-shadow: var(--shadow);
 }
 
 .upload-btn:hover {
-  background-color: #66b1ff;
+  background: var(--secondary);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(67, 97, 238, 0.3);
 }
 
 .image-preview {
@@ -293,10 +322,11 @@ const triggerFileSelect = () => {
 }
 
 .compression-controls {
-  background-color: #f5f7fa;
-  padding: 20px;
-  border-radius: 8px;
+  background: white;
+  padding: 25px;
+  border-radius: var(--border-radius);
   margin-bottom: 30px;
+  box-shadow: var(--shadow);
 }
 
 .control-group {
@@ -314,18 +344,22 @@ const triggerFileSelect = () => {
 }
 
 .compress-btn {
-  background-color: #67c23a;
+  background: #67c23a;
   color: white;
   border: none;
   padding: 12px 24px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background-color 0.3s;
+  transition: var(--transition);
+  box-shadow: var(--shadow);
+  width: 100%;
 }
 
 .compress-btn:hover:not(:disabled) {
-  background-color: #85ce61;
+  background: #85ce61;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(103, 194, 58, 0.3);
 }
 
 .compress-btn:disabled {
@@ -357,19 +391,22 @@ const triggerFileSelect = () => {
 }
 
 .download-btn {
-  background-color: #e6a23c;
+  background: var(--primary);
   color: white;
   border: none;
   padding: 12px 24px;
   font-size: 16px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   display: block;
   margin: 0 auto;
-  transition: background-color 0.3s;
+  transition: var(--transition);
+  box-shadow: var(--shadow);
 }
 
 .download-btn:hover {
-  background-color: #ebb563;
+  background: var(--secondary);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(67, 97, 238, 0.3);
 }
 </style>
