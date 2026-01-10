@@ -22,3 +22,23 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Tauri
+/target/
+
+# Windows reserved names
+nul
+CON
+PRN
+AUX
+CLOCK$
+NUL
+COM*
+LPT*
+
+# Claude Code
+.claude/
+
+# Documentation (keep only important ones)
+IMPROVEMENTS.md
+IMPLEMENTATION_SUMMARY.md

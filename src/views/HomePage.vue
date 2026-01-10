@@ -9,23 +9,40 @@ const router = useRouter();
 const route = useRoute();
 const searchQuery = ref('');
 const isLoading = ref(false);
+const hoveredToolId = ref<number | null>(null);
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
-  let result = store.tools; 
+  let result = store.tools;
   // 按分类过滤
   if (store.activeCategory && store.activeCategory.id !== 0) {
     result = result.filter(tool => tool.category?.id === store.activeCategory?.id);
   }
-  
+
   // 按搜索词过滤
   if (searchQuery.value) {
     const query = searchQuery.value.toLowerCase();
-    result = result.filter(tool => tool.name.toLowerCase().includes(query) || tool.description.toLowerCase().includes(query) || tool.tags.some(tag => tag.toLowerCase().includes(query)))
+    result = result.filter(tool =>
+      tool.name.toLowerCase().includes(query) ||
+      tool.description.toLowerCase().includes(query) ||
+      tool.tags.some(tag => tag.toLowerCase().includes(query))
+    );
   }
 
   return result;
 });
+
+// 显示搜索结果状态
+const showSearchResults = computed(() => searchQuery.value.trim().length > 0);
+
+// 搜索结果统计
+const searchResultCount = computed(() => filteredTools.value.length);
+
+// 清空搜索
+const clearSearch = () => {
+  searchQuery.value = '';
+  router.push({ path: '/' });
+};
 
 // 推荐工具数据
 const featuredTools = ref([
@@ -56,7 +73,33 @@ const routerMap: Record<number, string> = {
   6: 'code-formatter',
   7: 'file-recovery',
   8: 'network-speed-test',
-  9: 'json-tool'
+  9: 'json-tool',
+  10: 'base64-tool',
+  11: 'hash-generator',
+  // 新增工具路由
+  12: 'json-to-entity',
+  13: 'json-diff',
+  14: 'jwt-tool',
+  15: 'regex-tester',
+  16: 'timestamp-converter',
+  17: 'http-request',
+  18: 'text-tools',
+  19: 'encoding-tools',
+  // 更多新工具路由
+  20: 'xml-tools',
+  21: 'yaml-tools',
+  22: 'gm-crypto',
+  23: 'sql-tools',
+  24: 'database-tools',
+  25: 'image-tools',
+  26: 'csv-tools',
+  27: 'log-analyzer',
+  28: 'color-tools',
+  29: 'qrcode-tools',
+  30: 'uuid-tools',
+  31: 'cron-tools',
+  32: 'number-tools',
+  33: 'charset-tools'
 }
 
 const openTool = (tool: Tool) => {
@@ -72,17 +115,50 @@ const openTool = (tool: Tool) => {
   }
 };
 
+const setHoveredTool = (id: number | null) => {
+  hoveredToolId.value = id;
+}
+
 // 监听搜索查询变化
 watch(() => route.query.search, (newVal) => {
   if (newVal) {
     searchQuery.value = newVal as string;
+  } else {
+    searchQuery.value = '';
   }
 }, { immediate: true });
+
+// 监听本地搜索变化，同步到 URL（带防抖）
+let searchTimeout: ReturnType<typeof setTimeout> | null = null;
+watch(searchQuery, (newVal) => {
+  if (searchTimeout) clearTimeout(searchTimeout);
+
+  searchTimeout = setTimeout(() => {
+    if (newVal.trim()) {
+      router.push({ path: '/', query: { search: newVal.trim() } });
+    } else if (route.query.search) {
+      router.push({ path: '/' });
+    }
+  }, 300);
+});
 
 </script>
 <template>
     <main class="main-content">
-        <div class="section-header">
+        <!-- 搜索结果提示 -->
+        <div v-if="showSearchResults" class="search-results-header">
+          <div class="search-info">
+            <i class="fas fa-search"></i>
+            <span>搜索 "<strong>{{ searchQuery }}</strong>" 的结果</span>
+            <span class="result-count">找到 {{ searchResultCount }} 个工具</span>
+          </div>
+          <button @click="clearSearch" class="clear-search-btn">
+            <i class="fas fa-times"></i>
+            清空搜索
+          </button>
+        </div>
+
+        <div class="section-header" v-else>
             <h2 class="section-title">
             {{ store.activeCategory?.id === 0 ? '全部工具' : store.activeCategory?.name }}
             </h2>
@@ -91,17 +167,20 @@ watch(() => route.query.search, (newVal) => {
             </div>
         </div>
         
-        <TransitionGroup 
+        <TransitionGroup
             v-if="!isLoading && filteredTools.length > 0"
-            name="tool-card" 
-            tag="div" 
+            name="tool-card"
+            tag="div"
             class="tools-grid"
         >
-            <div 
-                v-for="tool in filteredTools" 
+            <div
+                v-for="tool in filteredTools"
                 :key="tool.id"
                 class="tool-card"
+                :class="{ 'hovered': hoveredToolId === tool.id }"
                 @click="openTool(tool)"
+                @mouseenter="setHoveredTool(tool.id)"
+                @mouseleave="setHoveredTool(null)"
             >
                 <div class="card-header" :style="`background: ${tool.gradient};`">
                 <i :class="tool.icon"></i>
@@ -113,6 +192,7 @@ watch(() => route.query.search, (newVal) => {
                     <span class="tag" v-for="tag in tool.tags" :key="tag">{{ tag }}</span>
                 </div>
                 </div>
+                <div class="card-glow" :style="`background: ${tool.gradient};`"></div>
             </div>
         </TransitionGroup>
         
@@ -132,19 +212,28 @@ watch(() => route.query.search, (newVal) => {
             
         <div v-else class="empty-state">
           <div class="empty-icon">
-            <i class="fas fa-search"></i>
+            <i class="fas" :class="showSearchResults ? 'fa-search-minus' : 'fa-search'"></i>
           </div>
-          <h3>没有找到匹配的工具</h3>
-          <p>请尝试其他搜索词或选择不同的分类</p>
+          <h3>{{ showSearchResults ? '没有找到匹配的工具' : '没有找到匹配的工具' }}</h3>
+          <p>
+            {{ showSearchResults
+              ? `尝试使用其他关键词搜索，或浏览全部 ${store.tools.length} 个工具`
+              : '请尝试其他搜索词或选择不同的分类'
+            }}
+          </p>
+          <button v-if="showSearchResults" @click="clearSearch" class="view-all-tools-btn">
+            <i class="fas fa-th-large"></i>
+            浏览全部工具
+          </button>
         </div>
-        
-        <div class="section-header">
+
+        <div class="section-header" v-if="!showSearchResults">
             <h2 class="section-title">推荐工具</h2>
         </div>
-        
-        <div class="featured-tools">
-            <div 
-            v-for="featured in featuredTools" 
+
+        <div class="featured-tools" v-if="!showSearchResults">
+            <div
+            v-for="featured in featuredTools"
             :key="featured.id"
             class="featured-card"
             >
@@ -203,11 +292,12 @@ watch(() => route.query.search, (newVal) => {
     border-radius: var(--border-radius);
     overflow: hidden;
     box-shadow: var(--shadow);
-    transition: var(--transition);
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     position: relative;
+    transform-style: preserve-3d;
   }
-  
+
   .tool-card::before {
     content: '';
     position: absolute;
@@ -218,15 +308,43 @@ watch(() => route.query.search, (newVal) => {
     background: linear-gradient(135deg, rgba(67, 97, 238, 0.05), rgba(72, 149, 239, 0.05));
     opacity: 0;
     transition: var(--transition);
+    z-index: 1;
+    pointer-events: none;
   }
-  
+
+  .tool-card.hovered {
+    transform: translateY(-12px) scale(1.02);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+  }
+
+  .tool-card.hovered::before {
+    opacity: 1;
+  }
+
   .tool-card:hover {
     transform: translateY(-8px) scale(1.02);
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
   }
-  
+
   .tool-card:hover::before {
     opacity: 1;
+  }
+
+  .card-glow {
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    border-radius: calc(var(--border-radius) + 2px);
+    opacity: 0;
+    transition: var(--transition);
+    z-index: -1;
+    filter: blur(10px);
+  }
+
+  .tool-card.hovered .card-glow {
+    opacity: 0.3;
   }
   
   .tool-card-enter-active {
@@ -350,7 +468,85 @@ watch(() => route.query.search, (newVal) => {
   .featured-btn:hover {
     background: var(--secondary);
   }
-    
+
+  /* 搜索结果样式 */
+  .search-results-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px;
+    background: white;
+    border-radius: var(--border-radius);
+    box-shadow: var(--shadow);
+    margin-bottom: 25px;
+  }
+
+  .search-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--dark);
+  }
+
+  .search-info i {
+    font-size: 20px;
+    color: var(--primary);
+  }
+
+  .search-info strong {
+    color: var(--primary);
+    font-weight: 600;
+  }
+
+  .result-count {
+    background: rgba(67, 97, 238, 0.1);
+    color: var(--primary);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 500;
+    margin-left: 12px;
+  }
+
+  .clear-search-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border: 2px solid var(--primary);
+    background: white;
+    color: var(--primary);
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: var(--transition);
+  }
+
+  .clear-search-btn:hover {
+    background: var(--primary);
+    color: white;
+  }
+
+  .view-all-tools-btn {
+    margin-top: 20px;
+    padding: 12px 24px;
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: var(--transition);
+  }
+
+  .view-all-tools-btn:hover {
+    background: var(--secondary);
+    transform: translateY(-2px);
+  }
+
   .empty-state {
     grid-column: 1 / -1;
     text-align: center;

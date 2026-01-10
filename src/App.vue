@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from "vue";
+import { ref, onMounted, computed, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
-import { RouterView, useRoute } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
+import { useTheme } from "@/composables/useTheme";
 
 const store  = useToolStore()
 const route = useRoute()
+const router = useRouter()
+const { isDark, toggleTheme } = useTheme()
 
 // 工具数据
 const tools = ref<Tool[]>([]);
@@ -47,9 +50,29 @@ onMounted(() => {
 })
 
 const searchQuery = ref('');
+
+// 监听路由变化，同步搜索框状态
+watch(() => route.query.search, (newVal) => {
+  searchQuery.value = (newVal as string) || '';
+}, { immediate: true });
+
+// 搜索功能 - 实时搜索并跳转到搜索结果页
 const searchTools = () => {
-  // 搜索功能由HomePage处理
-  console.log(`搜索工具: ${searchQuery.value}`);
+  if (searchQuery.value.trim()) {
+    // 跳转到首页并传递搜索参数
+    router.push({ path: '/', query: { search: searchQuery.value.trim() } });
+  } else if (route.query.search) {
+    // 清空搜索时移除搜索参数
+    router.push({ path: '/' });
+  }
+};
+
+// 清空搜索
+const clearSearch = () => {
+  searchQuery.value = '';
+  if (route.query.search) {
+    router.push({ path: '/' });
+  }
 };
 
 // 计算是否显示侧边栏（在工具页面不显示）
@@ -57,7 +80,7 @@ const showSidebar = computed(() => route.path === '/')
 </script>
 
 <template>
-      <div class="container" :class="{ 'no-sidebar': !showSidebar }">
+      <div class="container" :class="{ 'no-sidebar': !showSidebar, 'dark-mode': isDark }">
         <header>
           <div class="logo" @click="$router.push('/')" style="cursor: pointer;">
             <div class="logo-icon">
@@ -65,15 +88,28 @@ const showSidebar = computed(() => route.path === '/')
             </div>
             <div class="logo-text">万能<span>工具箱</span></div>
           </div>
-          <div class="search-container" v-if="showSidebar">
-            <i class="fas fa-search search-icon"></i>
-            <input 
-              type="text" 
-              placeholder="搜索工具..." 
-              v-model="searchQuery"
-              @keyup.enter="searchTools"
-              @input="searchTools"
-            >
+          <div class="header-actions">
+            <div class="search-container" v-if="showSidebar">
+              <i class="fas fa-search search-icon"></i>
+              <input
+                type="text"
+                placeholder="搜索工具名称、描述或标签..."
+                v-model="searchQuery"
+                @keyup.enter="searchTools"
+                @input="searchTools"
+              >
+              <button
+                v-if="searchQuery"
+                @click="clearSearch"
+                class="search-clear"
+                title="清空搜索"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <button @click="toggleTheme" class="theme-toggle" :title="isDark ? '切换到浅色模式' : '切换到深色模式'">
+              <i :class="isDark ? 'fas fa-sun' : 'fas fa-moon'"></i>
+            </button>
           </div>
         </header>
       <SideBar v-if="showSidebar"></SideBar>      
@@ -112,13 +148,30 @@ const showSidebar = computed(() => route.path === '/')
     --border-radius: 12px;
     --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
     --transition: all 0.3s ease;
+    --bg-primary: #ffffff;
+    --bg-secondary: #f5f7fa;
+    --bg-tertiary: #e4edf5;
+    --text-primary: #212529;
+    --text-secondary: #6c757d;
+    --border-color: rgba(0, 0, 0, 0.1);
   }
-  
+
+  .dark-mode {
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f3460;
+    --text-primary: #e4e4e7;
+    --text-secondary: #a1a1aa;
+    --border-color: rgba(255, 255, 255, 0.1);
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  }
+
   body {
-    background: linear-gradient(135deg, #f5f7fa 0%, #e4edf5 100%);
-    color: var(--dark);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+    color: var(--text-primary);
     min-height: 100vh;
     padding: 20px;
+    transition: background 0.3s ease, color 0.3s ease;
   }
   
   .container {
@@ -216,7 +269,36 @@ const showSidebar = computed(() => route.path === '/')
   .logo-text span {
     color: var(--primary);
   }
-  
+
+  /* 头部操作区域 */
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+  }
+
+  /* 主题切换按钮 */
+  .theme-toggle {
+    width: 45px;
+    height: 45px;
+    border-radius: 12px;
+    border: none;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 18px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: var(--transition);
+    box-shadow: var(--shadow);
+  }
+
+  .theme-toggle:hover {
+    transform: scale(1.1);
+    box-shadow: 0 6px 25px rgba(67, 97, 238, 0.3);
+  }
+
   /* 搜索区域样式 */
   .search-container {
     position: relative;
@@ -239,6 +321,35 @@ const showSidebar = computed(() => route.path === '/')
     border-color: var(--primary);
     box-shadow: 0 6px 25px rgba(67, 97, 238, 0.2);
     transform: translateY(-2px);
+  }
+
+  .search-container input:focus + .search-clear {
+    opacity: 1;
+  }
+
+  .search-clear {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: rgba(67, 97, 238, 0.1);
+    border-radius: 50%;
+    color: var(--primary);
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.8;
+    transition: var(--transition);
+  }
+
+  .search-clear:hover {
+    background: rgba(67, 97, 238, 0.2);
+    opacity: 1;
   }
   
   .search-icon {
