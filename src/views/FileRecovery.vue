@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
 import { toast } from '@/utils/toast';
 

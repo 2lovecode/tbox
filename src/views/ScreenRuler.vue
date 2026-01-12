@@ -11,8 +11,6 @@ const isMeasuring = ref(false)
 const unit = ref<'px' | 'cm' | 'inch'>('px')
 const measurements = ref<Array<{ width: number; height: number; unit: string }>>([])
 
-const rulerOverlay = ref<HTMLDivElement | null>(null)
-
 const pxToCm = (px: number) => px / 37.8 // 假设96 DPI
 const pxToInch = (px: number) => px / 96
 
@@ -110,6 +108,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  // 确保移除所有事件监听器，防止内存泄漏
   document.removeEventListener('mousedown', startMeasure)
   document.removeEventListener('mousemove', updateMeasure)
   document.removeEventListener('mouseup', endMeasure)
@@ -117,14 +116,16 @@ onUnmounted(() => {
 
 // 监听激活状态变化
 const watchActive = () => {
+  // 先移除所有监听器，避免重复添加
+  document.removeEventListener('mousedown', startMeasure)
+  document.removeEventListener('mousemove', updateMeasure)
+  document.removeEventListener('mouseup', endMeasure)
+
+  // 根据状态重新添加监听器
   if (isActive.value) {
     document.addEventListener('mousedown', startMeasure)
     document.addEventListener('mousemove', updateMeasure)
     document.addEventListener('mouseup', endMeasure)
-  } else {
-    document.removeEventListener('mousedown', startMeasure)
-    document.removeEventListener('mousemove', updateMeasure)
-    document.removeEventListener('mouseup', endMeasure)
   }
 }
 

@@ -28,7 +28,7 @@ const formatCode = async () => {
     toast.warning('请先输入代码')
     return
   }
-  
+
   try {
     // 使用 Rust 后端进行格式化
     const result = await invoke('format_code', {
@@ -36,8 +36,8 @@ const formatCode = async () => {
       language: language.value,
       indentSize: indentType.value === 'space' ? indentSize.value : undefined,
       useTabs: indentType.value === 'tab'
-    })
-    
+    }) as { formatted: string }
+
     formattedCode.value = result.formatted
     toast.success('代码格式化成功')
   } catch (error: any) {

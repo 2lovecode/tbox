@@ -19,20 +19,32 @@ const isLoading = ref(true);
 
 // 加载categories
 // 加载tools
-onMounted(() => {
+onMounted(async () => {
   isLoading.value = true;
-  Promise.all([
-    invoke('get_categories').then((res) => {
-      const fetchCategories = (res as Array<Category>).map((item: Category) => ({
+  try {
+    const [categoriesRes, toolsRes] = await Promise.all([
+      invoke('get_categories').catch((error) => {
+        console.error('Failed to load categories:', error);
+        return [];
+      }),
+      invoke('get_all_tools').catch((error) => {
+        console.error('Failed to load tools:', error);
+        return [];
+      })
+    ]);
+
+    if (categoriesRes && Array.isArray(categoriesRes)) {
+      const fetchCategories = (categoriesRes as Array<Category>).map((item: Category) => ({
         id: item.id,
         name: item.name,
         icon: "",
         count: item.count,
       }))
       store.setCategories(fetchCategories)
-    }),
-    invoke('get_all_tools').then((res) => {
-      const fetchTools = (res as Array<Tool>).map((item: Tool) => ({
+    }
+
+    if (toolsRes && Array.isArray(toolsRes)) {
+      const fetchTools = (toolsRes as Array<Tool>).map((item: Tool) => ({
         id: item.id,
         name: item.name,
         description: item.description,
@@ -43,10 +55,12 @@ onMounted(() => {
       }))
       store.setTools(fetchTools)
       tools.value = fetchTools;
-    })
-  ]).finally(() => {
+    }
+  } catch (error) {
+    console.error('Error loading data:', error);
+  } finally {
     isLoading.value = false;
-  })
+  }
 })
 
 const searchQuery = ref('');

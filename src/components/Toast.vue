@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 
 interface ToastMessage {
   id: number
   message: string
   type: 'success' | 'error' | 'info' | 'warning'
   duration?: number
+  timeoutId?: ReturnType<typeof setTimeout>
 }
 
 const toasts = ref<ToastMessage[]>([])
@@ -13,17 +14,20 @@ let toastId = 0
 
 const showToast = (message: string, type: ToastMessage['type'] = 'info', duration: number = 3000) => {
   const id = toastId++
-  const toast: ToastMessage = { id, message, type, duration }
-  toasts.value.push(toast)
-  
-  setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     removeToast(id)
   }, duration)
+  const toast: ToastMessage = { id, message, type, duration, timeoutId }
+  toasts.value.push(toast)
 }
 
 const removeToast = (id: number) => {
   const index = toasts.value.findIndex(t => t.id === id)
   if (index > -1) {
+    const toast = toasts.value[index]
+    if (toast.timeoutId) {
+      clearTimeout(toast.timeoutId)
+    }
     toasts.value.splice(index, 1)
   }
 }
@@ -38,6 +42,16 @@ onMounted(() => {
   if (typeof window !== 'undefined') {
     ;(window as any).$toast = showToast
   }
+})
+
+// 清理所有待处理的定时器
+onUnmounted(() => {
+  toasts.value.forEach(toast => {
+    if (toast.timeoutId) {
+      clearTimeout(toast.timeoutId)
+    }
+  })
+  toasts.value = []
 })
 </script>
 

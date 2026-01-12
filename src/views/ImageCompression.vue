@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { ref, reactive } from 'vue'
-import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
 
 // 类型定义
@@ -28,7 +27,6 @@ const compressionOptions = reactive<CompressionOptions>({
 })
 
 const fileInput = ref<HTMLInputElement | null>(null)
-const previewCanvas = ref<HTMLCanvasElement | null>(null)
 
 // 格式化文件大小
 const formatFileSize = (bytes: number): string => {
@@ -69,52 +67,69 @@ const handleFileSelect = (event: Event) => {
 // 压缩图片 - 使用 Rust 后端
 const compressImage = async () => {
   if (!originalImage.value) return
-  
+
   isCompressing.value = true
-  
+
   try {
     // 注意：这里需要先保存文件到临时位置，或者使用 Tauri 的文件对话框
     // 为了演示，我们仍然使用前端压缩，但可以切换到 Rust 后端
-    
+
     // 选项1：使用前端压缩（当前实现）
     const img = new Image()
+
+    // 添加一个标志来检查组件是否仍然挂载
+    let isMounted = true
+
     img.onload = () => {
+      // 检查组件是否仍然挂载
+      if (!isMounted || !isCompressing.value) {
+        return
+      }
+
       try {
         const canvas = document.createElement('canvas')
         const ctx = canvas.getContext('2d')
-        
+
         if (!ctx) {
           throw new Error('无法获取 Canvas 上下文')
         }
-        
+
         let { width, height } = img
         const maxWidth = compressionOptions.maxWidth
         const maxHeight = compressionOptions.maxHeight
-        
+
         if (width > maxWidth) {
           height = (height * maxWidth) / width
           width = maxWidth
         }
-        
+
         if (height > maxHeight) {
           width = (width * maxHeight) / height
           height = maxHeight
         }
-        
+
         canvas.width = width
         canvas.height = height
         ctx.drawImage(img, 0, 0, width, height)
-        
+
         const mimeType = originalImage.value?.type === 'image/png' ? 'image/png' : 'image/jpeg'
         const quality = mimeType === 'image/png' ? 1.0 : compressionOptions.quality
-        
+
         canvas.toBlob(
           (blob) => {
+            // 再次检查组件是否仍然挂载
+            if (!isMounted || !isCompressing.value) {
+              if (blob) {
+                URL.revokeObjectURL(URL.createObjectURL(blob))
+              }
+              return
+            }
+
             if (!blob) {
               isCompressing.value = false
               return
             }
-            
+
             const url = URL.createObjectURL(blob)
             compressedImage.value = {
               name: `compressed_${originalImage.value?.name}`,
@@ -122,7 +137,7 @@ const compressImage = async () => {
               type: blob.type,
               url
             }
-            
+
             isCompressing.value = false
           },
           mimeType,
@@ -130,24 +145,26 @@ const compressImage = async () => {
         )
       } catch (error) {
         console.error('图片压缩失败:', error)
-        isCompressing.value = false
-        if ((window as any).$toast) {
-          (window as any).$toast('图片压缩失败', 'error')
+        if (isMounted) {
+          isCompressing.value = false
+          if ((window as any).$toast) {
+            (window as any).$toast('图片压缩失败', 'error')
+          }
         }
       }
     }
-    
+
+    img.onerror = () => {
+      if (isMounted) {
+        console.error('图片加载失败')
+        isCompressing.value = false
+        if ((window as any).$toast) {
+          (window as any).$toast('图片加载失败', 'error')
+        }
+      }
+    }
+
     img.src = originalImage.value.url
-    
-    // 选项2：使用 Rust 后端（需要文件路径）
-    // const result = await invoke('compress_image', {
-    //   inputPath: filePath,
-    //   outputPath: outputPath,
-    //   quality: Math.round(compressionOptions.quality * 100),
-    //   maxWidth: compressionOptions.maxWidth,
-    //   maxHeight: compressionOptions.maxHeight
-    // })
-    // console.log('压缩结果:', result)
   } catch (error) {
     console.error('压缩失败:', error)
     isCompressing.value = false

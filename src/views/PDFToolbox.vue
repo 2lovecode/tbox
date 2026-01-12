@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
 import { toast } from '@/utils/toast';
 
@@ -64,11 +63,11 @@ const processPDF = async () => {
       // 合并PDF - 使用 Rust 后端
       // 注意：需要将 File 对象转换为文件路径
       // 这里需要先保存文件或使用 Tauri 的文件对话框
-      const filePaths = selectedFiles.value.map(f => {
-        // 临时方案：提示用户需要保存文件
-        return f.name // 实际应该使用文件路径
-      })
-      
+      // const filePaths = selectedFiles.value.map(f => {
+      //   // 临时方案：提示用户需要保存文件
+      //   return f.name // 实际应该使用文件路径
+      // })
+
       // 使用 Rust 后端合并
       // const result = await invoke('merge_pdfs', {
       //   inputPaths: filePaths,

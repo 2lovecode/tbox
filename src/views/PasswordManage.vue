@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue'
-import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
 import { toast } from '@/utils/toast';
 
@@ -74,9 +73,16 @@ const saveEntry = () => {
     })
   }
 
-  // 保存到本地存储
-  localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
-  
+  // 保存到本地存储 - 添加错误处理
+  try {
+    localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
+    toast.success('保存成功')
+  } catch (error) {
+    console.error('保存失败:', error)
+    toast.error('保存失败，可能是存储空间不足')
+    return
+  }
+
   // 重置表单
   newEntry.value = {
     name: '',
@@ -99,7 +105,13 @@ const editEntry = (entry: PasswordEntry) => {
 const deleteEntry = (id: string) => {
   if (confirm('确定要删除这条密码记录吗？')) {
     entries.value = entries.value.filter(e => e.id !== id)
-    localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
+    try {
+      localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
+      toast.success('删除成功')
+    } catch (error) {
+      console.error('删除失败:', error)
+      toast.error('删除失败')
+    }
   }
 }
 
@@ -119,11 +131,20 @@ const togglePassword = (id: string) => {
   showPassword.value[id] = !showPassword.value[id]
 }
 
-// 加载保存的密码
+// 加载保存的密码 - 添加错误处理
 const loadEntries = () => {
-  const saved = localStorage.getItem('passwordEntries')
-  if (saved) {
-    entries.value = JSON.parse(saved)
+  try {
+    const saved = localStorage.getItem('passwordEntries')
+    if (saved) {
+      const parsed = JSON.parse(saved)
+      if (Array.isArray(parsed)) {
+        entries.value = parsed
+      }
+    }
+  } catch (error) {
+    console.error('加载密码记录失败:', error)
+    toast.error('加载密码记录失败')
+    entries.value = []
   }
 }
 

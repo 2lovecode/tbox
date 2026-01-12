@@ -1,6 +1,5 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
-import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
 import { toast } from '@/utils/toast';
 
@@ -66,17 +65,25 @@ const handleFileSelect = (event: Event) => {
 
 const convertVideo = async () => {
   if (!selectedFile.value) return
-  
+
   isConverting.value = true
   conversionProgress.value = 0
-  
+
   // 模拟转换过程
   const interval = setInterval(() => {
-    conversionProgress.value += 10
-    if (conversionProgress.value >= 100) {
+    // 添加边界检查，确保进度不会超过100
+    if (conversionProgress.value < 100) {
+      conversionProgress.value = Math.min(conversionProgress.value + 10, 100)
+
+      if (conversionProgress.value >= 100) {
+        clearInterval(interval)
+        isConverting.value = false
+        toast.success('视频转换完成！注意：这是一个演示版本，实际转换功能需要集成FFmpeg等视频处理库。')
+      }
+    } else {
+      // 如果由于某种原因已经达到或超过100，清理定时器
       clearInterval(interval)
       isConverting.value = false
-      toast.success('视频转换完成！注意：这是一个演示版本，实际转换功能需要集成FFmpeg等视频处理库。')
     }
   }, 500)
 }
