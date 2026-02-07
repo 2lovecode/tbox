@@ -42,6 +42,7 @@ fn main() {
             commands::json::unescape_json,
             commands::json::validate_json,
             commands::json::get_json_info,
+            commands::json::compare_json,
 
             // TODO: 数据转换工具 (module not implemented yet)
             // commands::data_convert::json_to_java,
@@ -49,11 +50,6 @@ fn main() {
             // commands::data_convert::json_to_go,
             // commands::data_convert::json_to_python,
             // commands::data_convert::json_to_typescript,
-
-            // TODO: JSON对比工具 (module not implemented yet)
-            // commands::json_diff::compare_json,
-            // commands::json_diff::format_json_diff,
-            // commands::json_diff::query_json_path,
 
             // TODO: 加密工具 (module not implemented yet)
             // commands::crypto::aes_encrypt,

@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
+use std::collections::HashSet;
 
 #[derive(Serialize)]
 pub struct JsonFormatResult {
@@ -188,4 +189,139 @@ fn analyze_json_value(value: &Value, current_depth: usize) -> (usize, usize, std
     }
     
     (max_depth, key_count, value_types)
+}
+
+// ==================== JSON对比功能 ====================
+
+#[derive(Serialize)]
+pub struct JsonDiffChange {
+    path: String,
+    old_value: Value,
+    new_value: Value,
+}
+
+#[derive(Serialize)]
+pub struct JsonDiffResult {
+    added: Vec<String>,
+    removed: Vec<String>,
+    modified: Vec<JsonDiffChange>,
+    unchanged: Vec<String>,
+}
+
+/// 对比两个JSON的差异
+#[tauri::command]
+pub fn compare_json(json1: String, json2: String) -> Result<JsonDiffResult, String> {
+    // 解析两个JSON
+    let value1: Value = serde_json::from_str(&json1)
+        .map_err(|e| format!("第一个JSON解析错误: {}", e))?;
+    let value2: Value = serde_json::from_str(&json2)
+        .map_err(|e| format!("第二个JSON解析错误: {}", e))?;
+
+    // 执行对比
+    let mut added = Vec::new();
+    let mut removed = Vec::new();
+    let mut modified = Vec::new();
+    let mut unchanged = Vec::new();
+
+    compare_values(&value1, &value2, "$", &mut added, &mut removed, &mut modified, &mut unchanged);
+
+    Ok(JsonDiffResult {
+        added,
+        removed,
+        modified,
+        unchanged,
+    })
+}
+
+fn compare_values(
+    v1: &Value,
+    v2: &Value,
+    path: &str,
+    added: &mut Vec<String>,
+    removed: &mut Vec<String>,
+    modified: &mut Vec<JsonDiffChange>,
+    unchanged: &mut Vec<String>,
+) {
+    match (v1, v2) {
+        // 两个都是对象
+        (Value::Object(obj1), Value::Object(obj2)) => {
+            // 获取所有键的集合
+            let keys1: HashSet<_> = obj1.keys().collect();
+            let keys2: HashSet<_> = obj2.keys().collect();
+
+            // 找出被删除的键（在obj1中但不在obj2中）
+            for key in keys1.difference(&keys2) {
+                removed.push(format!("{}/{}", path, key));
+            }
+
+            // 找出新增的键（在obj2中但不在obj1中）
+            for key in keys2.difference(&keys1) {
+                added.push(format!("{}/{}", path, key));
+            }
+
+            // 比较共同的键
+            for key in keys1.intersection(&keys2) {
+                let new_path = format!("{}/{}", path, key);
+                compare_values(
+                    &obj1[*key],
+                    &obj2[*key],
+                    &new_path,
+                    added,
+                    removed,
+                    modified,
+                    unchanged,
+                );
+            }
+        }
+
+        // 两个都是数组
+        (Value::Array(arr1), Value::Array(arr2)) => {
+            let len1 = arr1.len();
+            let len2 = arr2.len();
+            let max_len = len1.max(len2);
+
+            for i in 0..max_len {
+                let new_path = format!("{}/[{}]", path, i);
+
+                match (arr1.get(i), arr2.get(i)) {
+                    (Some(val1), Some(val2)) => {
+                        // 两个数组都有这个索引，递归比较
+                        compare_values(
+                            val1,
+                            val2,
+                            &new_path,
+                            added,
+                            removed,
+                            modified,
+                            unchanged,
+                        );
+                    }
+                    (None, Some(_)) => {
+                        // arr2比arr1长，这是新增的元素
+                        added.push(new_path);
+                    }
+                    (Some(_), None) => {
+                        // arr1比arr2长，这是删除的元素
+                        removed.push(new_path);
+                    }
+                    (None, None) => {
+                        // 不可能发生
+                    }
+                }
+            }
+        }
+
+        // 其他类型（字符串、数字、布尔、null）
+        _ => {
+            if v1 == v2 {
+                unchanged.push(path.to_string());
+            } else {
+                modified.push(JsonDiffChange {
+                    path: path.to_string(),
+                    old_value: v1.clone(),
+                    new_value: v2.clone(),
+                });
+            }
+        }
+    }
 }

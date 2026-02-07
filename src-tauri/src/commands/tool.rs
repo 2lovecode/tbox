@@ -449,8 +449,24 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
         )?;
     }
 
-    // 检查并添加新工具 28-33
+    // 检查并添加新工具 12-33
     let new_tools = vec![
+        (12, "JSON转实体类", "将JSON自动转换为Java、C#、Go、Python、TypeScript实体类。", "fas fa-file-code", "linear-gradient(135deg, #4361ee, #4895ef)", 5, vec![11, 12]),
+        (13, "JSON对比工具", "对比两个JSON的差异，高亮显示新增、删除和修改的字段。", "fas fa-not-equal", "linear-gradient(135deg, #f72585, #b5179e)", 5, vec![11, 12]),
+        (14, "JWT工具", "解析和生成JWT Token，支持签名验证。", "fas fa-key", "linear-gradient(135deg, #4cc9f0, #4895ef)", 6, vec![5, 6]),
+        (15, "正则表达式测试", "实时测试正则表达式，查看匹配结果。", "fas fa-regexp", "linear-gradient(135deg, #7209b7, #560bad)", 5, vec![11, 12]),
+        (16, "时间戳转换", "Unix时间戳与日期时间互转，支持多种时间单位。", "fas fa-clock", "linear-gradient(135deg, #ff9e00, #ff5400)", 5, vec![11, 12]),
+        (17, "HTTP请求工具", "发送HTTP请求，支持GET/POST/PUT/DELETE等方法。", "fas fa-paper-plane", "linear-gradient(135deg, #3a0ca3, #4cc9f0)", 7, vec![14, 11]),
+        (18, "文本处理工具", "文本对比、去重、排序、正则替换等文本处理功能。", "fas fa-font", "linear-gradient(135deg, #4361ee, #3a0ca3)", 5, vec![11, 12]),
+        (19, "编码转换工具", "URL、Unicode、Base58/62等多种编码转换。", "fas fa-exchange-alt", "linear-gradient(135deg, #06ffa5, #00d4ff)", 5, vec![4, 16]),
+        (20, "XML工具", "XML格式化、压缩、JSON/YAML转换等功能。", "fas fa-code", "linear-gradient(135deg, #e76f51, #f4a261)", 5, vec![11, 12]),
+        (21, "YAML工具", "YAML格式化、验证、JSON转换和合并。", "fas fa-file-code", "linear-gradient(135deg, #2a9d8f, #264653)", 5, vec![11, 12]),
+        (22, "国密算法工具", "SM2/SM3/SM4国密算法加密解密和签名。", "fas fa-lock", "linear-gradient(135deg, #e63946, #457b9d)", 6, vec![5, 6]),
+        (23, "SQL工具", "SQL格式化和转义，支持多种数据库。", "fas fa-database", "linear-gradient(135deg, #1d3557, #457b9d)", 5, vec![11, 12]),
+        (24, "数据库工具", "MySQL、PostgreSQL、SQLite连接测试。", "fas fa-server", "linear-gradient(135deg, #0077b6, #00b4d8)", 5, vec![11, 12]),
+        (25, "图片工具", "图片格式转换、Base64编码、图片信息查看。", "fas fa-image", "linear-gradient(135deg, #9b5de5, #f15bb5)", 1, vec![1, 2]),
+        (26, "CSV工具", "CSV与JSON转换、格式化和统计。", "fas fa-file-csv", "linear-gradient(135deg, #00bbf9, #00f5d4)", 5, vec![11, 12]),
+        (27, "日志分析工具", "日志分析、错误统计、过滤和级别提取。", "fas fa-file-lines", "linear-gradient(135deg, #fb8500, #ffb703)", 5, vec![11, 12]),
         (28, "颜色工具", "RGB/HEX/HSL/HSV颜色格式转换，生成随机颜色，调整亮度。", "fas fa-palette", "linear-gradient(135deg, #f72585, #7209b7)", 8, vec![9, 10]),
         (29, "二维码工具", "生成二维码，解析二维码，生成条形码（CODE128、EAN13等）。", "fas fa-qrcode", "linear-gradient(135deg, #4361ee, #4cc9f0)", 5, vec![4, 11]),
         (30, "UUID工具", "生成v4/v7 UUID，批量生成，验证，Base64转换，版本检测。", "fas fa-fingerprint", "linear-gradient(135deg, #7209b7, #3a0ca3)", 5, vec![11, 12]),

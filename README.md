@@ -1,7 +1,406 @@
-# Tauri + Vue + TypeScript
+# TBox - 开发者工具箱
 
-This template should help get you started developing with Vue 3 and TypeScript in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+<div align="center">
 
-## Recommended IDE Setup
+![TBox Logo](https://img.shields.io/badge/TBox-0.1.0-brightgreen)
+![Tauri](https://img.shields.io/badge/Tauri-2.0-blue)
+![Vue](https://img.shields.io/badge/Vue-3.5-brightgreen)
+![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)
+![License](https://img.shields.io/badge/License-MIT-yellow)
 
-- [VS Code](https://code.visualstudio.com/) + [Vue - Official](https://marketplace.visualstudio.com/items?itemName=Vue.volar) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+一款基于 Tauri + Vue 3 + TypeScript 构建的现代化桌面开发者工具箱，集成 33+ 实用工具，提升开发效率。
+
+[功能特性](#功能特性) • [快速开始](#快速开始) • [技术栈](#技术栈) • [项目结构](#项目结构) • [开发指南](#开发指南)
+
+</div>
+
+---
+
+## ✨ 功能特性
+
+TBox 提供了丰富的开发工具，涵盖多个领域：
+
+### 🖼️ 图片处理
+- **图片压缩** - 智能压缩图片，保持画质
+- **图片格式转换** - 支持JPG、PNG、WEBP等格式互转
+- **图片裁剪/旋转** - 基础图片编辑功能
+- **图片转Base64** - 快速转换图片为Base64编码
+
+### 📄 文档处理
+- **PDF工具箱** - 合并、分割、压缩PDF文件
+- **文件恢复** - 恢复误删除的文件
+
+### 💻 开发工具
+- **JSON处理** - JSON美化、压缩、转义、验证、信息查看
+- **JSON对比** - 对比两个JSON差异，高亮显示变更
+- **JSON转实体类** - 自动转换为Java/C#/Go/Python/TypeScript实体类
+- **代码格式化** - 支持多种编程语言的代码格式化
+- **Base64工具** - Base64编码解码
+- **哈希生成器** - MD5、SHA-1、SHA-256等哈希值生成
+
+### 🔐 安全加密
+- **密码管理器** - 安全存储和管理密码
+- **JWT工具** - JWT Token解析和生成
+- **国密算法** - SM2/SM3/SM4加密解密
+- **AES/RSA加密** - 常用加密算法工具
+
+### 🌐 网络工具
+- **HTTP请求工具** - 发送各种HTTP请求
+- **网络测速** - 测试网络速度和延迟
+- **DNS查询** - 域名DNS记录查询
+
+### 📝 文本处理
+- **正则表达式测试** - 实时测试正则表达式
+- **文本对比** - 对比文本差异
+- **文本去重/排序** - 快速处理文本数据
+- **编码转换** - URL、Unicode、HTML实体编码转换
+
+### ⏰ 时间工具
+- **时间戳转换** - Unix时间戳与日期时间互转
+- **Cron工具** - Cron表达式构建和解析
+
+### 🎨 设计工具
+- **屏幕标尺** - 在屏幕上测量元素尺寸
+- **颜色工具** - RGB/HEX/HSL/HSV颜色格式转换
+- **二维码工具** - 生成和解析二维码、条形码
+
+### 🔢 数据处理
+- **CSV工具** - CSV与JSON转换、格式化
+- **UUID工具** - 生成各种版本的UUID
+- **数字工具** - 进制转换、科学计数法
+- **字符编码工具** - 编码检测、字符集转换
+
+### 📊 日志分析
+- **日志分析工具** - 分析日志、统计错误、过滤内容
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
+
+- **Node.js** >= 18.0.0
+- **pnpm** >= 8.0.0 (推荐) 或 npm/yarn
+- **Rust** >= 1.70
+- **系统依赖**:
+  - **macOS**: 无额外依赖
+  - **Linux**: 需要安装 `webkit2gtk-4.1`, `libgtk-3-dev`
+  - **Windows**: 无额外依赖
+
+### 安装
+
+```bash
+# 克隆项目
+git clone https://github.com/2lovecode/tbox.git
+cd tbox
+
+# 安装依赖
+pnpm install
+```
+
+### 开发
+
+```bash
+# 启动开发服务器
+pnpm tauri dev
+```
+
+### 构建
+
+```bash
+# 构建生产版本
+pnpm tauri build
+```
+
+构建产物位于 `src-tauri/target/release/bundle/` 目录。
+
+---
+
+## 🛠️ 技术栈
+
+### 前端技术
+- **框架**: Vue 3.5 (Composition API + `<script setup>`)
+- **语言**: TypeScript 5.6
+- **构建工具**: Vite 6.0
+- **路由**: Vue Router 4.6
+- **状态管理**: Pinia 3.0 + 持久化插件
+- **UI样式**: 原生CSS + CSS变量
+
+### 后端技术
+- **框架**: Tauri 2.0
+- **语言**: Rust 2021 Edition
+- **数据库**: SQLite (rusqlite)
+- **异步运行时**: Tokio
+
+### 主要依赖
+
+#### Rust依赖
+- `serde` / `serde_json` - JSON序列化
+- `tokio` - 异步运行时
+- `rusqlite` - SQLite数据库
+- `reqwest` - HTTP客户端
+- `image` - 图片处理
+- `lopdf` / `pdf` - PDF处理
+- `regex` - 正则表达式
+- `aes` / `rsa` / `sha2` - 加密算法
+- `libsm` - 国密算法
+- `uuid` - UUID生成
+- `chrono` - 时间处理
+- `csv` - CSV处理
+- `mysql` / `postgres` - 数据库驱动
+
+#### 前端依赖
+- `@tauri-apps/api` - Tauri API
+- `@tauri-apps/plugin-opener` - 打开链接插件
+- `pinia` - 状态管理
+- `vue-router` - 路由管理
+
+---
+
+## 📁 项目结构
+
+```
+tbox/
+├── src/                          # 前端源代码
+│   ├── components/               # Vue组件
+│   │   ├── CodeEditor.vue       # 代码编辑器
+│   │   ├── JsonViewer.vue       # JSON查看器
+│   │   ├── Toast.vue            # 提示组件
+│   │   └── ...
+│   ├── layout/                   # 布局组件
+│   │   ├── Header.vue           # 头部
+│   │   ├── SideBar.vue          # 侧边栏
+│   │   └── Footer.vue           # 页脚
+│   ├── router/                   # 路由配置
+│   │   └── main.ts              # 路由定义
+│   ├── stores/                   # Pinia状态管理
+│   │   └── tools.ts             # 工具状态
+│   ├── types/                    # TypeScript类型定义
+│   │   └── tools.ts             # 工具类型
+│   ├── utils/                    # 工具函数
+│   │   └── toast.ts             # 提示工具
+│   ├── views/                    # 页面组件
+│   │   ├── HomePage.vue         # 主页
+│   │   └── tools/               # 工具页面
+│   │       ├── JsonDiff.vue     # JSON对比
+│   │       ├── JwtTool.vue      # JWT工具
+│   │       └── ...
+│   ├── App.vue                   # 根组件
+│   └── main.ts                   # 入口文件
+├── src-tauri/                    # Tauri后端代码
+│   ├── src/
+│   │   ├── commands/            # Tauri命令
+│   │   │   ├── mod.rs          # 模块声明
+│   │   │   ├── tool.rs         # 工具管理API
+│   │   │   ├── json.rs         # JSON处理API
+│   │   │   ├── image.rs        # 图片处理API
+│   │   │   ├── pdf.rs          # PDF处理API
+│   │   │   ├── code.rs         # 代码处理API
+│   │   │   └── ...
+│   │   ├── main.rs              # Rust入口
+│   │   └── lib.rs               # 库入口
+│   ├── Cargo.toml               # Rust依赖配置
+│   ├── tauri.conf.json          # Tauri配置
+│   └── capabilities/            # 权限配置
+├── public/                       # 静态资源
+├── package.json                  # 前端依赖配置
+├── tsconfig.json                 # TypeScript配置
+├── vite.config.ts                # Vite配置
+└── README.md                     # 项目说明
+```
+
+---
+
+## 🔧 开发指南
+
+### 添加新工具
+
+#### 1. 后端实现
+
+在 `src-tauri/src/commands/` 创建新的命令模块：
+
+```rust
+// src-tauri/src/commands/new_tool.rs
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct NewToolResult {
+    result: String,
+}
+
+#[tauri::command]
+pub fn new_tool_function(input: String) -> Result<NewToolResult, String> {
+    // 实现工具逻辑
+    Ok(NewToolResult {
+        result: "处理结果".to_string()
+    })
+}
+```
+
+在 `src-tauri/src/commands/mod.rs` 中注册模块：
+
+```rust
+pub mod new_tool;
+```
+
+在 `src-tauri/src/main.rs` 中注册命令：
+
+```rust
+.invoke_handler(tauri::generate_handler![
+    // ...其他命令
+    commands::new_tool::new_tool_function,
+])
+```
+
+#### 2. 前端实现
+
+创建工具页面组件 `src/views/tools/NewTool.vue`：
+
+```vue
+<template>
+  <div class="tool-container">
+    <div class="tool-header">
+      <h1>新工具名称</h1>
+      <p>工具描述</p>
+    </div>
+    <!-- 工具界面 -->
+  </div>
+</template>
+
+<script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core';
+
+const callTool = async () => {
+  const result = await invoke('new_tool_function', {
+    input: '参数'
+  });
+  console.log(result);
+};
+</script>
+```
+
+在 `src/router/main.ts` 中添加路由：
+
+```typescript
+{ path: '/new-tool', component: () => import('@/views/tools/NewTool.vue') }
+```
+
+#### 3. 数据库注册
+
+在 `src-tauri/src/commands/tool.rs` 的 `add_missing_tools` 函数中添加工具信息：
+
+```rust
+let new_tools = vec![
+    // ...其他工具
+    (34, "新工具名称", "工具描述", "fas fa-icon", "gradient", category_id, vec![tag_ids]),
+];
+```
+
+---
+
+## 🎨 设计理念
+
+### UI/UX特点
+- **简洁现代** - 扁平化设计，清爽的界面
+- **响应式布局** - 适配不同屏幕尺寸
+- **主题系统** - CSS变量支持主题定制
+- **渐变配色** - 每个工具独特的渐变色标识
+- **图标系统** - Font Awesome图标，直观易识别
+
+### 架构特点
+- **模块化设计** - 工具相互独立，易于扩展
+- **类型安全** - TypeScript + Rust双重类型保障
+- **性能优化** - Tauri提供接近原生应用的性能
+- **跨平台** - 支持Windows、macOS、Linux
+- **数据持久化** - SQLite存储工具配置和记录
+
+---
+
+## 📸 界面预览
+
+> 主页 - 展示所有工具分类和工具卡片
+
+> 工具页面 - JSON对比工具界面，支持高亮显示差异
+
+---
+
+## 🤝 贡献指南
+
+欢迎贡献代码、报告问题或提出新功能建议！
+
+### 贡献流程
+1. Fork本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启Pull Request
+
+### 代码规范
+- 遵循ESLint和PustClippy的代码规范
+- 提交前运行 `pnpm lint` 和 `cargo clippy`
+- 为新功能添加测试
+- 更新相关文档
+
+---
+
+## 📝 待办事项
+
+- [ ] 完善所有工具的后端实现
+- [ ] 添加单元测试和集成测试
+- [ ] 支持主题切换（深色/浅色模式）
+- [ ] 添加工具收藏功能
+- [ ] 支持快捷键
+- [ ] 添加使用历史记录
+- [ ] 国际化支持（i18n）
+- [ ] 插件系统
+- [ ] 云同步功能
+
+---
+
+## ❓ 常见问题
+
+### Q: Tauri是什么？
+A: Tauri是一个使用Rust作为后端、Web技术作为前端的跨平台桌面应用框架，比Electron更轻量、更安全。
+
+### Q: 如何切换到深色模式？
+A: 深色模式功能正在开发中，敬请期待。
+
+### Q: 添加的工具会保存在哪里？
+A: 工具信息和配置保存在本地SQLite数据库中，位于系统用户数据目录。
+
+### Q: 支持哪些操作系统？
+A: 目前支持Windows、macOS和Linux三大主流桌面操作系统。
+
+---
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+---
+
+## 🙏 致谢
+
+- [Tauri](https://tauri.app/) - 强大的跨平台桌面应用框架
+- [Vue.js](https://vuejs.org/) - 渐进式JavaScript框架
+- [Rust](https://www.rust-lang.org/) - 安全、高效的系统编程语言
+- [Font Awesome](https://fontawesome.com/) - 优秀的图标库
+
+---
+
+## 📮 联系方式
+
+- 作者：2lovecode
+- 邮箱：tanklh@outlook.com
+- 项目主页：[https://github.com/2lovecode/tbox](https://github.com/2lovecode/tbox)
+- 问题反馈：[Issues](https://github.com/2lovecode/tbox/issues)
+
+---
+
+<div align="center">
+
+**如果这个项目对你有帮助，请给一个 ⭐️ Star支持一下！**
+
+Made with ❤️ by Tauri + Vue + TypeScript
+
+</div>
