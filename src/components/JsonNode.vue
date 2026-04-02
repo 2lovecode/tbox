@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { inject, computed, ref } from 'vue'
+import { inject, computed } from 'vue'
 import type { Ref } from 'vue'
 
 interface JsonNode {

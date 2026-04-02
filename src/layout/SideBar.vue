@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { Category } from '@/types/tools';
-import { ref } from 'vue';
 import { useToolStore } from '@/stores/tools';
 import { useRouter } from 'vue-router';
 

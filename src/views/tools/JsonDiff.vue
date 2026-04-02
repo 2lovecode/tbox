@@ -162,14 +162,12 @@ function highlightJson(jsonStr: string, side: 'left' | 'right'): string {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const indent = line.search(/\S/);
     const trimmed = line.trim();
 
     // 计算当前行的路径
     const path = getPathForLine(lines, i);
 
     let className = '';
-    let status = '';
 
     if (side === 'left') {
       if (removedPaths.has(path)) {

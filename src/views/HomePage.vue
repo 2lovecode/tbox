@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Tool } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 
 const store = useToolStore();

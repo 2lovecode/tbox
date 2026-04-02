@@ -150,7 +150,7 @@ const generateJwt = async () => {
   }
 
   try {
-    const token = await invoke('generate_jwt', {
+    const token = await invoke<string>('generate_jwt', {
       payload: jwtPayload.value,
       secret: jwtSecret.value
     });

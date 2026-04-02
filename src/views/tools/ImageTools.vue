@@ -125,12 +125,12 @@ const tabs = [
 ];
 
 const fileInput = ref<HTMLInputElement | null>(null);
-const selectedFile = ref<File | null>(null);
+const selectedFile = ref<(File & { path?: string }) | null>(null);
 const base64Output = ref('');
 const base64Input = ref('');
 const savePath = ref('');
 const saveResult = ref('');
-const infoFile = ref<File | null>(null);
+const infoFile = ref<(File & { path?: string }) | null>(null);
 const imageInfo = ref<any>(null);
 
 const onFileSelect = (event: Event) => {
@@ -152,7 +152,7 @@ const imageToBase64 = async () => {
 
   try {
     const result = await invoke<string>('image_to_base64', {
-      input_path: selectedFile.value.path || (selectedFile.value as any).webkitRelativePath || selectedFile.value.name
+      input_path: selectedFile.value.path || selectedFile.value.webkitRelativePath || selectedFile.value.name
     });
     base64Output.value = result;
     if ((window as any).$toast) {
@@ -194,7 +194,7 @@ const getImageInfo = async () => {
 
   try {
     const result = await invoke('get_detailed_image_info', {
-      inputPath: infoFile.value.path || (infoFile.value as any).webkitRelativePath || infoFile.value.name
+      inputPath: infoFile.value.path || infoFile.value.webkitRelativePath || infoFile.value.name
     });
     imageInfo.value = result;
   } catch (e) {

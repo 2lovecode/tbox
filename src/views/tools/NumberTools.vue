@@ -103,7 +103,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue';
+import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const currentTab = ref('base');
@@ -216,7 +216,7 @@ async function convertToRoman() {
 async function convertFromRoman() {
   try {
     error.value = '';
-    const num = await invoke('from_roman', { roman: romanInput.value });
+    const num = await invoke<string>('from_roman', { roman: romanInput.value });
     result.value = num.toString();
   } catch (e: any) {
     error.value = e.toString();

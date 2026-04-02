@@ -173,7 +173,7 @@ async function convertRgbToHex() {
 async function convertHexToRgb() {
   try {
     error.value = '';
-    const rgb = await invoke('hex_to_rgb', { hex: hexInput.value });
+    const rgb = await invoke<[number, number, number]>('hex_to_rgb', { hex: hexInput.value });
     result.value = `R: ${rgb[0]}, G: ${rgb[1]}, B: ${rgb[2]}`;
   } catch (e: any) {
     error.value = e.toString();
@@ -184,7 +184,7 @@ async function convertHexToRgb() {
 async function convertRgbToHsl() {
   try {
     error.value = '';
-    const hsl = await invoke('rgb_to_hsl', {
+    const hsl = await invoke<[number, number, number]>('rgb_to_hsl', {
       r: rgb.value.r,
       g: rgb.value.g,
       b: rgb.value.b
@@ -199,7 +199,7 @@ async function convertRgbToHsl() {
 async function convertRgbToHsv() {
   try {
     error.value = '';
-    const hsv = await invoke('rgb_to_hsv', {
+    const hsv = await invoke<[number, number, number]>('rgb_to_hsv', {
       r: rgb.value.r,
       g: rgb.value.g,
       b: rgb.value.b

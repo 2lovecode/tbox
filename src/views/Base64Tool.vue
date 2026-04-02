@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { toast } from '@/utils/toast'
@@ -8,14 +8,6 @@ const mode = ref<'encode' | 'decode'>('encode')
 const input = ref('')
 const output = ref('')
 const isProcessing = ref(false)
-
-const isValidBase64 = (str: string): boolean => {
-  try {
-    return btoa(atob(str)) === str
-  } catch {
-    return false
-  }
-}
 
 const encode = () => {
   if (!input.value) {

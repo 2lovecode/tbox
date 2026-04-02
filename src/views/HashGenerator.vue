@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
 import { toast } from '@/utils/toast'

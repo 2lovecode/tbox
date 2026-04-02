@@ -123,7 +123,7 @@
             <div class="section-title">日志级别统计</div>
             <div class="level-stats">
               <div class="level-item" v-for="(count, level) in levelResult.levels" :key="level">
-                <span class="level-name" :class="'level-' + level.toLowerCase()">{{ level }}</span>
+                <span class="level-name" :class="'level-' + String(level).toLowerCase()">{{ level }}</span>
                 <span class="level-count">{{ count }}</span>
               </div>
             </div>
