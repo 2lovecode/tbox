@@ -191,6 +191,91 @@ fn analyze_json_value(value: &Value, current_depth: usize) -> (usize, usize, std
     (max_depth, key_count, value_types)
 }
 
+// ==================== JSON转Query参数功能 ====================
+
+#[derive(Serialize)]
+pub struct JsonToQueryResult {
+    query_string: String,
+    encoded: String,
+}
+
+/// 将JSON对象转换为URL Query参数
+#[tauri::command]
+pub fn json_to_query_params(json_str: String) -> Result<JsonToQueryResult, String> {
+    let value: Value = serde_json::from_str(&json_str)
+        .map_err(|e| format!("JSON解析错误: {}", e))?;
+
+    let mut pairs = Vec::new();
+    flatten_json_value(&value, String::new(), &mut pairs);
+
+    let query_string = pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", k, v))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    let encoded = pairs
+        .iter()
+        .map(|(k, v)| format!("{}={}", urlencoding_encode(k), urlencoding_encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    Ok(JsonToQueryResult {
+        query_string,
+        encoded,
+    })
+}
+
+fn flatten_json_value(value: &Value, prefix: String, pairs: &mut Vec<(String, String)>) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map {
+                let new_key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{}[{}]", prefix, k)
+                };
+                flatten_json_value(v, new_key, pairs);
+            }
+        }
+        Value::Array(arr) => {
+            for (i, v) in arr.iter().enumerate() {
+                let new_key = format!("{}[{}]", prefix, i);
+                flatten_json_value(v, new_key, pairs);
+            }
+        }
+        Value::String(s) => {
+            pairs.push((prefix, s.clone()));
+        }
+        Value::Number(n) => {
+            pairs.push((prefix, n.to_string()));
+        }
+        Value::Bool(b) => {
+            pairs.push((prefix, b.to_string()));
+        }
+        Value::Null => {
+            pairs.push((prefix, String::new()));
+        }
+    }
+}
+
+fn urlencoding_encode(s: &str) -> String {
+    let mut result = String::new();
+    for c in s.chars() {
+        match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => {
+                result.push(c);
+            }
+            _ => {
+                for b in c.to_string().as_bytes() {
+                    result.push_str(&format!("%{:02X}", b));
+                }
+            }
+        }
+    }
+    result
+}
+
 // ==================== JSON对比功能 ====================
 
 #[derive(Serialize)]

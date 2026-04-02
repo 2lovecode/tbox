@@ -99,7 +99,8 @@ const routerMap: Record<number, string> = {
   30: 'uuid-tools',
   31: 'cron-tools',
   32: 'number-tools',
-  33: 'charset-tools'
+  33: 'charset-tools',
+  34: 'json-to-query'
 }
 
 const openTool = (tool: Tool) => {

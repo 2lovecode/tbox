@@ -43,6 +43,7 @@ fn main() {
             commands::json::validate_json,
             commands::json::get_json_info,
             commands::json::compare_json,
+            commands::json::json_to_query_params,
 
             // TODO: 数据转换工具 (module not implemented yet)
             // commands::data_convert::json_to_java,

@@ -180,6 +180,7 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (31, "Cron工具", "Cron表达式构建、验证和自然语言解释。", "fas fa-calendar-check", "linear-gradient(135deg, #2ec4b6, #06ffa5)"),
         (32, "数字工具", "进制转换（十进制、十六进制、二进制、八进制），科学计数法，罗马数字。", "fas fa-calculator", "linear-gradient(135deg, #ff9e00, #ff5400)"),
         (33, "字符编码工具", "编码检测，UTF-8/GBK转换，URL编解码，HTML实体，Punycode。", "fas fa-language", "linear-gradient(135deg, #4895ef, #00bbf9)"),
+        (34, "JSON转Query参数", "将POST的JSON对象转换为GET请求的URL查询参数。", "fas fa-link", "linear-gradient(135deg, #06ffa5, #00d4ff)"),
     ];
 
     let tool_tags = vec![
@@ -229,6 +230,7 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (31, 11), (31, 12),  // Cron工具 - 开发工具 + 编程
         (32, 11), (32, 12),  // 数字工具 - 开发工具 + 编程
         (33, 4), (33, 16),   // 字符编码工具 - 转换 + 编码
+        (34, 4), (34, 16),   // JSON转Query参数 - 转换 + 编码
     ];
 
     let tool_categories = vec![
@@ -268,6 +270,7 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (31, 5), // Cron工具属于开发工具
         (32, 5), // 数字工具属于开发工具
         (33, 5), // 字符编码工具属于开发工具
+        (34, 5), // JSON转Query参数属于开发工具
     ];
     for (id, name, description, sort) in categories {
         conn.execute(
@@ -473,6 +476,7 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
         (31, "Cron工具", "Cron表达式构建、验证和自然语言解释。", "fas fa-calendar-check", "linear-gradient(135deg, #2ec4b6, #06ffa5)", 5, vec![11, 12]),
         (32, "数字工具", "进制转换（十进制、十六进制、二进制、八进制），科学计数法，罗马数字。", "fas fa-calculator", "linear-gradient(135deg, #ff9e00, #ff5400)", 5, vec![11, 12]),
         (33, "字符编码工具", "编码检测，UTF-8/GBK转换，URL编解码，HTML实体，Punycode。", "fas fa-language", "linear-gradient(135deg, #4895ef, #00bbf9)", 5, vec![4, 16]),
+        (34, "JSON转Query参数", "将POST的JSON对象转换为GET请求的URL查询参数。", "fas fa-link", "linear-gradient(135deg, #06ffa5, #00d4ff)", 5, vec![4, 16]),
     ];
 
     for (id, name, description, icon, gradient, category_id, tag_ids) in new_tools {
