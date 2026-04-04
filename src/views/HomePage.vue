@@ -106,7 +106,12 @@ const routerMap: Record<number, string> = {
 const openTool = (tool: Tool) => {
   const toolRoute = routerMap[tool.id];
   if (toolRoute) {
+    isNavigating.value = true;
     router.push({ path: `/${toolRoute}` });
+    // 重置导航状态
+    setTimeout(() => {
+      isNavigating.value = false;
+    }, 500);
   } else {
     if ((window as any).$toast) {
       (window as any).$toast(`工具 "${tool.name}" 的路由尚未配置`, 'warning');
@@ -132,6 +137,9 @@ watch(() => route.query.search, (newVal) => {
 // 监听本地搜索变化，同步到 URL（带防抖）
 let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 watch(searchQuery, (newVal) => {
+  // 如果正在导航中，不重复触发
+  if (isNavigating.value) return;
+
   if (searchTimeout) clearTimeout(searchTimeout);
 
   searchTimeout = setTimeout(() => {
@@ -142,6 +150,9 @@ watch(searchQuery, (newVal) => {
     }
   }, 300);
 });
+
+// 标记是否正在导航，防止搜索watch干扰导航
+const isNavigating = ref(false);
 
 </script>
 <template>
@@ -179,7 +190,7 @@ watch(searchQuery, (newVal) => {
                 :key="tool.id"
                 class="tool-card"
                 :class="{ 'hovered': hoveredToolId === tool.id }"
-                @click="openTool(tool)"
+                @click.stop="openTool(tool)"
                 @mouseenter="setHoveredTool(tool.id)"
                 @mouseleave="setHoveredTool(null)"
             >
@@ -297,6 +308,11 @@ watch(searchQuery, (newVal) => {
     cursor: pointer;
     position: relative;
     transform-style: preserve-3d;
+    pointer-events: auto;
+  }
+
+  .tool-card * {
+    pointer-events: auto;
   }
 
   .tool-card::before {

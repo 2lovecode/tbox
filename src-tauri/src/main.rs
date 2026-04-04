@@ -22,6 +22,11 @@ fn main() {
             commands::file_ops::get_file_size,
             commands::file_ops::file_exists,
 
+            // 屏幕标尺
+            commands::screen::get_window_info,
+            commands::screen::get_global_mouse_position,
+            commands::screen::calculate_global_position,
+
             // 图片处理
             commands::image::compress_image,
             commands::image::get_image_info,
@@ -65,21 +70,23 @@ fn main() {
             // commands::crypto::md5_hash,
             // commands::crypto::sha1_hash,
 
-            // TODO: 编码工具 (module not implemented yet)
-            // commands::encoding::url_encode,
-            // commands::encoding::url_decode,
-            // commands::encoding::unicode_to_chinese,
-            // commands::encoding::chinese_to_unicode,
-            // commands::encoding::html_encode,
-            // commands::encoding::html_decode,
-            // commands::encoding::base58_encode,
-            // commands::encoding::base58_decode,
-            // commands::encoding::base62_encode,
-            // commands::encoding::base62_decode,
-            // commands::encoding::hex_to_string,
-            // commands::encoding::string_to_hex,
-            // commands::encoding::binary_to_hex,
-            // commands::encoding::hex_to_binary,
+            // 编码工具
+            commands::encoding::url_encode,
+            commands::encoding::url_decode,
+            commands::encoding::unicode_to_chinese,
+            commands::encoding::chinese_to_unicode,
+            commands::encoding::html_encode,
+            commands::encoding::html_decode,
+            commands::encoding::base58_encode,
+            commands::encoding::base58_decode,
+            commands::encoding::base62_encode,
+            commands::encoding::base62_decode,
+            commands::encoding::hex_to_string,
+            commands::encoding::string_to_hex,
+            commands::encoding::punycode_encode,
+            commands::encoding::punycode_decode,
+            commands::encoding::binary_to_hex,
+            commands::encoding::hex_to_binary,
 
             // TODO: 文本工具 (module not implemented yet)
             // commands::text_utils::regex_test,

@@ -5,12 +5,13 @@ pub mod pdf;
 pub mod code;
 pub mod file_ops;
 pub mod json;
+pub mod encoding;
+pub mod screen;
 
 // 新增模块 (TODO: uncomment as modules are implemented)
 // pub mod data_convert;
 // pub mod json_diff;
 // pub mod crypto;
-// pub mod encoding;
 // pub mod text_utils;
 // pub mod datetime;
 // pub mod network;
