@@ -4,11 +4,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
+import { useRoleStore } from "@/stores/role";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
+import RoleSelection from "@/components/onboarding/RoleSelection.vue";
 import { useTheme } from "@/composables/useTheme";
 
 const store  = useToolStore()
+const roleStore = useRoleStore()
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
@@ -20,6 +23,9 @@ const isLoading = ref(true);
 // 加载categories
 // 加载tools
 onMounted(async () => {
+  // 初始化角色状态
+  await roleStore.initialize();
+
   isLoading.value = true;
   try {
     const [categoriesRes, toolsRes] = await Promise.all([
@@ -192,8 +198,8 @@ const showSidebar = computed(() => route.path === '/')
     max-width: 1400px;
     margin: 0 auto;
     display: grid;
-    grid-template-columns: 260px 1fr;
-    gap: 25px;
+    grid-template-columns: 210px 1fr;
+    gap: 20px;
   }
 
   .container.no-sidebar {

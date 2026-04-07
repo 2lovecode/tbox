@@ -36,6 +36,8 @@ import CronTools from '@/views/tools/CronTools.vue'
 import NumberTools from '@/views/tools/NumberTools.vue'
 import CharsetTools from '@/views/tools/CharsetTools.vue'
 import JsonToQuery from '@/views/tools/JsonToQuery.vue'
+import CoordinateTools from '@/views/tools/CoordinateTools.vue'
+import CoordinateVisualizer from '@/views/tools/CoordinateVisualizer.vue'
 
 const routes = [
   { path: '/', component: HomePage },
@@ -74,7 +76,9 @@ const routes = [
   { path: '/cron-tools', component: CronTools },
   { path: '/number-tools', component: NumberTools },
   { path: '/charset-tools', component: CharsetTools },
-  { path: '/json-to-query', component: JsonToQuery }
+  { path: '/json-to-query', component: JsonToQuery },
+  { path: '/coordinate-tools', component: CoordinateTools },
+  { path: '/coordinate-visualizer', component: CoordinateVisualizer }
 ]
 
 export const router = createRouter({

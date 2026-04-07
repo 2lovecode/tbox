@@ -3,38 +3,30 @@ use rusqlite::{params, Connection, Result};
 use crate::utils2::get_db_path;
 
 // 新增：工具分类结构体
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ToolCategory {
-    id: u32,
-    name: String,
+    pub id: u32,
+    pub name: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct Tool {
-    id: u32,
-    name: String,
-    description: String,
-    icon: String,
-    category: Option<ToolCategory>,
-    tags: Vec<String>,
-    gradient: String,
+    pub id: u32,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub category: Option<ToolCategory>,
+    pub tags: Vec<String>,
+    pub gradient: String,
 }
 
 #[derive(Serialize)]
 pub struct Category {
-    id: u32,
-    name: String,
-    description: String,
-    order: u32,
-    count: u32,
-}
-
-#[derive(Serialize)]
-pub struct Tag {
-    id: u32,
-    name: String,
-    description: String,
-    count: u32,
+    pub id: u32,
+    pub name: String,
+    pub description: String,
+    pub order: u32,
+    pub count: u32,
 }
 
 pub fn init_db_if_needed() -> Result<()> {
@@ -113,6 +105,31 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         )",
         [],
     )?;
+
+    // 新增：创建 roles 表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS roles (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL UNIQUE,
+            display_name TEXT NOT NULL,
+            description TEXT NOT NULL,
+            icon TEXT NOT NULL,
+            is_system BOOLEAN DEFAULT 1
+        )",
+        [],
+    )?;
+
+    // 新增：创建 tool_roles 关联表
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS tool_roles (
+            tool_id INTEGER NOT NULL,
+            role_id INTEGER NOT NULL,
+            FOREIGN KEY (tool_id) REFERENCES tools(id),
+            FOREIGN KEY (role_id) REFERENCES roles(id),
+            PRIMARY KEY (tool_id, role_id)
+        )",
+        [],
+    )?;
     let categories = vec![
         (1, "图片处理", "图片处理工具", 1),
         (2, "视频处理", "视频处理工具", 2),
@@ -181,6 +198,9 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (32, "数字工具", "进制转换（十进制、十六进制、二进制、八进制），科学计数法，罗马数字。", "fas fa-calculator", "linear-gradient(135deg, #ff9e00, #ff5400)"),
         (33, "字符编码工具", "编码检测，UTF-8/GBK转换，URL编解码，HTML实体，Punycode。", "fas fa-language", "linear-gradient(135deg, #4895ef, #00bbf9)"),
         (34, "JSON转Query参数", "将POST的JSON对象转换为GET请求的URL查询参数。", "fas fa-link", "linear-gradient(135deg, #06ffa5, #00d4ff)"),
+        // 2026-04-04 新增工具
+        (35, "坐标距离计算", "计算经纬度之间的距离，支持WGS84、GCJ02、BD09坐标系统，以及多种距离计算方法。", "fas fa-globe", "linear-gradient(135deg, #4361ee, #4cc9f0)"),
+        (36, "坐标可视化", "在地图上标注多个坐标点，支持批量粘贴坐标并展示。", "fas fa-map-marked-alt", "linear-gradient(135deg, #f72585, #7209b7)"),
     ];
 
     let tool_tags = vec![
@@ -231,6 +251,9 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (32, 11), (32, 12),  // 数字工具 - 开发工具 + 编程
         (33, 4), (33, 16),   // 字符编码工具 - 转换 + 编码
         (34, 4), (34, 16),   // JSON转Query参数 - 转换 + 编码
+        // 2026-04-04 新增工具的tags
+        (35, 10), (35, 11),   // 坐标距离计算 - 测量 + 开发工具
+        (36, 10), (36, 11),   // 坐标可视化 - 测量 + 开发工具
     ];
 
     let tool_categories = vec![
@@ -271,6 +294,9 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (32, 5), // 数字工具属于开发工具
         (33, 5), // 字符编码工具属于开发工具
         (34, 5), // JSON转Query参数属于开发工具
+        // 2026-04-04 新增工具的categories
+        (35, 5), // 坐标距离计算属于开发工具
+        (36, 5), // 坐标可视化属于开发工具
     ];
     for (id, name, description, sort) in categories {
         conn.execute(
@@ -324,6 +350,43 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // 新增：角色数据初始化
+    let roles = vec![
+        (1, "personal", "个人开发者", "适合独立开发者和小团队项目", "fas fa-user"),
+        (2, "team", "团队", "适合开发团队协作", "fas fa-users"),
+        (3, "enterprise", "企业", "适合企业和政企单位", "fas fa-building"),
+    ];
+
+    // 新增：工具-角色关联数据
+    let tool_roles = vec![
+        // 个人开发者 (role_id=1) - 18工具
+        (1, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1),
+        (14, 1), (15, 1), (16, 1), (18, 1), (19, 1), (28, 1),
+        (29, 1), (30, 1), (31, 1), (32, 1), (33, 1), (34, 1),
+        // 团队 (role_id=2) - 12工具
+        (1, 2), (4, 2), (9, 2), (10, 2), (14, 2), (15, 2),
+        (16, 2), (18, 2), (19, 2), (22, 2), (29, 2), (30, 2),
+        // 企业 (role_id=3) - 6工具
+        (4, 3), (9, 3), (10, 3), (22, 3), (23, 3), (29, 3),
+    ];
+
+    // 插入角色数据
+    for (id, name, display_name, description, icon) in roles {
+        conn.execute(
+            "INSERT INTO roles (id, name, display_name, description, icon)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![id, name, display_name, description, icon],
+        )?;
+    }
+
+    // 插入工具-角色关联数据
+    for (tool_id, role_id) in tool_roles {
+        conn.execute(
+            "INSERT INTO tool_roles (tool_id, role_id) VALUES (?1, ?2)",
+            params![tool_id, role_id],
+        )?;
+    }
+
     Ok(())
 }
 
@@ -333,6 +396,7 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
     let required_tags = vec![
         (16, "编码", "编码"),
         (17, "哈希", "哈希"),
+        (10, "测量", "测量"),
     ];
 
     for (id, name, description) in required_tags {
@@ -477,6 +541,9 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
         (32, "数字工具", "进制转换（十进制、十六进制、二进制、八进制），科学计数法，罗马数字。", "fas fa-calculator", "linear-gradient(135deg, #ff9e00, #ff5400)", 5, vec![11, 12]),
         (33, "字符编码工具", "编码检测，UTF-8/GBK转换，URL编解码，HTML实体，Punycode。", "fas fa-language", "linear-gradient(135deg, #4895ef, #00bbf9)", 5, vec![4, 16]),
         (34, "JSON转Query参数", "将POST的JSON对象转换为GET请求的URL查询参数。", "fas fa-link", "linear-gradient(135deg, #06ffa5, #00d4ff)", 5, vec![4, 16]),
+        // 2026-04-04 新增工具
+        (35, "坐标距离计算", "计算经纬度之间的距离，支持WGS84、GCJ02、BD09坐标系统，以及多种距离计算方法。", "fas fa-globe", "linear-gradient(135deg, #4361ee, #4cc9f0)", 5, vec![10, 11]),
+        (36, "坐标可视化", "在地图上标注多个坐标点，支持批量粘贴坐标并展示。", "fas fa-map-marked-alt", "linear-gradient(135deg, #f72585, #7209b7)", 5, vec![10, 11]),
     ];
 
     for (id, name, description, icon, gradient, category_id, tag_ids) in new_tools {
@@ -504,6 +571,74 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
                     params![id, tag_id],
                 )?;
             }
+        }
+    }
+
+    // 新增：检查并迁移角色表（用于已有数据库的用户）
+    let mut check_roles = conn.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='roles'")?;
+    let roles_exist = check_roles.exists([])?;
+
+    if !roles_exist {
+        // 创建 roles 表
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS roles (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                display_name TEXT NOT NULL,
+                description TEXT NOT NULL,
+                icon TEXT NOT NULL,
+                is_system BOOLEAN DEFAULT 1
+            )",
+            [],
+        )?;
+
+        // 创建 tool_roles 关联表
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS tool_roles (
+                tool_id INTEGER NOT NULL,
+                role_id INTEGER NOT NULL,
+                FOREIGN KEY (tool_id) REFERENCES tools(id),
+                FOREIGN KEY (role_id) REFERENCES roles(id),
+                PRIMARY KEY (tool_id, role_id)
+            )",
+            [],
+        )?;
+
+        // 插入角色数据
+        let roles = vec![
+            (1, "personal", "个人开发者", "适合独立开发者和小团队项目", "fas fa-user"),
+            (2, "team", "团队", "适合开发团队协作", "fas fa-users"),
+            (3, "enterprise", "企业", "适合企业和政企单位", "fas fa-building"),
+        ];
+
+        // 工具-角色关联数据
+        let tool_roles = vec![
+            // 个人开发者 (role_id=1) - 18工具
+            (1, 1), (9, 1), (10, 1), (11, 1), (12, 1), (13, 1),
+            (14, 1), (15, 1), (16, 1), (18, 1), (19, 1), (28, 1),
+            (29, 1), (30, 1), (31, 1), (32, 1), (33, 1), (34, 1),
+            // 团队 (role_id=2) - 12工具
+            (1, 2), (4, 2), (9, 2), (10, 2), (14, 2), (15, 2),
+            (16, 2), (18, 2), (19, 2), (22, 2), (29, 2), (30, 2),
+            // 企业 (role_id=3) - 6工具
+            (4, 3), (9, 3), (10, 3), (22, 3), (23, 3), (29, 3),
+        ];
+
+        // 插入角色数据
+        for (id, name, display_name, description, icon) in roles {
+            conn.execute(
+                "INSERT INTO roles (id, name, display_name, description, icon)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![id, name, display_name, description, icon],
+            )?;
+        }
+
+        // 插入工具-角色关联数据
+        for (tool_id, role_id) in tool_roles {
+            conn.execute(
+                "INSERT INTO tool_roles (tool_id, role_id) VALUES (?1, ?2)",
+                params![tool_id, role_id],
+            )?;
         }
     }
 

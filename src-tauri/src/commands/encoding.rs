@@ -1,4 +1,3 @@
-use serde::Serialize;
 
 // ==================== URL编码/解码 ====================
 
@@ -107,19 +106,22 @@ pub fn base58_encode(input: String) -> Result<String, String> {
     let leading_zeros = bytes.iter().take_while(|&&b| b == 0).count();
     let size = (bytes.len() - leading_zeros) * 138 / 100 + 1;
     let mut buffer = vec![0u8; size];
-    let mut high = buffer.len() - 1;
+    let high = buffer.len() - 1;
 
     // 处理每个字节
     for &byte in bytes {
         let mut carry = byte as i32;
         let mut i = high;
 
-        while i >= 0 {
+        loop {
             carry += 256 * buffer[i] as i32;
             buffer[i] = (carry % 58) as u8;
             carry /= 58;
 
             if carry == 0 && i == 0 && byte == 0 {
+                break;
+            }
+            if i == 0 {
                 break;
             }
             i -= 1;
@@ -128,7 +130,7 @@ pub fn base58_encode(input: String) -> Result<String, String> {
 
     // 找到非零部分的起始位置
     let mut result = String::new();
-    let mut start = buffer.iter().position(|&b| b != 0).unwrap_or(buffer.len());
+    let start = buffer.iter().position(|&b| b != 0).unwrap_or(buffer.len());
 
     // 添加前导的 '1'（对应前导零字节）
     for _ in 0..leading_zeros {
@@ -154,7 +156,7 @@ pub fn base58_decode(input: String) -> Result<String, String> {
     let leading_ones = bytes.iter().take_while(|&&b| b == b'1').count();
     let size = (bytes.len() - leading_ones) * 138 / 100 + 1;
     let mut buffer = vec![0u8; size];
-    let mut high = buffer.len() - 1;
+    let high = buffer.len() - 1;
 
     for &byte in bytes {
         let c = match byte {
@@ -170,12 +172,15 @@ pub fn base58_decode(input: String) -> Result<String, String> {
         let mut carry = c as i32;
         let mut i = high;
 
-        while i >= 0 {
+        loop {
             carry += 58 * buffer[i] as i32;
             buffer[i] = (carry % 256) as u8;
             carry /= 256;
 
             if carry == 0 && i == 0 && c == 0 {
+                break;
+            }
+            if i == 0 {
                 break;
             }
             i -= 1;
@@ -206,13 +211,13 @@ pub fn base62_encode(input: String) -> Result<String, String> {
     let leading_zeros = bytes.iter().take_while(|&&b| b == 0).count();
     let size = (bytes.len() - leading_zeros) * 146 / 100 + 1;
     let mut buffer = vec![0u8; size];
-    let mut high = buffer.len() - 1;
+    let high = buffer.len() - 1;
 
     for &byte in bytes {
         let mut carry = byte as i32;
         let mut i = high;
 
-        while i >= 0 {
+        loop {
             carry += 256 * buffer[i] as i32;
             buffer[i] = (carry % 62) as u8;
             carry /= 62;
@@ -220,12 +225,15 @@ pub fn base62_encode(input: String) -> Result<String, String> {
             if carry == 0 && i == 0 && byte == 0 {
                 break;
             }
+            if i == 0 {
+                break;
+            }
             i -= 1;
         }
     }
 
     let mut result = String::new();
-    let mut start = buffer.iter().position(|&b| b != 0).unwrap_or(buffer.len());
+    let start = buffer.iter().position(|&b| b != 0).unwrap_or(buffer.len());
 
     for _ in 0..leading_zeros {
         result.push('0');
@@ -248,7 +256,7 @@ pub fn base62_decode(input: String) -> Result<String, String> {
     let leading_zeros = bytes.iter().take_while(|&&b| b == b'0').count();
     let size = (bytes.len() - leading_zeros) * 146 / 100 + 1;
     let mut buffer = vec![0u8; size];
-    let mut high = buffer.len() - 1;
+    let high = buffer.len() - 1;
 
     for &byte in bytes {
         let c = match byte {
@@ -261,12 +269,15 @@ pub fn base62_decode(input: String) -> Result<String, String> {
         let mut carry = c as i32;
         let mut i = high;
 
-        while i >= 0 {
+        loop {
             carry += 62 * buffer[i] as i32;
             buffer[i] = (carry % 256) as u8;
             carry /= 256;
 
             if carry == 0 && i == 0 && c == 0 {
+                break;
+            }
+            if i == 0 {
                 break;
             }
             i -= 1;
@@ -324,12 +335,6 @@ pub fn hex_to_string(hex: String) -> Result<String, String> {
 }
 
 // ==================== HTML实体编解码 ====================
-
-#[derive(Serialize)]
-pub struct HtmlEncodeResult {
-    encoded: String,
-    decoded: String,
-}
 
 #[tauri::command]
 pub fn html_encode(input: String) -> Result<String, String> {

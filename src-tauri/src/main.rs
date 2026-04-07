@@ -9,12 +9,37 @@ fn main() {
         eprintln!("初始化数据库失败: {}", e);
     }
 
+    // 构建搜索索引
+    if let Ok(tools) = commands::tool::get_all_tools() {
+        let search_results: Vec<commands::search::SearchResult> = tools
+            .into_iter()
+            .map(|t| commands::search::SearchResult {
+                id: t.id,
+                name: t.name,
+                description: t.description,
+                icon: t.icon,
+                category_id: t.category.as_ref().map(|c| c.id),
+                category_name: t.category.as_ref().map(|c| c.name.clone()),
+                tags: t.tags,
+                gradient: t.gradient,
+            })
+            .collect();
+        commands::search::build_search_index(search_results);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             // 工具管理
             commands::tool::get_categories,
             commands::tool::get_all_tools,
+            // 角色管理
+            commands::role::get_roles,
+            commands::role::get_tools_by_role,
+            commands::role::set_user_role,
+            commands::role::get_user_role,
+            // 搜索
+            commands::search::search_tools,
 
             // 文件操作
             commands::file::download_file,

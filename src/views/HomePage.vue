@@ -3,6 +3,7 @@ import { Tool } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
 import { ref, computed, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { invoke } from '@tauri-apps/api/core';
 
 const store = useToolStore();
 const router = useRouter();
@@ -10,27 +11,38 @@ const route = useRoute();
 const searchQuery = ref('');
 const isLoading = ref(false);
 const hoveredToolId = ref<number | null>(null);
+const isCompactView = ref(false);
+const searchResults = ref<Tool[]>([]);
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
-  let result = store.tools;
+  let result = searchResults.value.length > 0 ? searchResults.value : store.tools;
   // 按分类过滤
   if (store.activeCategory && store.activeCategory.id !== 0) {
     result = result.filter(tool => tool.category?.id === store.activeCategory?.id);
   }
-
-  // 按搜索词过滤
-  if (searchQuery.value) {
-    const query = searchQuery.value.toLowerCase();
-    result = result.filter(tool =>
-      tool.name.toLowerCase().includes(query) ||
-      tool.description.toLowerCase().includes(query) ||
-      tool.tags.some(tag => tag.toLowerCase().includes(query))
-    );
-  }
-
   return result;
 });
+
+// 监听搜索查询变化，使用Rust后端搜索
+watch(searchQuery, async (newVal) => {
+  if (newVal.trim()) {
+    try {
+      const results = await invoke<Tool[]>('search_tools', { query: newVal });
+      searchResults.value = results;
+    } catch (error) {
+      console.error('Search failed:', error);
+      // 降级到前端过滤
+      searchResults.value = store.tools.filter(tool =>
+        tool.name.toLowerCase().includes(newVal.toLowerCase()) ||
+        tool.description.toLowerCase().includes(newVal.toLowerCase()) ||
+        tool.tags.some(tag => tag.toLowerCase().includes(newVal.toLowerCase()))
+      );
+    }
+  } else {
+    searchResults.value = [];
+  }
+}, { immediate: true });
 
 // 显示搜索结果状态
 const showSearchResults = computed(() => searchQuery.value.trim().length > 0);
@@ -100,7 +112,9 @@ const routerMap: Record<number, string> = {
   31: 'cron-tools',
   32: 'number-tools',
   33: 'charset-tools',
-  34: 'json-to-query'
+  34: 'json-to-query',
+  35: 'coordinate-tools',
+  36: 'coordinate-visualizer'
 }
 
 const openTool = (tool: Tool) => {
@@ -178,55 +192,52 @@ const isNavigating = ref(false);
               共 {{ filteredTools.length }} 个工具
             </div>
         </div>
-        
+
+        <!-- 工具网格视图 -->
         <TransitionGroup
             v-if="!isLoading && filteredTools.length > 0"
             name="tool-card"
             tag="div"
             class="tools-grid"
+            :class="{ 'compact-view': isCompactView }"
         >
             <div
                 v-for="tool in filteredTools"
                 :key="tool.id"
                 class="tool-card"
-                :class="{ 'hovered': hoveredToolId === tool.id }"
+                :class="{ 'hovered': hoveredToolId === tool.id, 'compact': isCompactView }"
                 @click.stop="openTool(tool)"
                 @mouseenter="setHoveredTool(tool.id)"
                 @mouseleave="setHoveredTool(null)"
             >
-                <div class="card-header" :style="`background: ${tool.gradient};`">
-                <i :class="tool.icon"></i>
+                <div class="card-icon" :style="`background: ${tool.gradient};`">
+                    <i :class="tool.icon"></i>
                 </div>
                 <div class="card-content">
-                <h3>{{ tool.name }}</h3>
-                <p>{{ tool.description }}</p>
-                <div class="tool-tags">
-                    <span class="tag" v-for="tag in tool.tags" :key="tag">{{ tag }}</span>
+                    <h3>{{ tool.name }}</h3>
+                    <p v-if="!isCompactView" class="card-desc">{{ tool.description }}</p>
+                    <div class="tool-tags" v-if="!isCompactView">
+                        <span class="tag" v-for="tag in tool.tags.slice(0, 2)" :key="tag">{{ tag }}</span>
+                    </div>
                 </div>
-                </div>
-                <div class="card-glow" :style="`background: ${tool.gradient};`"></div>
             </div>
         </TransitionGroup>
-        
+
         <div v-else-if="isLoading" class="loading-skeleton">
-          <div v-for="i in 6" :key="i" class="skeleton-card">
-            <div class="skeleton-header"></div>
+          <div v-for="i in 12" :key="i" class="skeleton-card" :class="{ compact: isCompactView }">
+            <div class="skeleton-icon"></div>
             <div class="skeleton-content">
               <div class="skeleton-line"></div>
               <div class="skeleton-line short"></div>
-              <div class="skeleton-tags">
-                <div class="skeleton-tag"></div>
-                <div class="skeleton-tag"></div>
-              </div>
             </div>
           </div>
         </div>
-            
+
         <div v-else class="empty-state">
           <div class="empty-icon">
             <i class="fas" :class="showSearchResults ? 'fa-search-minus' : 'fa-search'"></i>
           </div>
-          <h3>{{ showSearchResults ? '没有找到匹配的工具' : '没有找到匹配的工具' }}</h3>
+          <h3>没有找到匹配的工具</h3>
           <p>
             {{ showSearchResults
               ? `尝试使用其他关键词搜索，或浏览全部 ${store.tools.length} 个工具`
@@ -239,26 +250,48 @@ const isNavigating = ref(false);
           </button>
         </div>
 
-        <div class="section-header" v-if="!showSearchResults">
-            <h2 class="section-title">推荐工具</h2>
-        </div>
+        <!-- 视图切换和推荐工具 -->
+        <template v-if="!showSearchResults">
+            <div class="view-toggle">
+                <button
+                    class="toggle-btn"
+                    :class="{ active: !isCompactView }"
+                    @click="isCompactView = false"
+                    title="网格视图"
+                >
+                    <i class="fas fa-th-large"></i>
+                </button>
+                <button
+                    class="toggle-btn"
+                    :class="{ active: isCompactView }"
+                    @click="isCompactView = true"
+                    title="紧凑视图"
+                >
+                    <i class="fas fa-th"></i>
+                </button>
+            </div>
 
-        <div class="featured-tools" v-if="!showSearchResults">
-            <div
-            v-for="featured in featuredTools"
-            :key="featured.id"
-            class="featured-card"
-            >
-            <div class="featured-icon" :style="`background: ${featured.gradient};`">
-                <i :class="featured.icon"></i>
+            <div class="section-header featured-header" v-if="!showSearchResults">
+                <h2 class="section-title">推荐工具</h2>
             </div>
-            <div class="featured-content">
-                <h3>{{ featured.name }}</h3>
-                <p>{{ featured.description }}</p>
-                <button class="featured-btn" @click="openTool(featured)">立即使用</button>
+
+            <div class="featured-tools" v-if="!showSearchResults">
+                <div
+                v-for="featured in featuredTools"
+                :key="featured.id"
+                class="featured-card"
+                >
+                <div class="featured-icon" :style="`background: ${featured.gradient};`">
+                    <i :class="featured.icon"></i>
+                </div>
+                <div class="featured-content">
+                    <h3>{{ featured.name }}</h3>
+                    <p>{{ featured.description }}</p>
+                    <button class="featured-btn" @click="openTool(featured)">立即使用</button>
+                </div>
+                </div>
             </div>
-            </div>
-        </div>
+        </template>
     </main>
 </template>
 <style scoped> 
@@ -266,222 +299,257 @@ const isNavigating = ref(false);
   .main-content {
     display: flex;
     flex-direction: column;
-    gap: 25px;
+    gap: 20px;
     width: 100%;
     max-width: 100%;
   }
-  
+
   .section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
-  
+
   .section-title {
-    font-size: 24px;
+    font-size: 20px;
     font-weight: 700;
     color: var(--dark);
   }
-  
+
   .tool-count-badge {
     background: rgba(67, 97, 238, 0.1);
     color: var(--primary);
-    padding: 8px 16px;
+    padding: 6px 14px;
     border-radius: 20px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
   }
-  
+
+  /* 视图切换按钮 */
+  .view-toggle {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 5px;
+  }
+
+  .toggle-btn {
+    width: 36px;
+    height: 36px;
+    border: 1px solid #d9d9d9;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gray);
+    transition: all 0.2s;
+  }
+
+  .toggle-btn:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+  }
+
+  .toggle-btn.active {
+    background: var(--primary);
+    border-color: var(--primary);
+    color: white;
+  }
+
+  /* 工具网格 - 普通视图 */
   .tools-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
   }
-  
+
+  /* 工具网格 - 紧凑视图 */
+  .tools-grid.compact-view {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+  }
+
   /* 工具卡片样式 */
   .tool-card {
     background: white;
-    border-radius: var(--border-radius);
-    overflow: hidden;
-    box-shadow: var(--shadow);
-    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 12px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
-    position: relative;
-    transform-style: preserve-3d;
     pointer-events: auto;
+    overflow: hidden;
   }
 
   .tool-card * {
     pointer-events: auto;
   }
 
-  .tool-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: linear-gradient(135deg, rgba(67, 97, 238, 0.05), rgba(72, 149, 239, 0.05));
-    opacity: 0;
-    transition: var(--transition);
-    z-index: 1;
-    pointer-events: none;
-  }
-
-  .tool-card.hovered {
-    transform: translateY(-12px) scale(1.02);
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
-  }
-
-  .tool-card.hovered::before {
-    opacity: 1;
-  }
-
   .tool-card:hover {
-    transform: translateY(-8px) scale(1.02);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   }
 
-  .tool-card:hover::before {
-    opacity: 1;
-  }
-
-  .card-glow {
-    position: absolute;
-    top: -2px;
-    left: -2px;
-    right: -2px;
-    bottom: -2px;
-    border-radius: calc(var(--border-radius) + 2px);
-    opacity: 0;
-    transition: var(--transition);
-    z-index: -1;
-    filter: blur(10px);
-  }
-
-  .tool-card.hovered .card-glow {
-    opacity: 0.3;
-  }
-  
-  .tool-card-enter-active {
-    transition: all 0.4s ease;
-  }
-  
-  .tool-card-enter-from {
-    opacity: 0;
-    transform: translateY(20px) scale(0.9);
-  }
-  
-  .tool-card-move {
-    transition: transform 0.4s ease;
-  }
-  
-  .card-header {
-    height: 120px;
+  /* 普通视图的卡片样式 */
+  .tool-card .card-icon {
+    width: 100%;
+    height: 80px;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: linear-gradient(135deg, var(--primary), var(--accent));
   }
-  
-  .card-header i {
-    font-size: 48px;
+
+  .tool-card .card-icon i {
+    font-size: 32px;
     color: white;
   }
-  
-  .card-content {
-    padding: 20px;
+
+  .tool-card .card-content {
+    padding: 14px 16px 16px;
   }
-  
-  .card-content h3 {
-    font-size: 18px;
-    margin-bottom: 10px;
-    color: var(--dark);
-  }
-  
-  .card-content p {
-    color: var(--gray);
+
+  .tool-card .card-content h3 {
     font-size: 14px;
-    line-height: 1.6;
-    margin-bottom: 15px;
+    margin-bottom: 6px;
+    color: var(--dark);
+    font-weight: 600;
   }
-  
-  .tool-tags {
+
+  .tool-card .card-desc {
+    color: var(--gray);
+    font-size: 12px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+    flex: 1;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .tool-card .tool-tags {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
   }
-  
+
+  /* 紧凑视图的卡片样式 */
+  .tool-card.compact {
+    border-radius: 10px;
+  }
+
+  .tool-card.compact .card-icon {
+    height: 56px;
+  }
+
+  .tool-card.compact .card-icon i {
+    font-size: 24px;
+  }
+
+  .tool-card.compact .card-content {
+    padding: 10px 12px 12px;
+  }
+
+  .tool-card.compact .card-content h3 {
+    font-size: 13px;
+    margin-bottom: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .tool-card.compact:hover {
+    transform: translateY(-3px);
+  }
+
+  .tool-card-enter-active {
+    transition: all 0.3s ease;
+  }
+
+  .tool-card-enter-from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  .tool-card-move {
+    transition: transform 0.3s ease;
+  }
+
   .tag {
-    background: rgba(67, 97, 238, 0.1);
+    background: rgba(67, 97, 238, 0.08);
     color: var(--primary);
-    padding: 4px 10px;
-    border-radius: 50px;
-    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
     font-weight: 500;
   }
-  
+
   /* 推荐工具区域 */
+  .featured-header {
+    margin-top: 10px;
+  }
+
   .featured-tools {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 25px;
+    gap: 18px;
   }
-  
+
   .featured-card {
     background: white;
-    border-radius: var(--border-radius);
+    border-radius: 10px;
     display: flex;
     overflow: hidden;
-    box-shadow: var(--shadow);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
     transition: var(--transition);
     cursor: pointer;
   }
 
   .featured-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    transform: translateY(-3px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
   }
-  
+
   .featured-icon {
-    width: 120px;
+    width: 100px;
     background: linear-gradient(135deg, #4cc9f0, #4895ef);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 36px;
+    font-size: 32px;
     color: white;
   }
-  
+
   .featured-content {
-    padding: 25px;
+    padding: 18px;
     flex: 1;
   }
-  
+
   .featured-content h3 {
-    font-size: 20px;
-    margin-bottom: 10px;
+    font-size: 17px;
+    margin-bottom: 6px;
     color: var(--dark);
   }
-  
+
   .featured-content p {
     color: var(--gray);
-    line-height: 1.6;
-    margin-bottom: 15px;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: 12px;
   }
-  
+
   .featured-btn {
     background: var(--primary);
     color: white;
     border: none;
-    padding: 10px 20px;
-    border-radius: 8px;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: var(--transition);
   }
-  
+
   .featured-btn:hover {
     background: var(--secondary);
   }
@@ -491,22 +559,22 @@ const isNavigating = ref(false);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px;
+    padding: 16px 20px;
     background: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow);
-    margin-bottom: 25px;
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
 
   .search-info {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     color: var(--dark);
+    font-size: 14px;
   }
 
   .search-info i {
-    font-size: 20px;
+    font-size: 18px;
     color: var(--primary);
   }
 
@@ -518,22 +586,23 @@ const isNavigating = ref(false);
   .result-count {
     background: rgba(67, 97, 238, 0.1);
     color: var(--primary);
-    padding: 6px 14px;
+    padding: 4px 12px;
     border-radius: 20px;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
-    margin-left: 12px;
+    margin-left: 8px;
   }
 
   .clear-search-btn {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 20px;
-    border: 2px solid var(--primary);
+    gap: 6px;
+    padding: 8px 16px;
+    border: 1px solid var(--primary);
     background: white;
     color: var(--primary);
-    border-radius: 8px;
+    border-radius: 6px;
+    font-size: 13px;
     font-weight: 500;
     cursor: pointer;
     transition: var(--transition);
@@ -545,12 +614,13 @@ const isNavigating = ref(false);
   }
 
   .view-all-tools-btn {
-    margin-top: 20px;
-    padding: 12px 24px;
+    margin-top: 15px;
+    padding: 10px 20px;
     background: var(--primary);
     color: white;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
+    font-size: 14px;
     font-weight: 500;
     cursor: pointer;
     display: inline-flex;
@@ -561,96 +631,89 @@ const isNavigating = ref(false);
 
   .view-all-tools-btn:hover {
     background: var(--secondary);
-    transform: translateY(-2px);
   }
 
   .empty-state {
     grid-column: 1 / -1;
     text-align: center;
-    padding: 80px 20px;
+    padding: 60px 20px;
     background: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow);
+    border-radius: 10px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
-  
+
   .empty-icon {
-    width: 100px;
-    height: 100px;
-    margin: 0 auto 30px;
+    width: 80px;
+    height: 80px;
+    margin: 0 auto 20px;
     background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(72, 149, 239, 0.1));
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  
+
   .empty-state i {
-    font-size: 48px;
+    font-size: 40px;
     color: var(--primary);
     opacity: 0.6;
   }
-  
+
   .empty-state h3 {
-    font-size: 24px;
+    font-size: 20px;
     color: var(--dark);
-    margin-bottom: 10px;
+    margin-bottom: 8px;
   }
-  
+
   .empty-state p {
     color: var(--gray);
-    font-size: 16px;
+    font-size: 14px;
   }
 
   .loading-skeleton {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 25px;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
   }
 
   .skeleton-card {
     background: white;
-    border-radius: var(--border-radius);
+    border-radius: 12px;
     overflow: hidden;
-    box-shadow: var(--shadow);
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
   }
 
-  .skeleton-header {
-    height: 120px;
+  .skeleton-card.compact {
+    border-radius: 10px;
+  }
+
+  .skeleton-icon {
+    width: 100%;
+    height: 80px;
     background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s ease-in-out infinite;
   }
 
+  .skeleton-card.compact .skeleton-icon {
+    height: 56px;
+  }
+
   .skeleton-content {
-    padding: 20px;
+    padding: 14px 16px 16px;
   }
 
   .skeleton-line {
-    height: 16px;
+    height: 14px;
     background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
     background-size: 200% 100%;
     border-radius: 4px;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
     animation: skeleton-loading 1.5s ease-in-out infinite;
   }
 
   .skeleton-line.short {
     width: 60%;
-  }
-
-  .skeleton-tags {
-    display: flex;
-    gap: 8px;
-    margin-top: 15px;
-  }
-
-  .skeleton-tag {
-    width: 60px;
-    height: 24px;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
-    background-size: 200% 100%;
-    border-radius: 12px;
-    animation: skeleton-loading 1.5s ease-in-out infinite;
   }
 
   @keyframes skeleton-loading {

@@ -23,17 +23,19 @@ const openCategory = (category: Category) => {
 </script>
 <template>
     <aside class="sidebar">
-        <h3><i class="fas fa-list"></i> 工具分类</h3>
+        <h3><i class="fas fa-th-large"></i> 工具分类</h3>
         <div class="categories">
-          <div 
-            v-for="category in fetchCategories()" 
+          <div
+            v-for="category in fetchCategories()"
             :key="category.id"
-            class="category" 
+            class="category"
             :class="{ active: store.activeCategory?.id === category.id }"
             @click="openCategory(category)"
           >
-            <i :class="category.icon"></i>
-            <span>{{ category.name }}</span>
+            <div class="category-left">
+              <i :class="category.icon"></i>
+              <span class="category-name">{{ category.name }}</span>
+            </div>
             <span class="tool-count">{{ category.count }}</span>
           </div>
         </div>
@@ -46,89 +48,110 @@ const openCategory = (category: Category) => {
   .sidebar {
     background: white;
     border-radius: var(--border-radius);
-    padding: 25px;
-    box-shadow: var(--shadow);
+    padding: 20px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
     height: fit-content;
   }
-  
+
   .sidebar h3 {
-    margin-bottom: 20px;
-    font-size: 18px;
-    color: var(--dark);
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: #94a3b8;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
-  
+
   .sidebar h3 i {
     color: var(--primary);
+    font-size: 12px;
   }
-  
+
   .categories {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 2px;
   }
-  
+
   .category {
-    padding: 12px 15px;
-    border-radius: 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
-    gap: 12px;
+    justify-content: space-between;
     cursor: pointer;
-    transition: var(--transition);
-    color: var(--gray);
-    font-weight: 500;
+    transition: all 0.2s ease;
+    color: #64748b;
+    font-size: 14px;
     position: relative;
-    overflow: hidden;
   }
 
-  .category::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 0;
-    bottom: 0;
-    width: 3px;
-    background: var(--primary);
-    transform: scaleY(0);
-    transition: var(--transition);
+  .category-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
   }
-  
+
   .category:hover {
-    background: rgba(67, 97, 238, 0.05);
+    background: #f1f5f9;
     color: var(--primary);
-    transform: translateX(5px);
   }
 
-  .category:hover::before {
-    transform: scaleY(1);
-  }
-  
   .category.active {
-    background: rgba(67, 97, 238, 0.1);
+    background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(67, 97, 238, 0.05));
     color: var(--primary);
     font-weight: 600;
   }
 
   .category.active::before {
-    transform: scaleY(1);
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 4px;
+    height: 24px;
+    background: var(--primary);
+    border-radius: 0 4px 4px 0;
   }
-  
+
   .category i {
-    width: 20px;
+    width: 18px;
     text-align: center;
-    font-size: 18px;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+
+  .category-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .tool-count {
-    background: rgba(67, 97, 238, 0.1);
-    color: var(--primary);
+    background: #f1f5f9;
+    color: #94a3b8;
     padding: 2px 8px;
     border-radius: 12px;
     font-size: 12px;
     font-weight: 500;
-    margin-left: 8px;
+    flex-shrink: 0;
+    min-width: 28px;
+    text-align: center;
+    transition: all 0.2s ease;
+  }
+
+  .category:hover .tool-count {
+    background: rgba(67, 97, 238, 0.1);
+    color: var(--primary);
+  }
+
+  .category.active .tool-count {
+    background: var(--primary);
+    color: white;
   }
 </style>

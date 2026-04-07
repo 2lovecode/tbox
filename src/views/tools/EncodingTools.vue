@@ -192,7 +192,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const activeTab = ref('url');
@@ -345,70 +345,12 @@ const detectedEncodings = computed(() => {
   return encodings;
 });
 
-// 操作配置
-const operationsConfig: Record<string, Array<{key: string; label: string; primary?: boolean; action: () => void}>> = {
-  url: [
-    { key: 'encode', label: 'URL编码', action: urlEncode },
-    { key: 'decode', label: 'URL解码', action: urlDecode },
-  ],
-  unicode: [
-    { key: 'toUnicode', label: '中文 → Unicode', action: chineseToUnicode },
-    { key: 'toChinese', label: 'Unicode → 中文', action: unicodeToChinese },
-  ],
-  base64: [
-    { key: 'encode', label: 'Base64编码', action: base64Encode },
-    { key: 'decode', label: 'Base64解码', action: base64Decode },
-  ],
-  base58: [
-    { key: 'encode', label: 'Base58编码', action: base58Encode },
-    { key: 'decode', label: 'Base58解码', action: base58Decode },
-  ],
-  hex: [
-    { key: 'toHex', label: '文本 → 十六进制', action: stringToHex },
-    { key: 'toString', label: '十六进制 → 文本', action: hexToString },
-  ],
-  html: [
-    { key: 'encode', label: 'HTML编码', action: htmlEncode },
-    { key: 'decode', label: 'HTML解码', action: htmlDecode },
-  ],
-  punycode: [
-    { key: 'encode', label: 'Punycode编码', action: punycodeEncode },
-    { key: 'decode', label: 'Punycode解码', action: punycodeDecode },
-  ],
-  binary: [
-    { key: 'toBinary', label: '文本 → 二进制', action: textToBinary },
-    { key: 'toText', label: '二进制 → 文本', action: binaryToText },
-  ],
-  morse: [
-    { key: 'toMorse', label: '文本 → 摩尔斯码', action: textToMorse, primary: true },
-    { key: 'toText', label: '摩尔斯码 → 文本', action: morseToText, primary: true },
-  ],
-  rot13: [
-    { key: 'encode', label: 'ROT13加密/解密', action: doRot13 },
-  ],
-  caesar: [
-    { key: 'encode', label: '凯撒加密', action: doCaesarEncode },
-    { key: 'decode', label: '凯撒解密', action: doCaesarDecode },
-  ],
-  text: [
-    { key: 'upper', label: '转大写', action: () => setTextOutput(textInput.value.toUpperCase()) },
-    { key: 'lower', label: '转小写', action: () => setTextOutput(textInput.value.toLowerCase()) },
-    { key: 'reverse', label: '反转', action: reverseText },
-  ],
-  detect: [
-    { key: 'detect', label: '自动检测编码', action: doDetect, primary: true },
-  ],
-};
-
-const currentOperations = computed(() => operationsConfig[activeTab.value] || []);
 const setTextOutput = (val: string) => { textOutput.value = val; };
 
 // 切换tab
 const switchTab = (key: string) => {
   activeTab.value = key;
-};
-
-// 获取placeholder
+};// 获取placeholder
 const getPlaceholder = () => {
   const placeholders: Record<string, string> = {
     url: '输入要编码/解码的URL或文本',
@@ -629,6 +571,33 @@ const binaryToText = async () => {
   }
 };
 
+// 摩尔斯码
+const MORSE_CODE: Record<string, string> = {
+  'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
+  'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..',
+  'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.',
+  'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-',
+  'Y': '-.--', 'Z': '--..', '0': '-----', '1': '.----', '2': '..---',
+  '3': '...--', '4': '....-', '5': '.....', '6': '-....', '7': '--...',
+  '8': '---..', '9': '----.', ' ': '/'
+};
+
+const REVERSE_MORSE: Record<string, string> = Object.fromEntries(
+  Object.entries(MORSE_CODE).map(([k, v]) => [v, k])
+);
+
+const textToMorse = () => {
+  if (!morseInput.value) return;
+  const result = morseInput.value.toUpperCase().split('').map(c => MORSE_CODE[c] || c).join(' ');
+  morseOutput.value = result;
+};
+
+const morseToText = () => {
+  if (!morseInput.value) return;
+  const result = morseInput.value.split(' ').map(c => REVERSE_MORSE[c] || c).join('');
+  morseOutput.value = result;
+};
+
 // ROT13
 const doRot13 = () => {
   if (!rot13Input.value) return;
@@ -728,6 +697,63 @@ const asciiTable = computed(() => {
   }
   return table;
 });
+
+// 操作配置
+const operationsConfig: Record<string, Array<{key: string; label: string; primary?: boolean; action: () => void}>> = {
+  url: [
+    { key: 'encode', label: 'URL编码', action: () => urlEncode() },
+    { key: 'decode', label: 'URL解码', action: () => urlDecode() },
+  ],
+  unicode: [
+    { key: 'toUnicode', label: '中文 → Unicode', action: () => chineseToUnicode() },
+    { key: 'toChinese', label: 'Unicode → 中文', action: () => unicodeToChinese() },
+  ],
+  base64: [
+    { key: 'encode', label: 'Base64编码', action: () => base64Encode() },
+    { key: 'decode', label: 'Base64解码', action: () => base64Decode() },
+  ],
+  base58: [
+    { key: 'encode', label: 'Base58编码', action: () => base58Encode() },
+    { key: 'decode', label: 'Base58解码', action: () => base58Decode() },
+  ],
+  hex: [
+    { key: 'toHex', label: '文本 → 十六进制', action: () => stringToHex() },
+    { key: 'toString', label: '十六进制 → 文本', action: () => hexToString() },
+  ],
+  html: [
+    { key: 'encode', label: 'HTML编码', action: () => htmlEncode() },
+    { key: 'decode', label: 'HTML解码', action: () => htmlDecode() },
+  ],
+  punycode: [
+    { key: 'encode', label: 'Punycode编码', action: () => punycodeEncode() },
+    { key: 'decode', label: 'Punycode解码', action: () => punycodeDecode() },
+  ],
+  binary: [
+    { key: 'toBinary', label: '文本 → 二进制', action: () => textToBinary() },
+    { key: 'toText', label: '二进制 → 文本', action: () => binaryToText() },
+  ],
+  morse: [
+    { key: 'toMorse', label: '文本 → 摩尔斯码', action: () => textToMorse(), primary: true },
+    { key: 'toText', label: '摩尔斯码 → 文本', action: () => morseToText(), primary: true },
+  ],
+  rot13: [
+    { key: 'encode', label: 'ROT13加密/解密', action: () => doRot13() },
+  ],
+  caesar: [
+    { key: 'encode', label: '凯撒加密', action: () => doCaesarEncode() },
+    { key: 'decode', label: '凯撒解密', action: () => doCaesarDecode() },
+  ],
+  text: [
+    { key: 'upper', label: '转大写', action: () => setTextOutput(textInput.value.toUpperCase()) },
+    { key: 'lower', label: '转小写', action: () => setTextOutput(textInput.value.toLowerCase()) },
+    { key: 'reverse', label: '反转', action: () => reverseText() },
+  ],
+  detect: [
+    { key: 'detect', label: '自动检测编码', action: () => doDetect(), primary: true },
+  ],
+};
+
+const currentOperations = computed(() => operationsConfig[activeTab.value] || []);
 </script>
 
 <style scoped>

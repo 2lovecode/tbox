@@ -7,6 +7,8 @@ pub mod file_ops;
 pub mod json;
 pub mod encoding;
 pub mod screen;
+pub mod search;
+pub mod role;
 
 // 新增模块 (TODO: uncomment as modules are implemented)
 // pub mod data_convert;

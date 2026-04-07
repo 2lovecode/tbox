@@ -732,6 +732,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "cedarwood"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6d910bedd62c24733263d0bed247460853c9d22e8956bd4cd964302095e04e90"
+dependencies = [
+ "smallvec",
+]
+
+[[package]]
 name = "cesu8"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2701,6 +2710,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jieba-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "93f0c1347cd3ac8d7c6e3a2dc33ac496d365cf09fc0831aa61111e1a6738983e"
+dependencies = [
+ "cedarwood",
+ "fxhash",
+ "hashbrown 0.14.5",
+ "lazy_static",
+ "phf 0.11.3",
+ "phf_codegen 0.11.3",
+ "regex",
+]
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4138,6 +4162,12 @@ name = "pin-utils"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184"
+
+[[package]]
+name = "pinyin"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b4bd9644ee8d1c2bbf0c4de9d0e1a8b76f8ba8ba5313b3b6f2b10290b33ac99"
 
 [[package]]
 name = "piper"
@@ -6087,6 +6117,7 @@ dependencies = [
  "hex",
  "hmac",
  "image",
+ "jieba-rs",
  "jsonwebtoken",
  "libsm",
  "lopdf",
@@ -6094,9 +6125,11 @@ dependencies = [
  "mysql",
  "num-bigint",
  "num-traits",
+ "once_cell",
  "os_info",
  "pdf",
  "percent-encoding",
+ "pinyin",
  "postgres",
  "rand 0.8.5",
  "regex",

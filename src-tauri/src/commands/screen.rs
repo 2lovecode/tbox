@@ -1,16 +1,6 @@
 use serde::Serialize;
 
 #[derive(Serialize)]
-pub struct ScreenInfo {
-    pub width: u32,
-    pub height: u32,
-    pub x: i32,
-    pub y: i32,
-    pub scale_factor: f64,
-    pub is_primary: bool,
-}
-
-#[derive(Serialize)]
 pub struct MousePosition {
     pub x: i32,
     pub y: i32,
