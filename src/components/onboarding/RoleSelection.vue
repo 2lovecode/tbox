@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router';
 import { useRoleStore } from '@/stores/role';
 import { storeToRefs } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
+import type { Tool } from '@/types/tools';
 
 const router = useRouter();
 const roleStore = useRoleStore();
