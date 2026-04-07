@@ -7,7 +7,6 @@ import SideBar from "@/layout/SideBar.vue";
 import { useRoleStore } from "@/stores/role";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
-import RoleSelection from "@/components/onboarding/RoleSelection.vue";
 import { useTheme } from "@/composables/useTheme";
 
 const store  = useToolStore()

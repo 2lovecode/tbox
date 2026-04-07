@@ -27,7 +27,7 @@ const totalToolCount = computed(() => {
 const loadToolPreviews = async () => {
   for (const role of availableRoles.value) {
     try {
-      const tools = await invoke('get_tools_by_role', { roleId: role.id });
+      const tools = await invoke<Tool[]>('get_tools_by_role', { roleId: role.id });
       previewTools.value.set(role.id, tools.length);
     } catch (error) {
       console.error(`Failed to load tools for role ${role.id}:`, error);
