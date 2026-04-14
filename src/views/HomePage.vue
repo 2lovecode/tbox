@@ -196,14 +196,14 @@ const isNavigating = ref(false);
         <!-- 工具网格视图 -->
         <TransitionGroup
             v-if="!isLoading && filteredTools.length > 0"
-            name="tool-card"
+            :name="showSearchResults ? '' : 'tool-card'"
             tag="div"
             class="tools-grid"
             :class="{ 'compact-view': isCompactView }"
         >
             <div
                 v-for="tool in filteredTools"
-                :key="tool.id"
+                :key="showSearchResults ? `search-${tool.id}` : tool.id"
                 class="tool-card"
                 :class="{ 'hovered': hoveredToolId === tool.id, 'compact': isCompactView }"
                 @click.stop="openTool(tool)"

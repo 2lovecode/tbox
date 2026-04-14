@@ -26,13 +26,13 @@
               <label>输入</label>
               <div class="panel-actions">
                 <button v-if="currentInput" @click="clearInput" class="btn-small" title="清空">
-                  <i class="fas fa-trash-alt"></i>
+                  <i class="fas fa-trash-alt"></i> 清空
                 </button>
                 <button v-if="currentInput || currentOutput" @click="swapIO" class="btn-small" title="交换">
-                  <i class="fas fa-arrow-up-arrow-down"></i>
+                  <i class="fas fa-arrow-up-arrow-down"></i> 交换
                 </button>
                 <button @click="loadFile" class="btn-small" title="从文件读取">
-                  <i class="fas fa-file-import"></i>
+                  <i class="fas fa-file-import"></i> 导入
                 </button>
               </div>
             </div>
@@ -58,10 +58,10 @@
               <label>结果</label>
               <div class="panel-actions">
                 <button v-if="currentOutput" @click="copyResult(currentOutput)" class="btn-small" title="复制">
-                  <i class="fas fa-copy"></i>
+                  <i class="fas fa-copy"></i> 复制
                 </button>
                 <button v-if="currentOutput" @click="saveToFile" class="btn-small" title="保存到文件">
-                  <i class="fas fa-file-export"></i>
+                  <i class="fas fa-file-export"></i> 保存
                 </button>
               </div>
             </div>
@@ -86,13 +86,13 @@
           </div>
           <div class="extra-actions" v-if="activeTab === 'text'">
             <button @click="toggleCase" class="btn-extra" title="大小写转换">
-              <i class="fas fa-text-height"></i>
+              <i class="fas fa-text-height"></i> <span>大小写</span>
             </button>
             <button @click="trimSpaces" class="btn-extra" title="去除多余空格">
-              <i class="fas fa-compress-alt"></i>
+              <i class="fas fa-compress-alt"></i> <span>去空格</span>
             </button>
             <button @click="reverseText" class="btn-extra" title="反转文本">
-              <i class="fas fa-exchange-alt"></i>
+              <i class="fas fa-exchange-alt"></i> <span>反转</span>
             </button>
           </div>
         </div>
@@ -827,6 +827,7 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+  align-items: start;
 }
 
 @media (max-width: 900px) {
@@ -859,7 +860,7 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
 }
 
 .btn-small {
-  padding: 5px 8px;
+  padding: 5px 10px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 5px;
@@ -869,7 +870,9 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
+  gap: 4px;
+  white-space: nowrap;
 }
 
 .btn-small:hover {
@@ -916,10 +919,13 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
 
 .output-box {
   min-height: 160px;
+  max-height: 300px;
+  max-width: 100%;
   padding: 12px 15px;
   background: var(--bg-secondary);
   border-radius: var(--border-radius);
   border: 1px solid var(--border-color);
+  overflow: auto;
 }
 
 .output-box pre {
@@ -927,7 +933,9 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
   font-family: 'Consolas', 'Monaco', monospace;
   font-size: 14px;
   color: var(--text-primary);
+  white-space: pre-wrap;
   word-break: break-all;
+  overflow-wrap: break-word;
   max-height: 300px;
   overflow: auto;
 }
@@ -995,6 +1003,9 @@ const currentOperations = computed(() => operationsConfig[activeTab.value] || []
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .btn-extra:hover {
