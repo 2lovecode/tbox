@@ -20,8 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-fs = "2"
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -51,6 +50,9 @@ libsm = "0.6"
 # 编码转换
 encoding_rs = "0.8"
 percent-encoding = "2.3"
+
+# Punycode (RFC 3492)
+punycode = "0.4"
 
 # 正则表达式
 regex = "1.10"

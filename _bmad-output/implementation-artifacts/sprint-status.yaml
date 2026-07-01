@@ -52,11 +52,11 @@ development_status:
   epic-1-retrospective: optional
 
   # Epic 2: Spotlight 全局搜索
-  epic-2: backlog
-  2-1-global-shortcut-plugin-integration: backlog
-  2-2-search-pinia-store: backlog
-  2-3-spotlight-search-component: backlog
-  2-4-search-role-integration: backlog
+  epic-2: done
+  2-1-global-shortcut-plugin-integration: done
+  2-2-search-pinia-store: done
+  2-3-spotlight-search-component: done
+  2-4-search-role-integration: done
   epic-2-retrospective: optional
 
   # Epic 3: 工具执行与键盘流体验

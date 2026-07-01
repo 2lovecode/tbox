@@ -1,17 +1,22 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, watch } from "vue";
+import { onBeforeUnmount } from "vue";
+import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
 import RoleSelection from "@/components/onboarding/RoleSelection.vue";
+import SpotlightSearch from "@/components/SpotlightSearch.vue";
 import { useRoleStore } from "@/stores/role";
+import { useSearchStore } from "@/stores/search";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
 import { useTheme } from "@/composables/useTheme";
 
 const store  = useToolStore()
 const roleStore = useRoleStore()
+const searchStore = useSearchStore()
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
@@ -20,11 +25,24 @@ const { isDark, toggleTheme } = useTheme()
 const tools = ref<Tool[]>([]);
 const isLoading = ref(true);
 
+// Subscribe to the global Spotlight shortcut event emitted by the Rust
+// side. The unlisten handle is captured for cleanup on unmount so HMR
+// can't leave stale listeners behind.
+let unlistenSpotlight: (() => void) | null = null;
+
 // 加载categories
 // 加载tools
 onMounted(async () => {
   // 初始化角色状态
   await roleStore.initialize();
+
+  unlistenSpotlight = await listen('spotlight:toggle', () => {
+    // Don't open Spotlight on top of the role wizard — it would steal
+    // focus from the onboarding flow and confuse first-time users.
+    if (!roleStore.showOnboarding) {
+      searchStore.open();
+    }
+  });
 
   isLoading.value = true;
   try {
@@ -97,6 +115,13 @@ const clearSearch = () => {
 
 // 计算是否显示侧边栏（在工具页面不显示）
 const showSidebar = computed(() => route.path === '/')
+
+onBeforeUnmount(() => {
+  if (unlistenSpotlight) {
+    unlistenSpotlight();
+    unlistenSpotlight = null;
+  }
+});
 </script>
 
 <template>
@@ -149,6 +174,7 @@ const showSidebar = computed(() => route.path === '/')
         <p>© 2025 万能工具箱 | 版本: 3.0.0 | 已收录 {{ tools.length }} 个实用工具</p>
         </footer>
         <Toast />
+        <SpotlightSearch />
         </template>
       </div>
 </template>
