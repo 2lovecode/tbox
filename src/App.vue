@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
+import RoleSelection from "@/components/onboarding/RoleSelection.vue";
 import { useRoleStore } from "@/stores/role";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
@@ -100,6 +101,9 @@ const showSidebar = computed(() => route.path === '/')
 
 <template>
       <div class="container" :class="{ 'no-sidebar': !showSidebar, 'dark-mode': isDark }">
+        <!-- 首次启动 / 重新选择角色时显示引导 -->
+        <RoleSelection v-if="roleStore.showOnboarding" />
+        <template v-else>
         <header>
           <div class="logo" @click="$router.push('/')" style="cursor: pointer;">
             <div class="logo-icon">
@@ -143,9 +147,10 @@ const showSidebar = computed(() => route.path === '/')
       </div>
       <footer>
         <p>© 2025 万能工具箱 | 版本: 3.0.0 | 已收录 {{ tools.length }} 个实用工具</p>
-      </footer>
-      <Toast />
-    </div>
+        </footer>
+        <Toast />
+        </template>
+      </div>
 </template>
 
 <style>

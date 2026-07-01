@@ -2,31 +2,32 @@ import { defineStore } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
 import type { Role } from '@/types/role';
 
+/**
+ * Persists the user's selected roles to disk via the Rust backend and keeps
+ * the available role catalogue in memory for components that need it.
+ *
+ * `showOnboarding` is a derived UI flag (not persisted): it flips to true on
+ * first launch when no roles have been chosen, and to false the moment the
+ * user confirms or skips. Components should rely on it to render the
+ * first-time role selection overlay.
+ */
 export const useRoleStore = defineStore('role', {
   state: () => ({
     selectedRoles: [] as number[],
     availableRoles: [] as Role[],
-    showOnboarding: false
+    showOnboarding: true,
   }),
 
   getters: {
-    /**
-     * 检查用户是否已选择角色
-     */
     hasSelectedRoles: (state) => state.selectedRoles.length > 0,
-
-    /**
-     * 返回已选择角色的数量
-     */
-    selectedRolesCount: (state) => state.selectedRoles.length
+    selectedRolesCount: (state) => state.selectedRoles.length,
+    selectedRoleIdsSet: (state) => new Set(state.selectedRoles),
   },
 
   actions: {
-    /**
-     * 设置用户选择的角色并保存到后端
-     */
     async setSelectedRoles(roles: number[]) {
-      this.selectedRoles = roles;
+      this.selectedRoles = [...roles];
+      this.showOnboarding = false;
       try {
         await invoke('set_user_role', { roleIds: roles });
       } catch (error) {
@@ -35,9 +36,6 @@ export const useRoleStore = defineStore('role', {
       }
     },
 
-    /**
-     * 从后端加载所有可用角色
-     */
     async loadAvailableRoles() {
       try {
         const roles = await invoke<Role[]>('get_roles');
@@ -48,40 +46,45 @@ export const useRoleStore = defineStore('role', {
       }
     },
 
-    /**
-     * 控制引导流程显示
-     */
-    setShowOnboarding(show: boolean) {
-      this.showOnboarding = show;
-    },
-
-    /**
-     * 初始化角色状态
-     * 加载可用角色和用户已保存的角色选择
-     */
     async initialize() {
-      // 加载可用角色
       await this.loadAvailableRoles();
 
-      // 加载用户已保存的角色
       try {
         const savedRoles = await invoke<number[]>('get_user_role');
-        if (savedRoles.length > 0) {
-          this.selectedRoles = savedRoles;
-          this.showOnboarding = false;
-        } else {
-          // 用户未选择过角色，显示引导
-          this.showOnboarding = true;
-        }
+        this.selectedRoles = savedRoles;
+        // Onboarding only shows when there are no saved roles yet.
+        this.showOnboarding = savedRoles.length === 0;
       } catch (error) {
         console.error('Failed to load user roles:', error);
+        // On error, keep onboarding visible so the user can still proceed.
         this.showOnboarding = true;
       }
-    }
+    },
+
+    async skipOnboarding() {
+      // Persist an empty list so the onboarding does not reappear on next
+      // launch, then dismiss the overlay.
+      this.showOnboarding = false;
+      try {
+        await invoke('set_user_role', { roleIds: [] });
+      } catch (error) {
+        console.error('Failed to skip onboarding:', error);
+      }
+    },
+
+    async reopenOnboarding() {
+      // Allow the user to revisit the wizard from settings; do not touch the
+      // persisted selection until they confirm again.
+      this.showOnboarding = true;
+    },
   },
 
   persist: {
     key: 'tbox-roles',
-    storage: localStorage
-  }
+    storage: localStorage,
+    // `showOnboarding` is derived state; persist only the catalogue and the
+    // user's confirmed selection. pinia-plugin-persistedstate v4 uses `pick`
+    // to whitelist state slices.
+    pick: ['selectedRoles', 'availableRoles'],
+  },
 });
