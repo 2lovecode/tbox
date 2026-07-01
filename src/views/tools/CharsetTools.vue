@@ -203,7 +203,7 @@ async function htmlDecode() {
 async function punycodeEncode() {
   try {
     error.value = '';
-    result.value = await invoke('punycode_encode', { domain: punycodeDomain.value });
+    result.value = await invoke('punycode_encode', { input: punycodeDomain.value });
   } catch (e: any) {
     error.value = e.toString();
     result.value = '';
@@ -213,7 +213,7 @@ async function punycodeEncode() {
 async function punycodeDecode() {
   try {
     error.value = '';
-    result.value = await invoke('punycode_decode', { domain: punycodeDomain.value });
+    result.value = await invoke('punycode_decode', { input: punycodeDomain.value });
   } catch (e: any) {
     error.value = e.toString();
     result.value = '';

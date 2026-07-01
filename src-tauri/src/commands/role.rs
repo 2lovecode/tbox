@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use std::fs;
 use std::path::PathBuf;
-use rusqlite::{params, Connection};
 
-use crate::utils2::get_db_path;
+use rusqlite::{params, Connection, OptionalExtension};
+
+use crate::db::with_connection;
 
 // 角色结构体
 #[derive(Serialize, Clone, Deserialize)]
@@ -23,32 +24,28 @@ pub struct Role {
 /// 获取所有角色
 #[tauri::command]
 pub fn get_roles() -> Result<Vec<Role>, String> {
-    let db_path = get_db_path();
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-
-    let mut stmt = conn.prepare("
+    with_connection(|conn| {
+        let mut stmt = conn.prepare("
         SELECT id, name, display_name, description, icon, is_system
         FROM roles
         ORDER BY id
-    ").map_err(|e| e.to_string())?;
+    ")?;
 
-    let role_iter = stmt.query_map([], |row| {
-        Ok(Role {
-            id: row.get(0)?,
-            name: row.get(1)?,
-            display_name: row.get(2)?,
-            description: row.get(3)?,
-            icon: row.get(4)?,
-            is_system: row.get(5)?,
-        })
-    }).map_err(|e| e.to_string())?;
+        let roles = stmt
+            .query_map([], |row| {
+                Ok(Role {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    display_name: row.get(2)?,
+                    description: row.get(3)?,
+                    icon: row.get(4)?,
+                    is_system: row.get(5)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
 
-    let mut roles = Vec::new();
-    for role in role_iter {
-        roles.push(role.map_err(|e| e.to_string())?);
-    }
-
-    Ok(roles)
+        Ok(roles)
+    })
 }
 
 /// 根据角色 ID 获取对应的工具列表
@@ -57,70 +54,79 @@ pub fn get_roles() -> Result<Vec<Role>, String> {
 /// 如需完整的工具信息，前端可以调用 get_all_tools 并在本地过滤
 #[tauri::command]
 pub fn get_tools_by_role(role_id: u32) -> Result<Vec<super::tool::Tool>, String> {
-    let db_path = get_db_path();
-    let conn = Connection::open(&db_path).map_err(|e| e.to_string())?;
-
-    let mut stmt = conn.prepare("
+    with_connection(|conn| {
+        let mut stmt = conn.prepare("
         SELECT t.id, t.name, t.description, t.icon, t.gradient
         FROM tools t
         INNER JOIN tool_roles tr ON t.id = tr.tool_id
         WHERE tr.role_id = ?1
         ORDER BY t.id
-    ").map_err(|e| e.to_string())?;
+    ")?;
 
-    let tool_iter = stmt.query_map(params![role_id], |row| {
-        let tool_id: u32 = row.get(0)?;
+        let tools = stmt
+            .query_map(params![role_id], |row| {
+                let tool_id: u32 = row.get(0)?;
+                let name: String = row.get(1)?;
+                let description: String = row.get(2)?;
+                let icon: String = row.get(3)?;
+                let gradient: String = row.get(4)?;
 
-        // 获取工具的标签
-        let mut tag_stmt = conn.prepare("
+                // Tag and category lookups are best-effort: a tool without any
+                // tags or categories still gets returned, but real DB errors
+                // are propagated rather than silently swallowed.
+                let tags = load_tags(conn, tool_id)?;
+                let category = load_primary_category(conn, tool_id)?;
+
+                Ok(super::tool::Tool {
+                    id: tool_id,
+                    name,
+                    description,
+                    icon,
+                    category,
+                    tags,
+                    gradient,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(tools)
+    })
+}
+
+fn load_tags(conn: &Connection, tool_id: u32) -> Result<Vec<String>, rusqlite::Error> {
+    let mut stmt = conn.prepare(
+        "
             SELECT tg.name
             FROM tool_tags tt
             JOIN tags tg ON tt.tag_id = tg.id
             WHERE tt.tool_id = ?1
-        ").map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
+        ",
+    )?;
+    let rows = stmt.query_map(params![tool_id], |row| row.get(0))?;
+    rows.collect::<Result<Vec<_>, _>>()
+}
 
-        let tags: Vec<String> = tag_stmt
-            .query_map(params![tool_id], |row| row.get(0))
-            .map_err(|_| rusqlite::Error::QueryReturnedNoRows)?
-            .collect::<Result<Vec<String>, _>>()
-            .map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
-
-        // 获取工具的分类（只取第一个分类）
-        let category: Option<super::tool::ToolCategory> = {
-            let mut cat_stmt = conn.prepare("
+fn load_primary_category(
+    conn: &Connection,
+    tool_id: u32,
+) -> Result<Option<super::tool::ToolCategory>, rusqlite::Error> {
+    conn.query_row(
+        "
                 SELECT c.id, c.name
                 FROM tool_categories tc
                 JOIN categories c ON tc.category_id = c.id
                 WHERE tc.tool_id = ?1
                 LIMIT 1
-            ").map_err(|_| rusqlite::Error::QueryReturnedNoRows)?;
-
-            cat_stmt
-                .query_row(params![tool_id], |row| {
-                    let id: u32 = row.get(0)?;
-                    let name: String = row.get(1)?;
-                    Ok(super::tool::ToolCategory { id, name })
-                })
-                .ok()
-        };
-
-        Ok(super::tool::Tool {
-            id: tool_id,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            icon: row.get(3)?,
-            category,
-            tags,
-            gradient: row.get(4)?,
-        })
-    }).map_err(|e| e.to_string())?;
-
-    let mut tools = Vec::new();
-    for tool in tool_iter {
-        tools.push(tool.map_err(|e| e.to_string())?);
-    }
-
-    Ok(tools)
+            ",
+        params![tool_id],
+        |row| {
+            Ok(super::tool::ToolCategory {
+                id: row.get(0)?,
+                name: row.get(1)?,
+            })
+        },
+    )
+    .optional()
 }
 
 /// 获取用户配置目录

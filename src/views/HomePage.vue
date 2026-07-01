@@ -2,11 +2,8 @@
 import { Tool } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
 import { ref, computed, watch } from 'vue';
-import { onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
 import { useRouter, useRoute } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
-import { useRoleStore } from '@/stores/role';
 
 const store = useToolStore();
 const router = useRouter();
@@ -16,27 +13,10 @@ const isLoading = ref(false);
 const hoveredToolId = ref<number | null>(null);
 const isCompactView = ref(false);
 const searchResults = ref<Tool[]>([]);
-const roleStore = useRoleStore();
-const { selectedRoles: selectedRoleIds } = storeToRefs(roleStore);
-
-// Story 1.5: 推荐工具缓存（按角色筛选）
-const recommendedToolIds = ref<Set<number>>(new Set());
-const roleNameByToolId = ref<Record<number, string[]>>({});
-const roleFilterEnabled = ref(true);
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
   let result = searchResults.value.length > 0 ? searchResults.value : store.tools;
-
-  // Story 1.5: 角色过滤（仅在非搜索状态下生效，避免和搜索结果叠加）
-  if (
-    roleFilterEnabled.value &&
-    selectedRoleIds.value.length > 0 &&
-    recommendedToolIds.value.size > 0 &&
-    searchResults.value.length === 0
-  ) {
-    result = result.filter((tool) => recommendedToolIds.value.has(tool.id));
-  }
 
   // 按分类过滤
   if (store.activeCategory && store.activeCategory.id !== 0) {
@@ -70,65 +50,6 @@ const showSearchResults = computed(() => searchQuery.value.trim().length > 0);
 
 // 搜索结果统计
 const searchResultCount = computed(() => filteredTools.value.length);
-
-// Story 1.5: 角色相关的派生状态
-const roleSummary = computed(() => {
-  const ids = selectedRoleIds.value;
-  if (ids.length === 0) return '';
-  return roleStore.availableRoles
-    .filter((r) => ids.includes(r.id))
-    .map((r) => r.display_name)
-    .join(' / ');
-});
-
-const showRoleFilterToggle = computed(
-  () => selectedRoleIds.value.length > 0 && recommendedToolIds.value.size > 0
-);
-
-function toggleRoleFilter() {
-  roleFilterEnabled.value = !roleFilterEnabled.value;
-}
-
-async function loadRecommendedTools() {
-  const ids = selectedRoleIds.value;
-  const idSet = new Set<number>();
-  const tagMap: Record<number, string[]> = {};
-
-  if (ids.length === 0) {
-    recommendedToolIds.value = idSet;
-    roleNameByToolId.value = tagMap;
-    return;
-  }
-
-  await Promise.all(
-    ids.map(async (roleId) => {
-      try {
-        const tools = await invoke<Tool[]>('get_tools_by_role', { roleId });
-        const role = roleStore.availableRoles.find((r) => r.id === roleId);
-        const roleName = role?.display_name ?? '';
-        tools.forEach((t) => {
-          idSet.add(t.id);
-          if (roleName) {
-            (tagMap[t.id] ??= []).push(roleName);
-          }
-        });
-      } catch (error) {
-        console.error(`Failed to load tools for role ${roleId}:`, error);
-      }
-    })
-  );
-
-  recommendedToolIds.value = idSet;
-  roleNameByToolId.value = tagMap;
-}
-
-watch(
-  () => [...selectedRoleIds.value],
-  () => {
-    loadRecommendedTools();
-  },
-  { deep: true }
-);
 
 // 清空搜索
 const clearSearch = () => {
@@ -248,10 +169,6 @@ watch(searchQuery, (newVal) => {
 // 标记是否正在导航，防止搜索watch干扰导航
 const isNavigating = ref(false);
 
-onMounted(() => {
-  loadRecommendedTools();
-});
-
 </script>
 <template>
     <main class="main-content">
@@ -274,22 +191,6 @@ onMounted(() => {
             </h2>
             <div class="tool-count-badge" v-if="filteredTools.length > 0">
               共 {{ filteredTools.length }} 个工具
-            </div>
-            <div class="section-header-right" v-if="roleSummary">
-                <div class="role-summary">
-                    <i class="fas fa-user-tag"></i>
-                    <span>为你推荐：{{ roleSummary }}</span>
-                </div>
-                <button
-                    v-if="showRoleFilterToggle"
-                    class="role-filter-toggle"
-                    :class="{ active: roleFilterEnabled }"
-                    @click="toggleRoleFilter"
-                    :title="roleFilterEnabled ? '点击查看全部工具' : '点击只看推荐工具'"
-                >
-                    <i :class="roleFilterEnabled ? 'fas fa-filter' : 'fas fa-filter-circle-xmark'"></i>
-                    {{ roleFilterEnabled ? '只看推荐' : '查看全部' }}
-                </button>
             </div>
         </div>
 
@@ -316,19 +217,6 @@ onMounted(() => {
                 <div class="card-content">
                     <h3>{{ tool.name }}</h3>
                     <p v-if="!isCompactView" class="card-desc">{{ tool.description }}</p>
-                    <div
-                        v-if="!isCompactView && roleNameByToolId[tool.id]?.length"
-                        class="role-tags"
-                    >
-                        <span
-                            v-for="name in roleNameByToolId[tool.id]"
-                            :key="name"
-                            class="role-tag"
-                        >
-                            <i class="fas fa-user-tag"></i>
-                            {{ name }}
-                        </span>
-                    </div>
                     <div class="tool-tags" v-if="!isCompactView">
                         <span class="tag" v-for="tag in tool.tags.slice(0, 2)" :key="tag">{{ tag }}</span>
                     </div>

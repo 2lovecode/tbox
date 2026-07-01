@@ -4,11 +4,9 @@ import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { invoke } from '@tauri-apps/api/core';
 import { useSearchStore } from '@/stores/search';
-import { useRoleStore } from '@/stores/role';
 
 const router = useRouter();
 const searchStore = useSearchStore();
-const roleStore = useRoleStore();
 const {
   isOpen,
   query,
@@ -16,41 +14,8 @@ const {
   isSearching,
   searchHistory,
   selectedIndex,
-  roleScope,
 } = storeToRefs(searchStore);
 
-// Set of tool IDs the user has unlocked by selecting roles. Mirrors the
-// HomePage logic so Spotlight and Home stay consistent.
-const recommendedToolIds = ref<Set<number>>(new Set());
-
-async function loadRecommendedToolIds() {
-  const ids = roleStore.selectedRoles;
-  if (ids.length === 0) {
-    recommendedToolIds.value = new Set();
-    return;
-  }
-  try {
-    const sets = await Promise.all(
-      ids.map((roleId) =>
-        invoke<Array<{ id: number }>>('get_tools_by_role', { roleId })
-      )
-    );
-    const merged = new Set<number>();
-    sets.forEach((arr) => arr.forEach((t) => merged.add(t.id)));
-    recommendedToolIds.value = merged;
-  } catch (error) {
-    console.error('[spotlight] failed to load role tools:', error);
-    recommendedToolIds.value = new Set();
-  }
-}
-
-watch(
-  () => [...roleStore.selectedRoles],
-  () => {
-    void loadRecommendedToolIds();
-  },
-  { deep: true, immediate: true }
-);
 const inputRef = ref<HTMLInputElement | null>(null);
 const debounceId = ref<ReturnType<typeof setTimeout> | null>(null);
 const routerMap: Record<number, string> = {
@@ -95,24 +60,8 @@ const routerMap: Record<number, string> = {
 const isQueryEmpty = computed(() => query.value.trim().length === 0);
 const visibleItems = computed(() => {
   if (isQueryEmpty.value) return [];
-  const matched: typeof results.value = [];
-  const rest: typeof results.value = [];
-  for (const tool of results.value) {
-    if (recommendedToolIds.value.has(tool.id)) {
-      matched.push(tool);
-    } else {
-      rest.push(tool);
-    }
-  }
-  if (roleScope.value && matched.length > 0) {
-    return matched;
-  }
-  return [...matched, ...rest];
+  return results.value;
 });
-const hasRoleSelection = computed(() => roleStore.selectedRoles.length > 0);
-const matchedCount = computed(() =>
-  results.value.filter((t) => recommendedToolIds.value.has(t.id)).length
-);
 const visibleHistory = computed(() =>
   isQueryEmpty.value ? searchHistory.value.slice(0, 8) : []
 );
@@ -245,25 +194,6 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="results-area">
-          <div v-if="!isQueryEmpty && hasRoleSelection" class="scope-tabs">
-            <button
-              type="button"
-              :class="['scope-tab', { active: roleScope }]"
-              @click="searchStore.setRoleScope(true)"
-            >
-              <i class="fas fa-user-tag"></i>
-              推荐 ({{ matchedCount }})
-            </button>
-            <button
-              type="button"
-              :class="['scope-tab', { active: !roleScope }]"
-              @click="searchStore.setRoleScope(false)"
-            >
-              <i class="fas fa-list"></i>
-              全部 ({{ results.length }})
-            </button>
-          </div>
-
           <template v-if="!isQueryEmpty">
             <div v-if="visibleItems.length === 0 && !isSearching" class="empty">
               <i class="fas fa-circle-info"></i>

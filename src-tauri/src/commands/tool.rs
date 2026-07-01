@@ -1,6 +1,6 @@
 use serde::Serialize;
 use rusqlite::{params, Connection, Result};
-use crate::utils2::get_db_path;
+use crate::db::get_db_path;
 
 // 新增：工具分类结构体
 #[derive(Serialize, Clone)]

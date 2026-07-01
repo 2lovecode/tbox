@@ -45,10 +45,6 @@ export const useSearchStore = defineStore('search', {
     searchHistory: [] as SearchHistoryItem[],
     selectedIndex: 0,
     lastError: null as string | null,
-    /// When true, results are filtered down to tools that belong to one of
-    /// the user's selected roles. Mirrors the HomePage role filter so the
-    /// two entry points behave the same way.
-    roleScope: true,
   }),
 
   getters: {
@@ -61,6 +57,14 @@ export const useSearchStore = defineStore('search', {
       this.isOpen = true;
       this.selectedIndex = 0;
       this.lastError = null;
+    },
+
+    toggle() {
+      if (this.isOpen) {
+        this.close();
+      } else {
+        this.open();
+      }
     },
 
     close() {
@@ -131,14 +135,6 @@ export const useSearchStore = defineStore('search', {
     selectByIndex(index: number) {
       if (index < 0 || index >= this.results.length) return;
       this.selectedIndex = index;
-    },
-
-    toggleRoleScope() {
-      this.roleScope = !this.roleScope;
-    },
-
-    setRoleScope(value: boolean) {
-      this.roleScope = value;
     },
   },
 

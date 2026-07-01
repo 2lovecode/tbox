@@ -302,14 +302,15 @@ pub fn base62_decode(input: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn string_to_hex(input: String) -> Result<String, String> {
-    Ok(hex::encode(input.as_bytes())
-        .to_uppercase()
-        .chars()
-        .collect::<Vec<_>>()
-        .chunks(2)
-        .map(|c| c.iter().collect::<String>())
-        .collect::<Vec<_>>()
-        .join(" "))
+    // Single-pass build of "AA BB CC ..." from the input bytes.
+    let mut out = String::with_capacity(input.len() * 3);
+    for (i, byte) in input.as_bytes().iter().enumerate() {
+        if i > 0 {
+            out.push(' ');
+        }
+        out.push_str(&format!("{:02X}", byte));
+    }
+    Ok(out)
 }
 
 #[tauri::command]
@@ -354,8 +355,9 @@ pub fn html_encode(input: String) -> Result<String, String> {
 
 #[tauri::command]
 pub fn html_decode(input: String) -> Result<String, String> {
-    let mut result = input.clone();
-    let replacements = [
+    // Single-pass scanner. &-sequences are decoded in-place into the output
+    // string; everything else is copied byte-for-byte.
+    const NAMED: &[(&str, &str)] = &[
         ("&lt;", "<"),
         ("&gt;", ">"),
         ("&amp;", "&"),
@@ -364,135 +366,70 @@ pub fn html_decode(input: String) -> Result<String, String> {
         ("&nbsp;", " "),
     ];
 
-    for (entity, char) in replacements {
-        result = result.replace(entity, char);
-    }
-
-    // 处理数字形式的HTML实体 &#xxx;
+    let bytes = input.as_bytes();
+    let mut out = String::with_capacity(input.len());
     let mut i = 0;
-    while i < result.len() {
-        if result[i..].starts_with("&#") {
-            let rest = &result[i + 2..];
-            if rest.starts_with('x') || rest.starts_with('X') {
-                // &#xHH 格式
-                let hex_part = &rest[1..];
-                if let Some(end) = hex_part.find(';') {
-                    if let Ok(code_point) = u32::from_str_radix(&hex_part[..end], 16) {
-                        if let Some(ch) = char::from_u32(code_point) {
-                            result = format!("{}{}{}", &result[..i], ch, &hex_part[end + 1..]);
-                            i += ch.len_utf8();
-                            continue;
-                        }
-                    }
-                }
-            } else {
-                // &#DDD 格式
-                if let Some(end) = rest.find(';') {
-                    if let Ok(code_point) = rest[..end].parse::<u32>() {
-                        if let Some(ch) = char::from_u32(code_point) {
-                            result = format!("{}{}{}", &result[..i], ch, &rest[end + 1..]);
-                            i += ch.len_utf8();
-                            continue;
-                        }
+    while i < bytes.len() {
+        if bytes[i] != b'&' {
+            out.push(bytes[i] as char);
+            i += 1;
+            continue;
+        }
+
+        // Try named entities first.
+        let mut matched = false;
+        for (entity, replacement) in NAMED {
+            if bytes[i..].starts_with(entity.as_bytes()) {
+                out.push_str(replacement);
+                i += entity.len();
+                matched = true;
+                break;
+            }
+        }
+        if matched {
+            continue;
+        }
+
+        // Numeric entities: &#NN; (decimal) or &#xNN; (hex).
+        if bytes[i..].starts_with(b"&#") {
+            let after_amp = i + 2;
+            let (digits_start, radix) = match bytes.get(after_amp) {
+                Some(b'x') | Some(b'X') => (after_amp + 1, 16),
+                _ => (after_amp, 10),
+            };
+            if let Some(semi) = bytes[digits_start..].iter().position(|&b| b == b';') {
+                let num_end = digits_start + semi;
+                if let Ok(code) = u32::from_str_radix(
+                    std::str::from_utf8(&bytes[digits_start..num_end]).unwrap_or(""),
+                    radix,
+                ) {
+                    if let Some(ch) = char::from_u32(code) {
+                        out.push(ch);
+                        i = num_end + 1;
+                        continue;
                     }
                 }
             }
         }
+
+        // Unknown escape — copy the '&' verbatim and move on.
+        out.push('&');
         i += 1;
     }
 
-    Ok(result)
+    Ok(out)
 }
 
 // ==================== Punycode 编解码 ====================
 
 #[tauri::command]
 pub fn punycode_encode(input: String) -> Result<String, String> {
-    // 简单的Punycode实现：处理ASCII部分直接复制，非ASCII转为 "xn--" 格式
-    let mut result = String::new();
-    let mut ascii_prefix = String::new();
-
-    for c in input.chars() {
-        if c.is_ascii() {
-            ascii_prefix.push(c);
-        } else {
-            // 将之前的ASCII部分加入结果
-            if !ascii_prefix.is_empty() {
-                result.push_str(&ascii_prefix);
-                ascii_prefix.clear();
-            }
-            // 将Unicode字符转为Punycode格式
-            // 使用简单的 "xn--" 前缀 + ASCII Compatible Encoding (ACE)
-            let code_point = c as u32;
-            // 简化的实现：将码点转为 base-36 编码
-            result.push_str("xn--");
-            result.push_str(&encode_punycode_prefix(code_point));
-        }
-    }
-
-    // 处理末尾的ASCII部分
-    if !ascii_prefix.is_empty() {
-        if result.is_empty() {
-            result = ascii_prefix;
-        } else {
-            result.push_str(&ascii_prefix);
-        }
-    }
-
-    if result.is_empty() {
-        result = input;
-    }
-
-    Ok(result)
-}
-
-fn encode_punycode_prefix(code: u32) -> String {
-    // 将码点编码为base36字符串
-    let chars: Vec<char> = "0123456789abcdefghijklmnopqrstuvwxyz".chars().collect();
-    let mut code = code;
-    let mut result = String::new();
-
-    while code > 0 {
-        let idx = (code % 36) as usize;
-        result.push(chars[idx]);
-        code /= 36;
-    }
-
-    result.chars().rev().collect()
+    punycode::encode(&input).map_err(|_| "Punycode 编码失败".to_string())
 }
 
 #[tauri::command]
 pub fn punycode_decode(input: String) -> Result<String, String> {
-    // 检查是否包含 "xn--" 前缀
-    if input.starts_with("xn--") {
-        // 简化实现：提取 "xn--" 后的内容并尝试解码
-        let encoded = &input[4..];
-        // 尝试将base36字符串转回码点
-        let code_point = decode_punycode_prefix(encoded)?;
-        if let Some(ch) = char::from_u32(code_point) {
-            Ok(ch.to_string())
-        } else {
-            Err("无效的Punycode码点".to_string())
-        }
-    } else {
-        // 没有 "xn--" 前缀，直接返回（可能是纯ASCII域名）
-        Ok(input)
-    }
-}
-
-fn decode_punycode_prefix(encoded: &str) -> Result<u32, String> {
-    let chars: Vec<char> = "0123456789abcdefghijklmnopqrstuvwxyz".chars().collect();
-    let mut code: u32 = 0;
-
-    for c in encoded.chars().rev() {
-        if let Some(idx) = chars.iter().position(|&x| x == c) {
-            code = code * 36 + idx as u32;
-        } else {
-            return Err(format!("无效的Punycode字符: {}", c));
-        }
-    }
-
-    Ok(code)
+    punycode::decode(&input).map_err(|_| "Punycode 解码失败".to_string())
 }
 
 // ==================== 进制转换辅助 ====================

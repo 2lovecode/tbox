@@ -6,20 +6,21 @@ import { invoke } from "@tauri-apps/api/core";
 import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
-import RoleSelection from "@/components/onboarding/RoleSelection.vue";
 import SpotlightSearch from "@/components/SpotlightSearch.vue";
-import { useRoleStore } from "@/stores/role";
 import { useSearchStore } from "@/stores/search";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
+import ShortcutHints from "@/components/ShortcutHints.vue";
 import { useTheme } from "@/composables/useTheme";
+import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
+import { formatShortcut } from "@/composables/useKeyboardShortcuts";
 
 const store  = useToolStore()
-const roleStore = useRoleStore()
 const searchStore = useSearchStore()
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
+const shortcuts = useKeyboardShortcuts()
 
 // 工具数据
 const tools = ref<Tool[]>([]);
@@ -30,18 +31,26 @@ const isLoading = ref(true);
 // can't leave stale listeners behind.
 let unlistenSpotlight: (() => void) | null = null;
 
+// Global keyboard shortcuts. `useKeyboardShortcuts` auto-cleans on scope
+// dispose, so we just declare them once. Cmd/Ctrl+K toggles Spotlight,
+// Cmd/Ctrl+[ jumps to the homepage (mirrors the macOS "back" convention),
+// Cmd/Ctrl+\ toggles theme, and `?` (handled inside ShortcutHints itself)
+// surfaces the panel.
+shortcuts.bind('k', { meta: true, ctrl: true }, () => {
+  searchStore.toggle();
+});
+shortcuts.bind('[', { meta: true, ctrl: true }, () => {
+  if (route.path !== '/') router.push('/');
+});
+shortcuts.bind('\\', { meta: true, ctrl: true }, () => {
+  toggleTheme();
+});
+
 // 加载categories
 // 加载tools
 onMounted(async () => {
-  // 初始化角色状态
-  await roleStore.initialize();
-
   unlistenSpotlight = await listen('spotlight:toggle', () => {
-    // Don't open Spotlight on top of the role wizard — it would steal
-    // focus from the onboarding flow and confuse first-time users.
-    if (!roleStore.showOnboarding) {
-      searchStore.open();
-    }
+    searchStore.toggle();
   });
 
   isLoading.value = true;
@@ -87,34 +96,15 @@ onMounted(async () => {
   }
 })
 
-const searchQuery = ref('');
-
-// 监听路由变化，同步搜索框状态
-watch(() => route.query.search, (newVal) => {
-  searchQuery.value = (newVal as string) || '';
-}, { immediate: true });
-
-// 搜索功能 - 实时搜索并跳转到搜索结果页
-const searchTools = () => {
-  if (searchQuery.value.trim()) {
-    // 跳转到首页并传递搜索参数
-    router.push({ path: '/', query: { search: searchQuery.value.trim() } });
-  } else if (route.query.search) {
-    // 清空搜索时移除搜索参数
-    router.push({ path: '/' });
-  }
-};
-
-// 清空搜索
-const clearSearch = () => {
-  searchQuery.value = '';
-  if (route.query.search) {
-    router.push({ path: '/' });
-  }
-};
-
 // 计算是否显示侧边栏（在工具页面不显示）
 const showSidebar = computed(() => route.path === '/')
+
+// Detect platform once for the keyboard-shortcut hint in the header.
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const spotlightHint = formatShortcut(
+  { key: 'k', meta: true, ctrl: true },
+  { platform: isMac ? 'mac' : 'other' },
+);
 
 onBeforeUnmount(() => {
   if (unlistenSpotlight) {
@@ -126,9 +116,6 @@ onBeforeUnmount(() => {
 
 <template>
       <div class="container" :class="{ 'no-sidebar': !showSidebar, 'dark-mode': isDark }">
-        <!-- 首次启动 / 重新选择角色时显示引导 -->
-        <RoleSelection v-if="roleStore.showOnboarding" />
-        <template v-else>
         <header>
           <div class="logo" @click="$router.push('/')" style="cursor: pointer;">
             <div class="logo-icon">
@@ -137,24 +124,16 @@ onBeforeUnmount(() => {
             <div class="logo-text">万能<span>工具箱</span></div>
           </div>
           <div class="header-actions">
-            <div class="search-container" v-if="showSidebar">
-              <i class="fas fa-search search-icon"></i>
-              <input
-                type="text"
-                placeholder="搜索工具名称、描述或标签..."
-                v-model="searchQuery"
-                @keyup.enter="searchTools"
-                @input="searchTools"
-              >
-              <button
-                v-if="searchQuery"
-                @click="clearSearch"
-                class="search-clear"
-                title="清空搜索"
-              >
-                <i class="fas fa-times"></i>
-              </button>
-            </div>
+            <button
+              type="button"
+              class="spotlight-trigger"
+              :title="`打开搜索面板 (${spotlightHint})`"
+              @click="searchStore.toggle()"
+            >
+              <i class="fas fa-search"></i>
+              <span class="spotlight-trigger-label">搜索工具…</span>
+              <kbd class="spotlight-trigger-kbd">{{ spotlightHint }}</kbd>
+            </button>
             <button @click="toggleTheme" class="theme-toggle" :title="isDark ? '切换到浅色模式' : '切换到深色模式'">
               <i :class="isDark ? 'fas fa-sun' : 'fas fa-moon'"></i>
             </button>
@@ -175,7 +154,7 @@ onBeforeUnmount(() => {
         </footer>
         <Toast />
         <SpotlightSearch />
-        </template>
+        <ShortcutHints />
       </div>
 </template>
 
@@ -347,6 +326,65 @@ onBeforeUnmount(() => {
   .theme-toggle:hover {
     transform: scale(1.1);
     box-shadow: 0 6px 25px rgba(67, 97, 238, 0.3);
+  }
+
+  /* Spotlight 触发按钮 — 替代旧的搜索框，把 Cmd/Ctrl+K 提示做明显 */
+  .spotlight-trigger {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 240px;
+    padding: 10px 16px;
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    box-shadow: var(--shadow);
+    transition: var(--transition);
+  }
+  .spotlight-trigger:hover {
+    border-color: var(--primary);
+    color: var(--primary);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 25px rgba(67, 97, 238, 0.2);
+  }
+  .spotlight-trigger:focus-visible {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2);
+  }
+  .spotlight-trigger > i {
+    font-size: 15px;
+  }
+  .spotlight-trigger-label {
+    flex: 1;
+    text-align: left;
+    color: var(--text-secondary);
+    font-size: 15px;
+  }
+  .spotlight-trigger-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 48px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+  }
+  .spotlight-trigger:hover .spotlight-trigger-kbd {
+    background: rgba(67, 97, 238, 0.12);
+    border-color: rgba(67, 97, 238, 0.35);
+    color: var(--primary);
   }
 
   /* 搜索区域样式 */

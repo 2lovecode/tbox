@@ -1,65 +1,70 @@
-import { ref, watch } from "vue";
+import { ref, watch, onScopeDispose, type Ref } from "vue";
 
 export type Theme = "light" | "dark" | "system";
 
 const THEME_KEY = "app-theme";
 
-const currentTheme = ref<Theme>(
-  (localStorage.getItem(THEME_KEY) as Theme) || "system",
-);
-const isDark = ref(false);
+/**
+ * Theme composable. Each call creates an isolated, scoped theme state that
+ * automatically tracks the system preference and cleans up listeners when
+ * the consuming component is unmounted.
+ */
+export function useTheme() {
+  const readInitial = (): Theme => {
+    if (typeof window === "undefined") return "system";
+    const stored = window.localStorage.getItem(THEME_KEY) as Theme | null;
+    return stored ?? "system";
+  };
 
-// Update dark mode based on theme
-function updateDarkMode() {
-  if (currentTheme.value === "system") {
-    isDark.value = window.matchMedia("(prefers-color-scheme: dark)").matches;
-  } else {
-    isDark.value = currentTheme.value === "dark";
-  }
+  const theme = ref<Theme>(readInitial());
+  const isDark = ref(false);
 
-  // Apply to document
-  if (isDark.value) {
-    document.documentElement.classList.add("dark");
-  } else {
-    document.documentElement.classList.remove("dark");
-  }
-}
+  const media = typeof window !== "undefined"
+    ? window.matchMedia("(prefers-color-scheme: dark)")
+    : null;
 
-// Initialize
-updateDarkMode();
+  const applyTheme = (value: Theme) => {
+    if (value === "system") {
+      isDark.value = media?.matches ?? false;
+    } else {
+      isDark.value = value === "dark";
+    }
 
-// Watch for theme changes
-watch(currentTheme, updateDarkMode);
+    if (typeof document !== "undefined") {
+      document.documentElement.classList.toggle("dark", isDark.value);
+    }
+  };
 
-// Watch for system theme changes
-window
-  .matchMedia("(prefers-color-scheme: dark)")
-  .addEventListener("change", () => {
-    if (currentTheme.value === "system") {
-      updateDarkMode();
+  applyTheme(theme.value);
+
+  const stopWatch = watch(theme, (next) => {
+    applyTheme(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(THEME_KEY, next);
     }
   });
 
-export function useTheme() {
-  function setTheme(theme: Theme) {
-    currentTheme.value = theme;
-    localStorage.setItem(THEME_KEY, theme);
+  const handleSystemChange = () => {
+    if (theme.value === "system") applyTheme("system");
+  };
+  media?.addEventListener("change", handleSystemChange);
+
+  onScopeDispose(() => {
+    stopWatch();
+    media?.removeEventListener("change", handleSystemChange);
+  });
+
+  function setTheme(next: Theme) {
+    theme.value = next;
   }
 
   function toggleTheme() {
-    if (currentTheme.value === "light") {
-      setTheme("dark");
-    } else if (currentTheme.value === "dark") {
-      setTheme("system");
-    } else {
-      setTheme("light");
-    }
+    if (theme.value === "light") setTheme("dark");
+    else if (theme.value === "dark") setTheme("system");
+    else setTheme("light");
   }
 
-  return {
-    theme: currentTheme,
-    isDark,
-    setTheme,
-    toggleTheme,
-  };
+  return { theme, isDark, setTheme, toggleTheme };
 }
+
+export type ThemeRef = Ref<Theme>;

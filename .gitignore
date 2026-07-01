@@ -47,3 +47,7 @@ _bmad-output
 # Documentation (keep only important ones)
 IMPROVEMENTS.md
 IMPLEMENTATION_SUMMARY.md
+
+# Sandbox-local CARGO_HOME (created when cargo check runs with escalated
+# sandbox permissions and CARGO_HOME pointed at the repo root).
+/.cargo/

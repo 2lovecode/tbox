@@ -1,57 +1,22 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
+import { useToast } from '@/composables/useToast'
 
-interface ToastMessage {
-  id: number
-  message: string
-  type: 'success' | 'error' | 'info' | 'warning'
-  duration?: number
-  timeoutId?: ReturnType<typeof setTimeout>
-}
+const { toasts, remove: removeToast } = useToast()
 
-const toasts = ref<ToastMessage[]>([])
-let toastId = 0
-
-const showToast = (message: string, type: ToastMessage['type'] = 'info', duration: number = 3000) => {
-  const id = toastId++
-  const timeoutId = setTimeout(() => {
-    removeToast(id)
-  }, duration)
-  const toast: ToastMessage = { id, message, type, duration, timeoutId }
-  toasts.value.push(toast)
-}
-
-const removeToast = (id: number) => {
-  const index = toasts.value.findIndex(t => t.id === id)
-  if (index > -1) {
-    const toast = toasts.value[index]
-    if (toast.timeoutId) {
-      clearTimeout(toast.timeoutId)
-    }
-    toasts.value.splice(index, 1)
-  }
-}
-
-// 暴露方法供外部调用
-defineExpose({
-  showToast
-})
-
-// 全局注册
+// Backwards-compatible shim: legacy callers still go through window.$toast
+// so we don't have to touch every call site in this commit.
 onMounted(() => {
   if (typeof window !== 'undefined') {
-    ;(window as any).$toast = showToast
+    ;(window as any).$toast = (message: string, type: string) =>
+      useToast().show(message, type as 'success' | 'error' | 'info' | 'warning')
   }
 })
 
-// 清理所有待处理的定时器
 onUnmounted(() => {
-  toasts.value.forEach(toast => {
-    if (toast.timeoutId) {
-      clearTimeout(toast.timeoutId)
-    }
-  })
-  toasts.value = []
+  if (typeof window !== 'undefined') {
+    ;(window as any).$toast = undefined
+  }
 })
 </script>
 
