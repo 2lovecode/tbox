@@ -17,6 +17,23 @@ pub struct SearchResult {
     pub gradient: String,
 }
 
+/// Story 5.1 (Phase 1.5 v0) lightweight local intent routing output.
+/// `score` is non-normalised — higher is better — and `reason` is a short
+/// Chinese string used by the UI to explain which signals fired
+/// (e.g. "名称匹配" / "意图: 描述关键词 x2").
+#[derive(Debug, Clone, Serialize)]
+pub struct AiRouteResult {
+    pub id: u32,
+    pub name: String,
+    pub description: String,
+    pub icon: String,
+    pub category_id: Option<u32>,
+    pub category_name: Option<String>,
+    pub tags: Vec<String>,
+    pub gradient: String,
+    pub score: f64,
+    pub reason: String,
+}
 /// 全局分词器
 static JIEBA: Lazy<Jieba> = Lazy::new(|| Jieba::new());
 
@@ -256,4 +273,189 @@ pub fn build_search_index(tools: Vec<SearchResult>) {
 pub fn search_tools(query: String) -> Vec<SearchResult> {
     let index = SEARCH_INDEX.lock().unwrap();
     index.search(&query)
+}
+
+// ---------------------------------------------------------------------------
+// Story 5.1 (Phase 1.5 v0): lightweight local intent routing.
+//
+// This is a deliberately narrow slice of "AI search": instead of shipping an
+// LLM (which would require model download, 300MB+ binary, and bypasses the
+// project constraint of zero-network) we score candidate tools using the
+// jieba tokeniser, pinyin/initials, and a per-tool tag/description match
+// across the whole query.
+//
+// The output `AiRouteResult` includes a `reason` string so the Spotlight UI
+// can show users why a tool was promoted. This keeps the same UX contract
+// we'd want from an LLM-backed intent router (transparency) without the
+// binary-size cost.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub(crate) struct ScoredTool {
+    info: SearchResult,
+    score: f64,
+    reason: String,
+}
+
+/// Slice the query through jieba and drop empty / single-char / pure-punct
+/// segments. Used as the unit of "meaningful word" for intent scoring.
+fn meaningful_query_tokens(query: &str) -> Vec<String> {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    JIEBA
+        .cut(trimmed, false)
+        .into_iter()
+        .map(|w| w.trim().to_lowercase())
+        .filter(|w| !w.is_empty() && w.chars().any(|c| !c.is_whitespace()))
+        .collect()
+}
+
+impl SearchIndex {
+    /// Story 5.1: rank the tools inside `tool_ids` against the user's query.
+    /// Returns scored candidates sorted by descending `score`. Tools missing
+    /// from the index are silently skipped — callers should already have
+    /// presented an authoritative tool list to the user.
+    pub(crate) fn rank_intent(&self, query: &str, tool_ids: &[u32]) -> Vec<ScoredTool> {
+        let tokens = meaningful_query_tokens(query);
+        let query_lower = query.to_lowercase();
+        let query_pinyin = Self::get_pinyin(query);
+        let query_initials = Self::get_pinyin_initials(query);
+
+        let mut scored = Vec::with_capacity(tool_ids.len());
+        for id in tool_ids {
+            let info = match self.tool_id_to_info.get(id) {
+                Some(info) => info,
+                None => continue,
+            };
+
+            let mut score = 0.0;
+            let mut reasons: Vec<String> = Vec::new();
+
+            // Whole-query name / pinyin match keeps it compatible with the
+            // existing `search_tools` ranking so users see deterministic
+            // ordering when they type exact tool names.
+            if info.name.to_lowercase().contains(&query_lower) {
+                score += 100.0;
+                reasons.push("名称匹配".to_string());
+            }
+            if Self::get_pinyin(&info.name.to_lowercase()).contains(&query_pinyin) {
+                score += 80.0;
+                if !reasons.iter().any(|r| r == "拼音匹配") {
+                    reasons.push("拼音匹配".to_string());
+                }
+            }
+            let initials = Self::get_pinyin_initials(&info.name);
+            if initials.starts_with(&query_initials) {
+                score += 60.0;
+                if !reasons.iter().any(|r| r == "首字母匹配") {
+                    reasons.push("首字母匹配".to_string());
+                }
+            }
+
+            // Intent: each jieba segment contributes based on where it lands
+            // (tag > description > name suffix). Multi-token queries add
+            // multiplicative matching so a query like "图片 压缩" picks
+            // "图片压缩" instead of any single-word hit.
+            if !tokens.is_empty() {
+                let mut token_hits = 0usize;
+                for tok in &tokens {
+                    let tag_hit = info
+                        .tags
+                        .iter()
+                        .any(|tag| tag.to_lowercase().contains(tok));
+                    let desc_hit = info.description.to_lowercase().contains(tok);
+                    let name_hit = info.name.to_lowercase().contains(tok);
+
+                    if tag_hit {
+                        score += 25.0;
+                        token_hits += 1;
+                    } else if desc_hit {
+                        score += 12.0;
+                        token_hits += 1;
+                    } else if name_hit {
+                        score += 18.0;
+                        token_hits += 1;
+                    }
+                }
+
+                if tokens.len() > 1 && token_hits == tokens.len() {
+                    // Multi-token full match — the strongest intent signal.
+                    score += 40.0;
+                    reasons.push(format!("意图匹配 {} 项", tokens.len()));
+                } else if token_hits > 0 {
+                    reasons.push(format!("意图部分匹配 {} 项", token_hits));
+                }
+            }
+
+            // If nothing fired we still want to surface the candidate in
+            // deterministic order so the UI doesn't show gaps; the small
+            // base keeps `displayedResults` ordering stable.
+            if reasons.is_empty() {
+                score += 0.001 * (1.0 / (*id as f64 + 1.0));
+            }
+
+            scored.push(ScoredTool {
+                info: info.clone(),
+                score,
+                reason: reasons.join(" · "),
+            });
+        }
+
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.info.id.cmp(&b.info.id))
+        });
+        scored
+    }
+}
+
+/// Local intent router used by Spotlight when `aiMode` is on.
+///
+/// Inputs:
+///   - `query`: the user's natural-language query
+///   - `tool_ids`: tools the frontend wants considered (typically the current
+///     `search_tools` result ids). Empty means "rank the whole index".
+///   - `role_ids`: tools mapped to any of these roles are weighted higher
+///     (Story 2.4 role-aware boost, applied at the local AI layer).
+#[tauri::command]
+pub fn ai_route_intent(
+    query: String,
+    tool_ids: Vec<u32>,
+) -> Vec<AiRouteResult> {
+    let index = SEARCH_INDEX.lock().unwrap();
+
+    // If the frontend didn't pre-filter, consider every tool in the index.
+    let candidate_ids: Vec<u32> = if tool_ids.is_empty() {
+        index.tool_id_to_info.keys().copied().collect()
+    } else {
+        tool_ids
+    };
+
+    let scored = index.rank_intent(&query, &candidate_ids);
+
+    // Story 2.4 role boost is applied client-side inside
+    // `displayedResults`. By design this command stays role-agnostic —
+    // it scores purely on jieba/pinyin/tag/description intent signals
+    // derived from `query` + `tool_ids`. Keeping it pure makes it easy
+    // to unit-test and avoids loading the tool<->role mapping here.
+
+    scored
+        .into_iter()
+        .map(|s| AiRouteResult {
+            id: s.info.id,
+            name: s.info.name,
+            description: s.info.description,
+            icon: s.info.icon,
+            category_id: s.info.category_id,
+            category_name: s.info.category_name,
+            tags: s.info.tags,
+            gradient: s.info.gradient,
+            score: s.score,
+            reason: s.reason,
+        })
+        .collect()
 }

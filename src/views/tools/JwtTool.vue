@@ -85,9 +85,7 @@
           <div class="token-output">
             <code>{{ generatedToken }}</code>
           </div>
-          <button @click="copyToken" class="btn-secondary">
-            <i class="fas fa-copy"></i> 复制Token
-          </button>
+          <CopyButton :text="generatedToken" label="复制Token" variant="action" />
         </div>
       </div>
     </div>
@@ -97,6 +95,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const activeTab = ref('parse');
 const jwtToken = ref('');
@@ -104,6 +105,18 @@ const jwtPayload = ref('');
 const jwtSecret = ref('');
 const parseResult = ref<any>(null);
 const generatedToken = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/jwt-tool',
+  {
+    copy: () => { void copy(generatedToken.value); },
+  },
+  [
+    { id: 'jwt-copy', group: '结果', description: '复制 JWT Token', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 
 const parseJwt = async () => {
   if (!jwtToken.value.trim()) {
@@ -162,16 +175,7 @@ const generateJwt = async () => {
   }
 };
 
-const copyToken = async () => {
-  try {
-    await navigator.clipboard.writeText(generatedToken.value);
-    if ((window as any).$toast) {
-      (window as any).$toast('Token已复制到剪贴板', 'success');
-    }
-  } catch (e) {
-    console.error('复制失败:', e);
-  }
-};
+// 复制按钮已切到 CopyButton + useClipboard；copyToken 不再需要。
 </script>
 
 <style scoped>

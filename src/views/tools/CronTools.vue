@@ -99,7 +99,7 @@
       <div v-if="result" class="result">
         <h4>Cron 表达式:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
 
       <div v-if="result" class="natural-language">
@@ -148,7 +148,7 @@
         <div v-for="example in examples" :key="example.expression" class="example-item">
           <div class="example-expression">
             <code>{{ example.expression }}</code>
-            <button @click="copyToClipboard(example.expression)" class="copy-btn-small">复制</button>
+            <CopyButton :text="example.expression" label="复制" variant="action" />
           </div>
           <div class="example-description">{{ example.description }}</div>
         </div>
@@ -164,12 +164,27 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const currentTab = ref('generate');
 const error = ref('');
 const result = ref('');
 const validateResult = ref<boolean | null>(null);
 const validateError = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/cron-tools',
+  {
+    copy: () => { void copy(result.value); },
+  },
+  [
+    { id: 'cron-copy', group: '结果', description: '复制 Cron 表达式', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 const naturalLanguage = ref('');
 const validateInput = ref('');
 const explainInput = ref('');
@@ -258,13 +273,7 @@ async function explainCron() {
   }
 }
 
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (e) {
-    error.value = '复制失败';
-  }
-}
+// 复制按钮已切到 CopyButton + useClipboard。
 </script>
 
 <style scoped>

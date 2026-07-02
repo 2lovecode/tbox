@@ -1,11 +1,13 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import { useToast } from '@/composables/useToast';
 
 const activeTab = ref('merge')
 const selectedFiles = ref<File[]>([])
 const isProcessing = ref(false)
+
+const toast = useToast();
 
 const tabs = [
   { id: 'merge', label: '合并PDF', icon: 'fas fa-layer-group' },

@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import { useToast } from '@/composables/useToast';
 
 interface VideoFile {
   name: string
@@ -15,6 +15,8 @@ const isConverting = ref(false)
 const conversionProgress = ref(0)
 const outputFormat = ref('mp4')
 const quality = ref('high')
+
+const toast = useToast();
 
 const supportedFormats = [
   { value: 'mp4', label: 'MP4' },

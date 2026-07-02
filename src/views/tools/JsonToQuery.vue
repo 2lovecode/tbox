@@ -29,16 +29,12 @@
         <div class="result-box">
           <div class="result-label">未编码:</div>
           <div class="result-value">{{ result.query_string }}</div>
-          <button @click="copyText(result.query_string)" class="copy-btn">
-            <i class="fas fa-copy"></i> 复制
-          </button>
+          <CopyButton :text="result.query_string" label="复制" variant="action" />
         </div>
         <div class="result-box">
           <div class="result-label">URL编码:</div>
           <div class="result-value encoded">{{ result.encoded }}</div>
-          <button @click="copyText(result.encoded)" class="copy-btn">
-            <i class="fas fa-copy"></i> 复制
-          </button>
+          <CopyButton :text="result.encoded" label="复制" variant="action" />
         </div>
       </div>
 
@@ -83,6 +79,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 interface QueryResult {
   query_string: string;
@@ -90,6 +89,18 @@ interface QueryResult {
 }
 
 const jsonInput = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/json-to-query',
+  {
+    copy: () => { if (result.value) void copy(result.value.query_string); },
+  },
+  [
+    { id: 'j2q-copy', group: '结果', description: '复制 Query 字符串', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 const result = ref<QueryResult | null>(null);
 const error = ref('');
 
@@ -126,13 +137,7 @@ const clearAll = () => {
   error.value = '';
 };
 
-const copyText = (text: string) => {
-  navigator.clipboard.writeText(text).then(() => {
-    if ((window as any).$toast) {
-      (window as any).$toast('已复制到剪贴板', 'success');
-    }
-  });
-};
+// 复制按钮已切到 CopyButton + useClipboard；copyText 不再需要。
 </script>
 
 <style scoped>

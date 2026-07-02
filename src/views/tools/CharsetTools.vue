@@ -54,7 +54,7 @@
       <div v-if="result" class="result">
         <h4>转换结果:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -70,7 +70,7 @@
       <div v-if="result" class="result">
         <h4>结果:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -86,7 +86,7 @@
       <div v-if="result" class="result">
         <h4>结果:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -102,7 +102,7 @@
       <div v-if="result" class="result">
         <h4>结果:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -115,9 +115,24 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const currentTab = ref('detect');
 const error = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/charset-tools',
+  {
+    copy: () => { void copy(result.value); },
+  },
+  [
+    { id: 'charset-copy', group: '结果', description: '复制当前结果', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 const result = ref('');
 
 const detectText = ref('');
@@ -220,13 +235,7 @@ async function punycodeDecode() {
   }
 }
 
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (e) {
-    error.value = '复制失败';
-  }
-}
+// 复制按钮已切到 CopyButton + useClipboard。
 </script>
 
 <style scoped>

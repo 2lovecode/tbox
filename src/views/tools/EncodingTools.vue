@@ -57,9 +57,7 @@
             <div class="panel-header">
               <label>结果</label>
               <div class="panel-actions">
-                <button v-if="currentOutput" @click="copyResult(currentOutput)" class="btn-small" title="复制">
-                  <i class="fas fa-copy"></i> 复制
-                </button>
+                <CopyButton v-if="currentOutput" :text="currentOutput" label="复制" variant="action" />
                 <button v-if="currentOutput" @click="saveToFile" class="btn-small" title="保存到文件">
                   <i class="fas fa-file-export"></i> 保存
                 </button>
@@ -194,10 +192,25 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const activeTab = ref('url');
 const showAsciiTable = ref(false);
 const inputRef = ref<HTMLTextAreaElement | null>(null);
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/encoding-tools',
+  {
+    copy: () => { void copy(currentOutput.value); },
+  },
+  [
+    { id: 'enc-copy', group: '结果', description: '复制当前结果', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 
 const tabs = [
   { key: 'url', name: 'URL编码', icon: 'fas fa-link' },
@@ -377,16 +390,7 @@ const showToast = (message: string, type: 'success' | 'error' = 'success') => {
   }
 };
 
-// 复制
-const copyResult = async (text: string) => {
-  if (!text) return;
-  try {
-    await navigator.clipboard.writeText(text);
-    showToast('已复制到剪贴板');
-  } catch (e) {
-    showToast('复制失败', 'error');
-  }
-};
+// 复制按钮已切到 CopyButton + useClipboard；copyResult 不再需要。
 
 // 清空
 const clearInput = () => {

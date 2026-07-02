@@ -150,6 +150,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 interface Timezone {
   label: string;
@@ -350,18 +352,19 @@ const handleDatetimeInput = () => {
   };
 };
 
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/timestamp-converter',
+  {},
+  [
+    // 此页面的复制入口在结果行内（点击数值即复制），不挂 Cmd+Shift+C 全局快捷键以免误触。
+  ],
+);
+
 // 复制结果
 const copyResult = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text);
-    if ((window as any).$toast) {
-      (window as any).$toast('已复制');
-    }
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('复制失败', 'error');
-    }
-  }
+  await copy(text, { successMessage: '已复制' });
 };
 
 // 常用时间格式示例

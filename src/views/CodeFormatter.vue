@@ -2,13 +2,33 @@
 import { ref } from 'vue'
 import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToast } from '@/composables/useToast';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const code = ref('')
 const formattedCode = ref('')
 const language = ref('javascript')
 const indentSize = ref(2)
 const indentType = ref<'space' | 'tab'>('space')
+
+const toast = useToast();
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/code-formatter',
+  {
+    run: () => { void formatCode(); },
+    copy: () => { void copy(formattedCode.value); },
+    clear: () => clearCode(),
+  },
+  [
+    { id: 'cf-run', group: '工具', description: '格式化当前代码', spec: { key: 'Enter', meta: true } },
+    { id: 'cf-copy', group: '结果', description: '复制格式化结果', spec: { key: 'C', meta: true, shift: true } },
+    { id: 'cf-clear', group: '工具', description: '清空输入与结果', spec: { key: 'L', meta: true } },
+  ],
+);
 
 const languages = [
   { value: 'javascript', label: 'JavaScript' },
@@ -122,15 +142,7 @@ const formatBasic = (code: string): string => {
   return formatted.trim()
 }
 
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success('已复制到剪贴板')
-  } catch (err) {
-    console.error('复制失败:', err)
-    toast.error('复制失败')
-  }
-}
+// 复制按钮已切到 <CopyButton> + useClipboard，不需要本地函数。
 
 const clearCode = () => {
   code.value = ''
@@ -204,9 +216,7 @@ const loadExample = () => {
     <div v-if="formattedCode" class="formatted-section">
       <div class="editor-header">
         <h3>格式化结果</h3>
-        <button @click="copyToClipboard(formattedCode)" class="copy-btn">
-          <i class="fas fa-copy"></i> 复制
-        </button>
+        <CopyButton :text="formattedCode" variant="action" />
       </div>
       <pre class="code-output"><code>{{ formattedCode }}</code></pre>
     </div>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { formatShortcut, type ShortcutSpec } from '@/composables/useKeyboardShortcuts';
+import { detectPlatform } from '@/utils/platform';
 
 interface ShortcutEntry {
   /** Stable id so the overlay can scroll back to it if needed. */
@@ -16,7 +17,7 @@ interface ShortcutEntry {
 const isOpen = ref(false);
 
 const platform = computed<'mac' | 'other'>(() =>
-  typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? 'mac' : 'other',
+  detectPlatform() === 'mac' ? 'mac' : 'other',
 );
 
 const shortcuts: ShortcutEntry[] = [

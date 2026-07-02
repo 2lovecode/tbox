@@ -1,7 +1,8 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import CopyButton from '@/components/CopyButton.vue';
+import { useToast } from '@/composables/useToast';
 
 interface PasswordEntry {
   id: string
@@ -36,6 +37,9 @@ const filteredEntries = computed(() => {
     entry.url.toLowerCase().includes(query)
   )
 })
+
+const toast = useToast();
+// 复制按钮都走 CopyButton 组件，useClipboard 不再需要在此处显式调用。
 
 // 生成强密码
 const generatePassword = (length: number = 16) => {
@@ -115,16 +119,7 @@ const deleteEntry = (id: string) => {
   }
 }
 
-// 复制到剪贴板
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success('已复制到剪贴板')
-  } catch (err) {
-    console.error('复制失败:', err)
-    toast.error('复制失败')
-  }
-}
+// 复制通过 CopyButton + useClipboard 处理。
 
 // 切换密码显示
 const togglePassword = (id: string) => {
@@ -237,9 +232,7 @@ loadEntries()
           <div v-if="entry.username" class="entry-field">
             <label>用户名:</label>
             <span>{{ entry.username }}</span>
-            <button @click="copyToClipboard(entry.username)" class="copy-btn">
-              <i class="fas fa-copy"></i>
-            </button>
+            <CopyButton :text="entry.username" label="" variant="action" />
           </div>
           <div class="entry-field">
             <label>密码:</label>
@@ -247,9 +240,7 @@ loadEntries()
             <button @click="togglePassword(entry.id)" class="toggle-btn">
               <i :class="showPassword[entry.id] ? 'fas fa-eye-slash' : 'fas fa-eye'"></i>
             </button>
-            <button @click="copyToClipboard(entry.password)" class="copy-btn">
-              <i class="fas fa-copy"></i>
-            </button>
+            <CopyButton :text="entry.password" label="" variant="action" />
           </div>
           <div v-if="entry.url" class="entry-field">
             <label>网址:</label>

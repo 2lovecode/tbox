@@ -27,7 +27,7 @@
       <div v-if="result" class="result">
         <h4>结果:</h4>
         <code>{{ result }}</code>
-        <button @click="copyToClipboard(result)" class="copy-btn">复制</button>
+        <CopyButton :text="result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -49,13 +49,13 @@
       <div v-if="batchResults.length > 0" class="result">
         <div class="result-header">
           <h4>结果 ({{ batchResults.length }} 个):</h4>
-          <button @click="copyAllToClipboard" class="copy-btn">复制全部</button>
+          <CopyButton :text="batchResults.join('\n')" label="复制全部" variant="action" />
         </div>
         <div class="batch-results">
           <div v-for="(uuid, index) in batchResults" :key="index" class="batch-item">
             <span class="index">{{ index + 1 }}.</span>
             <code>{{ uuid }}</code>
-            <button @click="copyToClipboard(uuid)" class="copy-btn-small">复制</button>
+            <CopyButton :text="uuid" label="复制" variant="action" />
           </div>
         </div>
       </div>
@@ -89,7 +89,7 @@
       <div v-if="convertResult" class="result">
         <h4>转换结果:</h4>
         <code>{{ convertResult }}</code>
-        <button @click="copyToClipboard(convertResult)" class="copy-btn">复制</button>
+        <CopyButton :text="convertResult" label="复制" variant="action" />
       </div>
     </div>
 
@@ -124,7 +124,7 @@
       <div v-if="v5Result" class="result">
         <h4>结果:</h4>
         <code>{{ v5Result }}</code>
-        <button @click="copyToClipboard(v5Result)" class="copy-btn">复制</button>
+        <CopyButton :text="v5Result" label="复制" variant="action" />
       </div>
     </div>
 
@@ -136,7 +136,7 @@
       <div v-if="nilResult" class="result">
         <h4>NIL UUID:</h4>
         <code>{{ nilResult }}</code>
-        <button @click="copyToClipboard(nilResult)" class="copy-btn">复制</button>
+        <CopyButton :text="nilResult" label="复制" variant="action" />
       </div>
     </div>
 
@@ -149,6 +149,9 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const currentTab = ref('generate');
 const error = ref('');
@@ -158,6 +161,22 @@ const convertResult = ref('');
 const versionResult = ref<number | null>(null);
 const v5Result = ref('');
 const nilResult = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/uuid-tools',
+  {
+    copy: () => {
+      const pick = [result.value, convertResult.value, v5Result.value, nilResult.value]
+        .find((v) => !!v);
+      if (pick) void copy(pick);
+    },
+  },
+  [
+    { id: 'uuid-copy', group: '结果', description: '复制首个非空结果', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 const batchResults = ref<string[]>([]);
 
 const uuidVersion = ref('v4');
@@ -274,21 +293,7 @@ async function generateNil() {
   }
 }
 
-async function copyToClipboard(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch (e) {
-    error.value = '复制失败';
-  }
-}
-
-async function copyAllToClipboard() {
-  try {
-    await navigator.clipboard.writeText(batchResults.value.join('\n'));
-  } catch (e) {
-    error.value = '复制失败';
-  }
-}
+// 复制按钮已切到 CopyButton + useClipboard；copyToClipboard / copyAllToClipboard 不再需要。
 </script>
 
 <style scoped>

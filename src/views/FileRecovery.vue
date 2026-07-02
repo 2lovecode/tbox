@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import { useToast } from '@/composables/useToast';
 
 interface RecoverableFile {
   name: string
@@ -17,6 +17,8 @@ const scanProgress = ref(0)
 const foundFiles = ref<RecoverableFile[]>([])
 const selectedFiles = ref<string[]>([])
 const isRecovering = ref(false)
+
+const toast = useToast();
 
 const formatFileSize = (bytes: number): string => {
   if (bytes === 0) return '0 Bytes'

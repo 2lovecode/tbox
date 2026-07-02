@@ -44,7 +44,7 @@
               class="result-textarea"
             ></textarea>
             <div class="button-group">
-              <button @click="copyBase64" class="btn-action-secondary">复制</button>
+              <CopyButton :text="base64Output" label="复制" variant="action" />
             </div>
           </div>
         </div>
@@ -116,8 +116,22 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const activeTab = ref('base64');
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/image-tools',
+  {
+    copy: () => { void copy(base64Output.value); },
+  },
+  [
+    { id: 'img-copy', group: '结果', description: '复制 Base64 结果', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 const tabs = [
   { key: 'base64', name: '转Base64', icon: 'fas fa-image' },
   { key: 'from-base64', name: 'Base64转图片', icon: 'fas fa-file-image' },
@@ -165,12 +179,7 @@ const imageToBase64 = async () => {
   }
 };
 
-const copyBase64 = () => {
-  navigator.clipboard.writeText(base64Output.value);
-  if ((window as any).$toast) {
-    (window as any).$toast('已复制到剪贴板', 'success');
-  }
-};
+// 复制按钮已切到 CopyButton + useClipboard；copyBase64 不再需要。
 
 const base64ToImage = async () => {
   try {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from "vue";
+import { ref, onMounted, computed } from "vue";
 import { onBeforeUnmount } from "vue";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,14 +12,17 @@ import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
 import ShortcutHints from "@/components/ShortcutHints.vue";
 import { useTheme } from "@/composables/useTheme";
+import { useOnlineStatus } from "@/composables/useOnlineStatus";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { formatShortcut } from "@/composables/useKeyboardShortcuts";
+import { detectPlatform } from "@/utils/platform";
 
 const store  = useToolStore()
 const searchStore = useSearchStore()
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
+const { isOnline } = useOnlineStatus()
 const shortcuts = useKeyboardShortcuts()
 
 // 工具数据
@@ -100,7 +103,7 @@ onMounted(async () => {
 const showSidebar = computed(() => route.path === '/')
 
 // Detect platform once for the keyboard-shortcut hint in the header.
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+const isMac = detectPlatform() === 'mac';
 const spotlightHint = formatShortcut(
   { key: 'k', meta: true, ctrl: true },
   { platform: isMac ? 'mac' : 'other' },
@@ -124,6 +127,16 @@ onBeforeUnmount(() => {
             <div class="logo-text">万能<span>工具箱</span></div>
           </div>
           <div class="header-actions">
+            <span
+              v-if="!isOnline"
+              class="offline-badge"
+              role="status"
+              aria-live="polite"
+              title="当前为离线状态，网络工具可能不可用"
+            >
+              <span class="offline-dot" aria-hidden="true"></span>
+              <span class="offline-label">离线</span>
+            </span>
             <button
               type="button"
               class="spotlight-trigger"
@@ -326,6 +339,31 @@ onBeforeUnmount(() => {
   .theme-toggle:hover {
     transform: scale(1.1);
     box-shadow: 0 6px 25px rgba(67, 97, 238, 0.3);
+  }
+
+  /* 离线状态徽标 — 仅在 navigator.onLine 报告 false 时出现 */
+  .offline-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(244, 67, 54, 0.12);
+    color: #c62828;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .dark-mode .offline-badge {
+    background: rgba(244, 67, 54, 0.22);
+    color: #ff8a80;
+  }
+  .offline-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    display: inline-block;
   }
 
   /* Spotlight 触发按钮 — 替代旧的搜索框，把 Cmd/Ctrl+K 提示做明显 */

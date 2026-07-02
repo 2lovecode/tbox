@@ -2,12 +2,35 @@
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
-import { toast } from '@/utils/toast'
+import CopyButton from '@/components/CopyButton.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { useToast } from '@/composables/useToast'
+import { useToolShortcuts } from '@/composables/useToolShortcuts'
 
 const input = ref('')
 const hashResults = ref<Record<string, string>>({})
 const selectedAlgorithm = ref('all')
 const isProcessing = ref(false)
+
+const toast = useToast()
+const { copy } = useClipboard()
+
+useToolShortcuts(
+  '/hash-generator',
+  {
+    run: () => { void generateHash() },
+    copy: () => {
+      const first = Object.values(hashResults.value)[0]
+      if (first) void copy(first)
+    },
+    clear: () => clear(),
+  },
+  [
+    { id: 'hash-run', group: '工具', description: '计算哈希值', spec: { key: 'Enter', meta: true } },
+    { id: 'hash-copy', group: '结果', description: '复制首个哈希结果', spec: { key: 'C', meta: true, shift: true } },
+    { id: 'hash-clear', group: '工具', description: '清空输入与结果', spec: { key: 'L', meta: true } },
+  ],
+)
 
 const algorithms = [
   { value: 'all', label: '全部算法' },
@@ -83,14 +106,7 @@ const md5 = async (message: string): Promise<string> => {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 32)
 }
 
-const copyHash = async (hash: string) => {
-  try {
-    await navigator.clipboard.writeText(hash)
-    toast.success('已复制到剪贴板')
-  } catch {
-    toast.error('复制失败')
-  }
-}
+// 复制按钮已切到 <CopyButton> + useClipboard，不需要本地函数。
 
 const clear = () => {
   input.value = ''
@@ -157,9 +173,7 @@ const loadExample = () => {
         >
           <div class="hash-header">
             <h4>{{ algorithm }}</h4>
-            <button @click="copyHash(hash)" class="copy-btn">
-              <i class="fas fa-copy"></i> 复制
-            </button>
+            <CopyButton :text="hash" variant="action" />
           </div>
           <div class="hash-value">
             <code>{{ hash }}</code>

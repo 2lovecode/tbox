@@ -43,9 +43,7 @@
           <i class="fas fa-sync-alt"></i> 转换
         </button>
 
-        <button v-if="outputCode" @click="copyCode" class="btn-secondary">
-          <i class="fas fa-copy"></i> 复制代码
-        </button>
+        <CopyButton v-if="outputCode" :text="outputCode" label="复制代码" variant="action" />
       </div>
 
       <div class="output-section" v-if="outputCode">
@@ -61,12 +59,27 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 const jsonInput = ref('');
 const jsonError = ref('');
 const selectedLanguage = ref('java');
 const className = ref('User');
 const outputCode = ref('');
+
+const { copy } = useClipboard();
+
+useToolShortcuts(
+  '/json-to-entity',
+  {
+    copy: () => { void copy(outputCode.value); },
+  },
+  [
+    { id: 'j2e-copy', group: '结果', description: '复制实体类代码', spec: { key: 'C', meta: true, shift: true } },
+  ],
+);
 
 const handleJsonInput = () => {
   jsonError.value = '';
@@ -129,16 +142,7 @@ const convertJson = async () => {
   }
 };
 
-const copyCode = async () => {
-  try {
-    await navigator.clipboard.writeText(outputCode.value);
-    if ((window as any).$toast) {
-      (window as any).$toast('代码已复制到剪贴板', 'success');
-    }
-  } catch (e) {
-    console.error('复制失败:', e);
-  }
-};
+// 复制按钮已切到 CopyButton + useClipboard；copyCode 不再需要。
 </script>
 
 <style scoped>

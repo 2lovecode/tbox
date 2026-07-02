@@ -90,6 +90,8 @@ pub fn run() {
             commands::role::get_user_role,
             // 搜索
             commands::search::search_tools,
+            // Story 5.1 (Phase 1.5 v0): 本地意图路由
+            commands::search::ai_route_intent,
 
             // 文件操作
             commands::file::download_file,

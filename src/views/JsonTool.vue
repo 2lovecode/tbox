@@ -2,7 +2,10 @@
 import { ref } from 'vue'
 import { invoke } from "@tauri-apps/api/core";
 import PageHeader from '@/components/PageHeader.vue';
-import { toast } from '@/utils/toast';
+import CopyButton from '@/components/CopyButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
+import { useToast } from '@/composables/useToast';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 import JsonViewer from '@/components/JsonViewer.vue';
 
 const activeTab = ref('format')
@@ -12,6 +15,25 @@ const isProcessing = ref(false)
 const indentSize = ref(2)
 const jsonInfo = ref<any>(null)
 const showRaw = ref(true) // 默认显示原始文本，避免树形视图初始化问题
+
+const toast = useToast();
+const { copy } = useClipboard();
+
+// 工具级快捷键：Cmd/Ctrl+Enter 执行当前 tab 操作，Cmd/Ctrl+Shift+C 复制输出，
+// Cmd/Ctrl+L 清空输入输出。hint 会出现在按 `?` 唤起的 ShortcutHints 面板中。
+useToolShortcuts(
+  '/json-tool',
+  {
+    run: () => { void processJson(); },
+    copy: () => { void copy(outputJson.value); },
+    clear: () => clearAll(),
+  },
+  [
+    { id: 'json-run', group: '工具', description: '执行当前 JSON 操作', spec: { key: 'Enter', meta: true } },
+    { id: 'json-copy', group: '结果', description: '复制当前结果到剪贴板', spec: { key: 'C', meta: true, shift: true } },
+    { id: 'json-clear', group: '工具', description: '清空输入与结果', spec: { key: 'L', meta: true } },
+  ],
+);
 
 // 检查是否为有效的JSON
 const isValidJson = (text: string): boolean => {
@@ -244,15 +266,9 @@ const processJson = () => {
   }
 }
 
-// 复制到剪贴板
-const copyToClipboard = async (text: string) => {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success('已复制到剪贴板')
-  } catch (err) {
-    toast.error('复制失败')
-  }
-}
+// 复制到剪贴板 —— JsonViewer @copy 事件会带 (text: string) 进来，所以这里
+// 仍然保留 text 参数；实际写入由 useClipboard 统一处理（含 trim + fallback + toast）。
+const copyToClipboard = (text: string) => copy(text);
 
 // 交换输入输出
 const swapInputOutput = () => {
@@ -322,9 +338,7 @@ const swapInputOutput = () => {
         <div class="section-header">
           <h3>输出</h3>
           <div class="section-actions" v-if="outputJson">
-            <button @click="copyToClipboard(outputJson)" class="action-btn">
-              <i class="fas fa-copy"></i> 复制
-            </button>
+            <CopyButton :text="outputJson" />
             <button @click="swapInputOutput" class="action-btn">
               <i class="fas fa-exchange-alt"></i> 交换
             </button>

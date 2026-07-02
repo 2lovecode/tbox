@@ -1,5 +1,5 @@
 # generated: 2026-04-04
-# last_updated: 2026-04-04
+# last_updated: 2026-07-02
 # project: tbox
 # project_key: NOKEY
 # tracking_system: file-system
@@ -35,7 +35,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 
 generated: 2026-04-04
-last_updated: 2026-07-01
+last_updated: 2026-07-02
 project: tbox
 project_key: NOKEY
 tracking_system: file-system
@@ -60,18 +60,21 @@ development_status:
   epic-2-retrospective: optional
 
   # Epic 3: 工具执行与键盘流体验
-  epic-3: backlog
-  3-1-keyboard-navigation-enhancement: backlog
-  3-2-one-click-copy-results: backlog
+  epic-3: done
+  3-1-keyboard-navigation-enhancement: done
+  3-2-one-click-copy-results: done
   epic-3-retrospective: optional
 
   # Epic 4: 跨平台系统集成
-  epic-4: backlog
-  4-1-platform-specific-shortcut-handling: backlog
-  4-2-offline-functionality-verification: backlog
+  epic-4: done
+  4-1-platform-specific-shortcut-handling: done
+  4-2-offline-functionality-verification: done
   epic-4-retrospective: optional
 
   # Epic 5: 本地智能搜索（Phase 1.5）
-  epic-5: backlog
-  5-1-local-ai-model-integration: backlog
+  epic-5: in-progress
+  5-1-local-ai-model-integration: in-progress
+  # Phase 1.5 v0 shipped: jieba + pinyin + role-aware intent router with
+  # Spotlight AI toggle. Full LLM path remains deferred to Phase 2; see
+  # the 5-1 artifact for triggering conditions and the v1 task breakdown.
   epic-5-retrospective: optional

@@ -2,12 +2,32 @@
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue'
 import CodeEditor from '@/components/CodeEditor.vue'
-import { toast } from '@/utils/toast'
+import CopyButton from '@/components/CopyButton.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { useToast } from '@/composables/useToast'
+import { useToolShortcuts } from '@/composables/useToolShortcuts'
 
 const mode = ref<'encode' | 'decode'>('encode')
 const input = ref('')
 const output = ref('')
 const isProcessing = ref(false)
+
+const toast = useToast()
+const { copy } = useClipboard()
+
+useToolShortcuts(
+  '/base64-tool',
+  {
+    run: () => { void process() },
+    copy: () => { void copy(output.value) },
+    clear: () => clear(),
+  },
+  [
+    { id: 'base64-run', group: '工具', description: '执行编码或解码', spec: { key: 'Enter', meta: true } },
+    { id: 'base64-copy', group: '结果', description: '复制当前结果', spec: { key: 'C', meta: true, shift: true } },
+    { id: 'base64-clear', group: '工具', description: '清空输入与结果', spec: { key: 'L', meta: true } },
+  ],
+)
 
 const encode = () => {
   if (!input.value) {
@@ -54,14 +74,7 @@ const process = () => {
   }
 }
 
-const copyToClipboard = async () => {
-  try {
-    await navigator.clipboard.writeText(output.value)
-    toast.success('已复制到剪贴板')
-  } catch {
-    toast.error('复制失败')
-  }
-}
+// 复制按钮已切到 <CopyButton> + useClipboard，不需要本地函数。
 
 const swap = () => {
   const temp = input.value
@@ -131,9 +144,7 @@ const loadExample = () => {
             <button @click="swap" class="action-btn">
               <i class="fas fa-exchange-alt"></i> 交换
             </button>
-            <button @click="copyToClipboard" class="action-btn">
-              <i class="fas fa-copy"></i> 复制
-            </button>
+            <CopyButton :text="output" />
           </div>
         </div>
         <CodeEditor

@@ -1,22 +1,77 @@
 <script setup lang="ts">
 import { Tool } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
-import { ref, computed, watch } from 'vue';
-import { useRouter, useRoute } from 'vue-router';
+import { ref, computed, watch, onMounted } from 'vue';
+import { storeToRefs } from 'pinia';
+import { useRoleStore } from '@/stores/role';
 import { invoke } from '@tauri-apps/api/core';
+import { useRouter, useRoute } from 'vue-router';
+import RoleSelection from '@/components/onboarding/RoleSelection.vue';
 
 const store = useToolStore();
 const router = useRouter();
 const route = useRoute();
+const roleStore = useRoleStore();
 const searchQuery = ref('');
 const isLoading = ref(false);
 const hoveredToolId = ref<number | null>(null);
 const isCompactView = ref(false);
 const searchResults = ref<Tool[]>([]);
+const showAllTools = ref(false);
+const roleToolIds = ref<Set<number>>(new Set());
+const isLoadingRoleTools = ref(false);
+
+const { selectedRoleIds, availableRoles } = storeToRefs(roleStore);
+
+// 加载可用角色 + 选中角色对应的工具集
+async function refreshRoleTools() {
+  if (selectedRoleIds.value.length === 0) {
+    roleToolIds.value = new Set();
+    return;
+  }
+  isLoadingRoleTools.value = true;
+  try {
+    const merged = new Set<number>();
+    for (const roleId of selectedRoleIds.value) {
+      const ids = await invoke<Array<{ id: number }>>('get_tools_by_role', { roleId });
+      for (const t of ids) merged.add(t.id);
+    }
+    roleToolIds.value = merged;
+  } catch (error) {
+    console.error('[home] failed to load role tools:', error);
+    roleToolIds.value = new Set();
+  } finally {
+    isLoadingRoleTools.value = false;
+  }
+}
+
+onMounted(async () => {
+  if (availableRoles.value.length === 0) {
+    await roleStore.loadAvailableRoles();
+  }
+  await refreshRoleTools();
+});
+
+watch(selectedRoleIds, () => { void refreshRoleTools(); });
+
+const activeRoleNames = computed(() =>
+  roleStore.selectedRoles.map((r) => r.displayName).join(' / '),
+);
+
+// clearRoleFilter 不再需要，showAllTools 由 toggle 按钮直接翻转。
 
 // 计算属性 - 过滤后的工具列表
 const filteredTools = computed(() => {
   let result = searchResults.value.length > 0 ? searchResults.value : store.tools;
+
+  // 角色过滤：未选择角色或开启"显示全部"时跳过
+  if (
+    !showAllTools.value &&
+    selectedRoleIds.value.length > 0 &&
+    roleToolIds.value.size > 0
+  ) {
+    result = result.filter((tool) => roleToolIds.value.has(tool.id));
+  }
 
   // 按分类过滤
   if (store.activeCategory && store.activeCategory.id !== 0) {
@@ -171,6 +226,7 @@ const isNavigating = ref(false);
 
 </script>
 <template>
+    <RoleSelection v-if="roleStore.showOnboarding" />
     <main class="main-content">
         <!-- 搜索结果提示 -->
         <div v-if="showSearchResults" class="search-results-header">
@@ -189,6 +245,28 @@ const isNavigating = ref(false);
             <h2 class="section-title">
             {{ store.activeCategory?.id === 0 ? '全部工具' : store.activeCategory?.name }}
             </h2>
+            <div v-if="roleStore.hasSelectedRoles" class="role-summary">
+                <i class="fas fa-user-shield" aria-hidden="true"></i>
+                <span class="role-summary-label">当前角色：</span>
+                <span class="role-summary-value">{{ activeRoleNames || '未选择' }}</span>
+                <button
+                    type="button"
+                    :class="['role-filter-toggle', { active: showAllTools }]"
+                    :title="showAllTools ? '当前显示全部工具' : '点击仅显示当前角色下的工具'"
+                    @click="showAllTools = !showAllTools"
+                >
+                    {{ showAllTools ? '仅显示我的角色' : '显示全部工具' }}
+                </button>
+                <span
+                    v-for="r in roleStore.selectedRoles"
+                    :key="r.id"
+                    class="role-tag"
+                    :title="r.description"
+                >
+                    <i :class="r.icon" aria-hidden="true"></i>
+                    {{ r.displayName }}
+                </span>
+            </div>
             <div class="tool-count-badge" v-if="filteredTools.length > 0">
               共 {{ filteredTools.length }} 个工具
             </div>
