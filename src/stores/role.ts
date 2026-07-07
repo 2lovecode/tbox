@@ -24,6 +24,11 @@ export const useRoleStore = defineStore(
     const selectedAt = ref<number | null>(null);
     const lastError = ref<string | null>(null);
     const isLoading = ref(false);
+    // 角色对应的工具 id 集合（缓存，HomePage 与 SideBar 共享以保证分类计数一致）
+    const roleToolIds = ref<Set<number>>(new Set());
+    const isLoadingRoleTools = ref(false);
+    // "显示全部工具"开关（true 时绕过角色过滤），由 HomePage 的 toggle 写入
+    const showAllTools = ref(false);
 
     const hasSelectedRoles = computed(() => selectedRoleIds.value.length > 0);
     const selectedRolesCount = computed(() => selectedRoleIds.value.length);
@@ -71,6 +76,31 @@ export const useRoleStore = defineStore(
       return invoke<Array<{ id: number }>>('get_tools_by_role', { roleId });
     }
 
+    async function refreshRoleTools() {
+      if (selectedRoleIds.value.length === 0) {
+        roleToolIds.value = new Set();
+        return;
+      }
+      isLoadingRoleTools.value = true;
+      try {
+        const merged = new Set<number>();
+        for (const roleId of selectedRoleIds.value) {
+          const ids = await invoke<Array<{ id: number }>>('get_tools_by_role', { roleId });
+          for (const t of ids) merged.add(t.id);
+        }
+        roleToolIds.value = merged;
+      } catch (error) {
+        console.error('[role] failed to load role tools:', error);
+        roleToolIds.value = new Set();
+      } finally {
+        isLoadingRoleTools.value = false;
+      }
+    }
+
+    function setShowAllTools(value: boolean) {
+      showAllTools.value = value;
+    }
+
     async function persistSelectedRoles() {
       // No backend user table yet (single-user desktop app); localStorage
       // is updated automatically by the persist plugin.
@@ -97,6 +127,9 @@ export const useRoleStore = defineStore(
       selectedAt,
       lastError,
       isLoading,
+      roleToolIds,
+      isLoadingRoleTools,
+      showAllTools,
       hasSelectedRoles,
       selectedRolesCount,
       selectedRoles,
@@ -105,6 +138,8 @@ export const useRoleStore = defineStore(
       toggleRole,
       setShowOnboarding,
       fetchToolsForRole,
+      refreshRoleTools,
+      setShowAllTools,
       persistSelectedRoles,
       reset,
       snapshot,
@@ -113,7 +148,7 @@ export const useRoleStore = defineStore(
   {
     persist: {
       key: 'tbox.role.selection',
-      pick: ['selectedRoleIds', 'selectedAt', 'showOnboarding'],
+      pick: ['selectedRoleIds', 'selectedAt', 'showOnboarding', 'showAllTools'],
     },
   },
 );

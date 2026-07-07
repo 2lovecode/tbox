@@ -30,7 +30,10 @@
             class="text-input"
           ></textarea>
           <div class="button-group">
-            <button @click="analyzeLogs" class="btn-action">分析</button>
+            <button @click="analyzeLogs" class="btn-action">
+              <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+              分析
+            </button>
           </div>
           <div v-if="analyzeResult" class="result">
             <div class="section-title">分析结果</div>
@@ -56,7 +59,10 @@
             class="text-input"
           ></textarea>
           <div class="button-group">
-            <button @click="countErrors" class="btn-action">统计错误</button>
+            <button @click="countErrors" class="btn-action">
+              <i class="fas fa-bug" aria-hidden="true"></i>
+              统计错误
+            </button>
           </div>
           <div v-if="errorResult" class="result">
             <div class="section-title">错误统计</div>
@@ -99,7 +105,10 @@
             class="text-input"
           ></textarea>
           <div class="button-group">
-            <button @click="filterLogs" class="btn-action">过滤</button>
+            <button @click="filterLogs" class="btn-action">
+              <i class="fas fa-filter" aria-hidden="true"></i>
+              过滤
+            </button>
           </div>
           <div v-if="filterOutput" class="result">
             <div class="section-title">过滤结果</div>
@@ -117,7 +126,10 @@
             class="text-input"
           ></textarea>
           <div class="button-group">
-            <button @click="extractLevels" class="btn-action">提取日志级别</button>
+            <button @click="extractLevels" class="btn-action">
+              <i class="fas fa-layer-group" aria-hidden="true"></i>
+              提取日志级别
+            </button>
           </div>
           <div v-if="levelResult" class="result">
             <div class="section-title">日志级别统计</div>

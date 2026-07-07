@@ -7,7 +7,9 @@ import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
 import SpotlightSearch from "@/components/SpotlightSearch.vue";
+import SettingsModal from "@/components/settings/SettingsModal.vue";
 import { useSearchStore } from "@/stores/search";
+import { useSettingsStore } from "@/stores/settings";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
 import ShortcutHints from "@/components/ShortcutHints.vue";
@@ -19,6 +21,7 @@ import { detectPlatform } from "@/utils/platform";
 
 const store  = useToolStore()
 const searchStore = useSearchStore()
+const settingsStore = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggleTheme } = useTheme()
@@ -48,6 +51,10 @@ shortcuts.bind('[', { meta: true, ctrl: true }, () => {
 shortcuts.bind('\\', { meta: true, ctrl: true }, () => {
   toggleTheme();
 });
+// Cmd/Ctrl+, opens the Settings modal (mirrors the macOS convention).
+shortcuts.bind(',', { meta: true, ctrl: true }, () => {
+  settingsStore.toggle();
+});
 
 // 加载categories
 // 加载tools
@@ -73,7 +80,7 @@ onMounted(async () => {
       const fetchCategories = (categoriesRes as Array<Category>).map((item: Category) => ({
         id: item.id,
         name: item.name,
-        icon: "",
+        icon: item.icon,
         count: item.count,
       }))
       store.setCategories(fetchCategories)
@@ -150,6 +157,15 @@ onBeforeUnmount(() => {
             <button @click="toggleTheme" class="theme-toggle" :title="isDark ? '切换到浅色模式' : '切换到深色模式'">
               <i :class="isDark ? 'fas fa-sun' : 'fas fa-moon'"></i>
             </button>
+            <button
+              type="button"
+              class="theme-toggle settings-toggle"
+              title="设置"
+              aria-label="打开设置"
+              @click="settingsStore.toggle()"
+            >
+              <i class="fas fa-sliders"></i>
+            </button>
           </div>
         </header>
       <SideBar v-if="showSidebar"></SideBar>      
@@ -168,6 +184,7 @@ onBeforeUnmount(() => {
         <Toast />
         <SpotlightSearch />
         <ShortcutHints />
+        <SettingsModal />
       </div>
 </template>
 
@@ -339,6 +356,14 @@ onBeforeUnmount(() => {
   .theme-toggle:hover {
     transform: scale(1.1);
     box-shadow: 0 6px 25px rgba(67, 97, 238, 0.3);
+  }
+
+  .settings-toggle {
+    font-size: 16px;
+  }
+
+  .settings-toggle:hover {
+    color: var(--primary, #4361ee);
   }
 
   /* 离线状态徽标 — 仅在 navigator.onLine 报告 false 时出现 */

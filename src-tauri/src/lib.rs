@@ -93,6 +93,13 @@ pub fn run() {
             // Story 5.1 (Phase 1.5 v0): 本地意图路由
             commands::search::ai_route_intent,
 
+            // Story 5.1 v1: LLM provider configuration
+            commands::llm::get_llm_config,
+            commands::llm::save_llm_config,
+            commands::llm::clear_llm_api_key,
+            commands::llm::delete_llm_config,
+            commands::llm::test_llm_connection,
+
             // 文件操作
             commands::file::download_file,
             commands::file_ops::list_directory,

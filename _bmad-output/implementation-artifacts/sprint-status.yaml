@@ -1,5 +1,5 @@
 # generated: 2026-04-04
-# last_updated: 2026-07-02
+# last_updated: 2026-07-03
 # project: tbox
 # project_key: NOKEY
 # tracking_system: file-system
@@ -74,7 +74,8 @@ development_status:
   # Epic 5: 本地智能搜索（Phase 1.5）
   epic-5: in-progress
   5-1-local-ai-model-integration: in-progress
-  # Phase 1.5 v0 shipped: jieba + pinyin + role-aware intent router with
-  # Spotlight AI toggle. Full LLM path remains deferred to Phase 2; see
-  # the 5-1 artifact for triggering conditions and the v1 task breakdown.
+  # Phase 1.5 v0 已交付：jieba + pinyin + 角色感知意图路由 + Spotlight AI 开关。
+  # v0 通过 `cargo check` / `vue-tsc` / `vite build` 验证。
+  # v1（完整 LLM）按 Story 5.1 中的触发条件延后到 Phase 2，详见
+  # 5-1-local-ai-model-integration.md。
   epic-5-retrospective: optional

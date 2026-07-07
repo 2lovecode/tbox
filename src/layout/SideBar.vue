@@ -1,32 +1,64 @@
 <script setup lang="ts">
+import { computed, onMounted } from 'vue';
+import { storeToRefs } from 'pinia';
 import { Category } from '@/types/tools';
 import { useToolStore } from '@/stores/tools';
+import { useRoleStore } from '@/stores/role';
 import { useRouter } from 'vue-router';
 
-const store = useToolStore()
-const router = useRouter()
+const store = useToolStore();
+const roleStore = useRoleStore();
+const router = useRouter();
 
-const fetchCategories = (): Category[] => {
-    const remoteCategories = store.categories
-    return [
-      { id: 0, name: '全部工具', icon: 'fas fa-star', count: remoteCategories.reduce((sum, cat) => sum + cat.count, 0) },
-      ...remoteCategories
-    ]
-}
+const { selectedRoleIds, roleToolIds, showAllTools } = storeToRefs(roleStore);
+
+// 首次挂载时拉取当前角色对应的工具集合，与 HomePage 共享同一份数据
+onMounted(async () => {
+  if (selectedRoleIds.value.length > 0 && roleToolIds.value.size === 0) {
+    await roleStore.refreshRoleTools();
+  }
+});
+
+// 与 HomePage.filteredTools 对齐的角色过滤条件：
+// showAllTools 或未选角色时返回 null 表示不过滤。
+const visibleToolIds = computed<Set<number> | null>(() => {
+  if (showAllTools.value) return null;
+  if (selectedRoleIds.value.length === 0) return null;
+  if (roleToolIds.value.size === 0) return null;
+  return roleToolIds.value;
+});
+
+const categoryCounts = computed<Record<number, number>>(() => {
+  const counts: Record<number, number> = {};
+  const allow = visibleToolIds.value;
+  for (const tool of store.tools) {
+    const catId = tool.category?.id;
+    if (catId == null) continue;
+    if (allow && !allow.has(tool.id)) continue;
+    counts[catId] = (counts[catId] ?? 0) + 1;
+  }
+  return counts;
+});
+
+const categories = computed<Category[]>(() => {
+  const total = Object.values(categoryCounts.value).reduce((sum, n) => sum + n, 0);
+  return [
+    { id: 0, name: '全部工具', icon: 'fas fa-star', count: total },
+    ...store.categories.map((c) => ({ ...c, count: categoryCounts.value[c.id] ?? 0 })),
+  ];
+});
 
 const openCategory = (category: Category) => {
   store.setActiveCategory(category);
-  router.push({ path: "/" })
-}
-
-
+  router.push({ path: '/' });
+};
 </script>
 <template>
     <aside class="sidebar">
         <h3><i class="fas fa-th-large"></i> 工具分类</h3>
         <div class="categories">
           <div
-            v-for="category in fetchCategories()"
+            v-for="category in categories"
             :key="category.id"
             class="category"
             :class="{ active: store.activeCategory?.id === category.id }"

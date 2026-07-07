@@ -26,6 +26,7 @@ pub struct Category {
     pub name: String,
     pub description: String,
     pub order: u32,
+    pub icon: String,
     pub count: u32,
 }
 
@@ -45,6 +46,9 @@ pub fn init_db_if_needed() -> Result<()> {
         add_missing_tools(&conn)?;
     }
 
+    // 分类图标是后续补的能力：老库没有 icon 列，需要在这里幂等补齐
+    ensure_category_icons(&conn)?;
+
     Ok(())
 }
 
@@ -55,7 +59,8 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
             id INTEGER PRIMARY KEY,
             name TEXT NOT NULL,
             description TEXT NOT NULL,
-            sort INTEGER NOT NULL
+            sort INTEGER NOT NULL,
+            icon TEXT NOT NULL DEFAULT ''
         )",
         [],
     )?;
@@ -131,14 +136,14 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         [],
     )?;
     let categories = vec![
-        (1, "图片处理", "图片处理工具", 1),
-        (2, "视频处理", "视频处理工具", 2),
-        (3, "音频处理", "音频处理工具", 3),
-        (4, "文件管理", "文档处理工具", 4),
-        (5, "开发工具", "开发工具", 5),
-        (6, "安全工具", "安全工具", 6),
-        (7, "网络工具", "网络工具", 7),
-        (8, "设计工具", "设计工具", 8),
+        (1, "图片处理", "图片处理工具", 1, "fas fa-image"),
+        (2, "视频处理", "视频处理工具", 2, "fas fa-video"),
+        (3, "音频处理", "音频处理工具", 3, "fas fa-music"),
+        (4, "文件管理", "文档处理工具", 4, "fas fa-folder-open"),
+        (5, "开发工具", "开发工具", 5, "fas fa-code"),
+        (6, "安全工具", "安全工具", 6, "fas fa-shield-halved"),
+        (7, "网络工具", "网络工具", 7, "fas fa-network-wired"),
+        (8, "设计工具", "设计工具", 8, "fas fa-palette"),
     ];
     let tags = vec![
         (1, "图片处理", "图片处理"),
@@ -298,15 +303,16 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (35, 5), // 坐标距离计算属于开发工具
         (36, 5), // 坐标可视化属于开发工具
     ];
-    for (id, name, description, sort) in categories {
+    for (id, name, description, sort, icon) in categories {
         conn.execute(
-            "INSERT INTO categories (id, name, description, sort)
-             VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO categories (id, name, description, sort, icon)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
                 id,
                 name,
                 description,
-                sort
+                sort,
+                icon
             ],
         )?;
     }
@@ -720,7 +726,7 @@ pub fn get_categories() -> Result<Vec<Category>, String> {
     let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
 
     let mut stmt = conn.prepare("
-        SELECT c.id, c.name, c.description, c.sort, COUNT(tc.tool_id) as count
+        SELECT c.id, c.name, c.description, c.sort, c.icon, COUNT(tc.tool_id) as count
         FROM categories c
         LEFT JOIN tool_categories tc ON c.id = tc.category_id
         GROUP BY c.id, c.name, c.description, c.sort
@@ -734,7 +740,8 @@ pub fn get_categories() -> Result<Vec<Category>, String> {
                 name: row.get(1)?,
                 description: row.get(2)?,
                 order: row.get(3)?,
-                count: row.get(4)?,
+                icon: row.get(4)?,
+                count: row.get(5)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -745,4 +752,45 @@ pub fn get_categories() -> Result<Vec<Category>, String> {
     }
 
     Ok(categories)
+}
+
+// 给老库补 icon 列并把 8 个分类的图标写进去，整个流程幂等，可重复执行
+fn ensure_category_icons(conn: &Connection) -> Result<()> {
+    // PRAGMA table_info 返回 (cid, name, type, notnull, dflt_value, pk)
+    let mut stmt = conn.prepare("PRAGMA table_info(categories)")?;
+    let mut has_icon = false;
+    let mut rows = stmt.query([])?;
+    while let Some(row) = rows.next()? {
+        let name: String = row.get(1)?;
+        if name == "icon" {
+            has_icon = true;
+            break;
+        }
+    }
+
+    if !has_icon {
+        conn.execute(
+            "ALTER TABLE categories ADD COLUMN icon TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
+    }
+
+    let icons: &[(u32, &str)] = &[
+        (1, "fas fa-image"),
+        (2, "fas fa-video"),
+        (3, "fas fa-music"),
+        (4, "fas fa-folder-open"),
+        (5, "fas fa-code"),
+        (6, "fas fa-shield-halved"),
+        (7, "fas fa-network-wired"),
+        (8, "fas fa-palette"),
+    ];
+    for (id, icon) in icons {
+        conn.execute(
+            "UPDATE categories SET icon = ?1 WHERE id = ?2",
+            params![icon, id],
+        )?;
+    }
+
+    Ok(())
 }

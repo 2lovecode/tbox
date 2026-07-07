@@ -17,42 +17,16 @@ const isLoading = ref(false);
 const hoveredToolId = ref<number | null>(null);
 const isCompactView = ref(false);
 const searchResults = ref<Tool[]>([]);
-const showAllTools = ref(false);
-const roleToolIds = ref<Set<number>>(new Set());
-const isLoadingRoleTools = ref(false);
-
-const { selectedRoleIds, availableRoles } = storeToRefs(roleStore);
-
-// 加载可用角色 + 选中角色对应的工具集
-async function refreshRoleTools() {
-  if (selectedRoleIds.value.length === 0) {
-    roleToolIds.value = new Set();
-    return;
-  }
-  isLoadingRoleTools.value = true;
-  try {
-    const merged = new Set<number>();
-    for (const roleId of selectedRoleIds.value) {
-      const ids = await invoke<Array<{ id: number }>>('get_tools_by_role', { roleId });
-      for (const t of ids) merged.add(t.id);
-    }
-    roleToolIds.value = merged;
-  } catch (error) {
-    console.error('[home] failed to load role tools:', error);
-    roleToolIds.value = new Set();
-  } finally {
-    isLoadingRoleTools.value = false;
-  }
-}
+const { selectedRoleIds, availableRoles, roleToolIds, showAllTools } = storeToRefs(roleStore);
 
 onMounted(async () => {
   if (availableRoles.value.length === 0) {
     await roleStore.loadAvailableRoles();
   }
-  await refreshRoleTools();
+  await roleStore.refreshRoleTools();
 });
 
-watch(selectedRoleIds, () => { void refreshRoleTools(); });
+watch(selectedRoleIds, () => { void roleStore.refreshRoleTools(); });
 
 const activeRoleNames = computed(() =>
   roleStore.selectedRoles.map((r) => r.displayName).join(' / '),
@@ -253,7 +227,7 @@ const isNavigating = ref(false);
                     type="button"
                     :class="['role-filter-toggle', { active: showAllTools }]"
                     :title="showAllTools ? '当前显示全部工具' : '点击仅显示当前角色下的工具'"
-                    @click="showAllTools = !showAllTools"
+                    @click="roleStore.setShowAllTools(!showAllTools)"
                 >
                     {{ showAllTools ? '仅显示我的角色' : '显示全部工具' }}
                 </button>
