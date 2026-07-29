@@ -78,11 +78,32 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { useToast } from '@/composables/useToast';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
+import { useDebouncedFn } from '@/composables/useDebounce';
+
 
 const pattern = ref('');
 const flags = ref('g');
 const testText = ref('');
 const matches = ref<string[] | null>(null);
+const toast = useToast();
+
+useToolShortcuts(
+  '/regex-tester',
+  {
+    run: () => { void testRegexNow(); },
+    clear: () => {
+      pattern.value = '';
+      testText.value = '';
+      matches.value = null;
+    },
+  },
+  [
+    { id: 'regex-run', group: '工具', description: '立即执行正则匹配', spec: { key: 'Enter', meta: true } },
+    { id: 'regex-clear', group: '工具', description: '清空输入', spec: { key: 'L', meta: true } },
+  ],
+);
 
 const commonPatterns = {
   '邮箱': '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}',
@@ -95,7 +116,7 @@ const commonPatterns = {
   '字母': '[a-zA-Z]+'
 };
 
-const testRegex = async () => {
+async function testRegexNow() {
   if (!pattern.value.trim()) {
     matches.value = null;
     return;
@@ -109,14 +130,20 @@ const testRegex = async () => {
     });
     matches.value = result;
   } catch (e) {
-    console.error('正则测试失败:', e);
+    toast.error('正则测试失败: ' + (e instanceof Error ? e.message : String(e)));
     matches.value = [];
   }
-};
+}
+
+// Debounced version: each keystroke resets the 250ms timer so we only run
+// the (potentially expensive) Rust regex against large pasted text once
+// the user pauses.
+const testRegex = useDebouncedFn(() => { void testRegexNow(); }, 250);
 
 const applyPattern = (p: string) => {
   pattern.value = p;
-  testRegex();
+  // applyPattern runs from a button click — bypass the debounce.
+  void testRegexNow();
 };
 </script>
 

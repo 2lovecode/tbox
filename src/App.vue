@@ -13,6 +13,7 @@ import { useSettingsStore } from "@/stores/settings";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
 import ShortcutHints from "@/components/ShortcutHints.vue";
+import ConfirmModal from "@/components/ConfirmModal.vue";
 import { useTheme } from "@/composables/useTheme";
 import { useOnlineStatus } from "@/composables/useOnlineStatus";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
@@ -184,6 +185,7 @@ onBeforeUnmount(() => {
         <Toast />
         <SpotlightSearch />
         <ShortcutHints />
+        <ConfirmModal />
         <SettingsModal />
       </div>
 </template>

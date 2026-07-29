@@ -1,9 +1,6 @@
 <template>
   <div class="tool-container">
-    <div class="tool-header">
-      <h1>国密算法工具</h1>
-      <p>SM2/SM3/SM4国密算法加密解密</p>
-    </div>
+    <PageHeader title="国密算法工具" description="SM2 / SM3 / SM4 国密算法加密解密" :show-back="true" />
 
     <div class="tabs">
       <button
@@ -17,28 +14,34 @@
     </div>
 
     <div class="tab-content">
-      <!-- SM3哈希 -->
+      <!-- SM3 哈希 -->
       <div v-if="activeTab === 'sm3'" class="crypto-view">
         <div class="input-group">
           <textarea
             v-model="sm3Input"
-            placeholder="输入要计算SM3哈希的文本"
+            placeholder="输入要计算 SM3 哈希的文本"
             class="text-input"
           ></textarea>
           <div class="button-group">
-            <button @click="calcSm3" class="btn-action">计算SM3哈希</button>
+            <AsyncButton :loading="busyAction === 'sm3-calc'" @click="calcSm3">
+              计算 SM3 哈希
+            </AsyncButton>
           </div>
           <div v-if="sm3Output" class="result">
-            <div class="section-title">SM3哈希结果</div>
+            <div class="result-header">
+              <span class="section-title">SM3 哈希结果</span>
+              <CopyButton :text="sm3Output" />
+            </div>
             <pre>{{ sm3Output }}</pre>
           </div>
+          <EmptyState v-else icon="fas fa-hashtag" title="输入文本以计算 SM3" />
         </div>
       </div>
 
-      <!-- SM4加密解密 -->
+      <!-- SM4 加解密 -->
       <div v-if="activeTab === 'sm4'" class="crypto-view">
         <div class="input-group">
-          <div class="input-label">明文/密文:</div>
+          <div class="input-label">明文 / 密文:</div>
           <textarea
             v-model="sm4Input"
             placeholder="输入要加密或解密的文本"
@@ -46,34 +49,55 @@
           ></textarea>
           <div class="input-row">
             <div class="input-field">
-              <label>密钥:</label>
-              <input v-model="sm4Key" type="text" class="text-field" placeholder="输入16字节密钥" />
+              <label>密钥 (16 字节):</label>
+              <SensitiveInput v-model="sm4Key" placeholder="输入或生成密钥" />
             </div>
             <div class="input-field">
-              <label>IV:</label>
-              <input v-model="sm4Iv" type="text" class="text-field" placeholder="输入IV（可选）" />
+              <label>IV (可选):</label>
+              <SensitiveInput v-model="sm4Iv" placeholder="输入 IV（可选）" :masked="false" />
             </div>
           </div>
           <div class="button-group">
-            <button @click="sm4Encrypt" class="btn-action">SM4加密</button>
-            <button @click="sm4Decrypt" class="btn-action">SM4解密</button>
-            <button @click="generateSm4Key" class="btn-action-secondary">生成密钥</button>
+            <AsyncButton :loading="busyAction === 'sm4-encrypt'" @click="sm4Encrypt">
+              SM4 加密
+            </AsyncButton>
+            <AsyncButton :loading="busyAction === 'sm4-decrypt'" @click="sm4Decrypt">
+              SM4 解密
+            </AsyncButton>
+            <AsyncButton
+              :loading="busyAction === 'sm4-keygen'"
+              kind="secondary"
+              @click="generateSm4Key"
+            >
+              生成密钥
+            </AsyncButton>
           </div>
           <div v-if="sm4Output" class="result">
-            <div class="section-title">结果</div>
+            <div class="result-header">
+              <span class="section-title">结果</span>
+              <CopyButton :text="sm4Output" />
+            </div>
             <pre>{{ sm4Output }}</pre>
           </div>
         </div>
       </div>
 
-      <!-- SM2签名验签 -->
+      <!-- SM2 签名验签 -->
       <div v-if="activeTab === 'sm2'" class="crypto-view">
         <div class="input-group">
           <div class="button-group">
-            <button @click="generateSm2Keypair" class="btn-action">生成SM2密钥对</button>
+            <AsyncButton
+              :loading="busyAction === 'sm2-keygen'"
+              @click="generateSm2Keypair"
+            >
+              生成 SM2 密钥对
+            </AsyncButton>
           </div>
           <div v-if="sm2Keypair" class="result">
-            <div class="section-title">密钥对</div>
+            <div class="result-header">
+              <span class="section-title">密钥对</span>
+              <CopyButton :text="sm2Keypair" />
+            </div>
             <pre>{{ sm2Keypair }}</pre>
           </div>
 
@@ -83,14 +107,29 @@
             placeholder="输入要签名的消息"
             class="text-input"
           ></textarea>
-          <div class="input-label">私钥:</div>
-          <input v-model="sm2PrivateKey" type="text" class="text-field" placeholder="输入私钥" />
+          <div class="input-row">
+            <div class="input-field">
+              <label>私钥:</label>
+              <SensitiveInput v-model="sm2PrivateKey" placeholder="输入私钥" />
+            </div>
+            <div class="input-field">
+              <label>公钥:</label>
+              <SensitiveInput v-model="sm2PublicKey" placeholder="输入公钥" :masked="false" />
+            </div>
+          </div>
           <div class="button-group">
-            <button @click="sm2Sign" class="btn-action">SM2签名</button>
-            <button @click="sm2Verify" class="btn-action">SM2验签</button>
+            <AsyncButton :loading="busyAction === 'sm2-sign'" @click="sm2Sign">
+              SM2 签名
+            </AsyncButton>
+            <AsyncButton :loading="busyAction === 'sm2-verify'" @click="sm2Verify">
+              SM2 验签
+            </AsyncButton>
           </div>
           <div v-if="sm2Output" class="result">
-            <div class="section-title">结果</div>
+            <div class="result-header">
+              <span class="section-title">结果</span>
+              <CopyButton :text="sm2Output" />
+            </div>
             <pre>{{ sm2Output }}</pre>
           </div>
         </div>
@@ -105,13 +144,20 @@
             placeholder="输入消息"
             class="text-input"
           ></textarea>
-          <div class="input-label">密钥:</div>
-          <input v-model="hmacKey" type="text" class="text-field" placeholder="输入密钥" />
+          <div class="input-field">
+            <label>密钥:</label>
+            <SensitiveInput v-model="hmacKey" placeholder="输入密钥" :masked="false" />
+          </div>
           <div class="button-group">
-            <button @click="calcHmacSm3" class="btn-action">计算HMAC-SM3</button>
+            <AsyncButton :loading="busyAction === 'hmac-calc'" @click="calcHmacSm3">
+              计算 HMAC-SM3
+            </AsyncButton>
           </div>
           <div v-if="hmacOutput" class="result">
-            <div class="section-title">HMAC-SM3结果</div>
+            <div class="result-header">
+              <span class="section-title">HMAC-SM3 结果</span>
+              <CopyButton :text="hmacOutput" />
+            </div>
             <pre>{{ hmacOutput }}</pre>
           </div>
         </div>
@@ -123,6 +169,15 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import PageHeader from '@/components/PageHeader.vue';
+import CopyButton from '@/components/CopyButton.vue';
+import SensitiveInput from '@/components/SensitiveInput.vue';
+import AsyncButton from '@/components/AsyncButton.vue';
+import EmptyState from '@/components/EmptyState.vue';
+import { useToast } from '@/composables/useToast';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
+
+const toast = useToast();
 
 const activeTab = ref('sm3');
 const tabs = [
@@ -131,6 +186,10 @@ const tabs = [
   { key: 'sm2', name: 'SM2签名', icon: 'fas fa-signature' },
   { key: 'hmac', name: 'HMAC-SM3', icon: 'fas fa-key' }
 ];
+
+// Per-tab loading state for AsyncButton. Multiple buttons can be in-flight
+// independently (e.g. SM4 encrypt + decrypt), so we key on action id.
+const busyAction = ref<string | null>(null);
 
 const sm3Input = ref('');
 const sm3Output = ref('');
@@ -147,120 +206,129 @@ const hmacMessage = ref('');
 const hmacKey = ref('');
 const hmacOutput = ref('');
 
-const calcSm3 = async () => {
+// Run an async invoke with unified error handling and loading state.
+async function runCrypto<T>(
+  actionKey: string,
+  op: string,
+  args: Record<string, unknown>,
+  successMessage?: string,
+): Promise<T | null> {
+  busyAction.value = actionKey;
   try {
-    const result = await invoke<string>('sm3_hash', { input: sm3Input.value });
-    sm3Output.value = result;
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('计算失败: ' + (e as Error).message, 'error');
-    }
+    const result = await invoke<T>(op, args);
+    if (successMessage) toast.success(successMessage);
+    return result;
+  } catch (err) {
+    toast.error('操作失败：' + (err instanceof Error ? err.message : String(err)));
+    return null;
+  } finally {
+    busyAction.value = null;
   }
+}
+
+const calcSm3 = async () => {
+  if (!sm3Input.value) {
+    toast.warning('请输入要计算哈希的文本');
+    return;
+  }
+  const result = await runCrypto<string>('sm3-calc', 'sm3_hash', { input: sm3Input.value });
+  if (result !== null) sm3Output.value = result;
 };
 
 const sm4Encrypt = async () => {
-  try {
-    const result = await invoke<string>('sm4_encrypt', {
-      plaintext: sm4Input.value,
-      key: sm4Key.value,
-      iv: sm4Iv.value
-    });
-    sm4Output.value = result;
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('加密失败: ' + (e as Error).message, 'error');
-    }
+  if (!sm4Input.value || !sm4Key.value) {
+    toast.warning('请输入明文与密钥');
+    return;
   }
+  const result = await runCrypto<string>('sm4-encrypt', 'sm4_encrypt', {
+    plaintext: sm4Input.value,
+    key: sm4Key.value,
+    iv: sm4Iv.value,
+  }, 'SM4 加密成功');
+  if (result !== null) sm4Output.value = result;
 };
 
 const sm4Decrypt = async () => {
-  try {
-    const result = await invoke<string>('sm4_decrypt', {
-      ciphertext: sm4Input.value,
-      key: sm4Key.value,
-      iv: sm4Iv.value
-    });
-    sm4Output.value = result;
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('解密失败: ' + (e as Error).message, 'error');
-    }
+  if (!sm4Input.value || !sm4Key.value) {
+    toast.warning('请输入密文与密钥');
+    return;
   }
+  const result = await runCrypto<string>('sm4-decrypt', 'sm4_decrypt', {
+    ciphertext: sm4Input.value,
+    key: sm4Key.value,
+    iv: sm4Iv.value,
+  }, 'SM4 解密成功');
+  if (result !== null) sm4Output.value = result;
 };
 
 const generateSm4Key = async () => {
-  try {
-    const result = await invoke<string>('generate_sm4_key');
-    sm4Key.value = result;
-    if ((window as any).$toast) {
-      (window as any).$toast('密钥已生成', 'success');
-    }
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('生成失败: ' + (e as Error).message, 'error');
-    }
-  }
+  const result = await runCrypto<string>('sm4-keygen', 'generate_sm4_key', {}, '密钥已生成');
+  if (result !== null) sm4Key.value = result;
 };
 
 const generateSm2Keypair = async () => {
-  try {
-    const result = await invoke<[string, string]>('generate_sm2_keypair');
-    sm2Keypair.value = `私钥: ${result[0]}\n公钥: ${result[1]}`;
-    if ((window as any).$toast) {
-      (window as any).$toast('密钥对已生成', 'success');
-    }
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('生成失败: ' + (e as Error).message, 'error');
-    }
-  }
+  const result = await runCrypto<[string, string]>('sm2-keygen', 'generate_sm2_keypair', {}, '密钥对已生成');
+  if (result !== null) sm2Keypair.value = `私钥: ${result[0]}\n公钥: ${result[1]}`;
 };
 
 const sm2Sign = async () => {
-  try {
-    const result = await invoke<string>('sm2_sign', {
-      message: sm2Message.value,
-      privateKey: sm2PrivateKey.value
-    });
-    sm2Output.value = `签名: ${result}`;
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('签名失败: ' + (e as Error).message, 'error');
-    }
+  if (!sm2Message.value || !sm2PrivateKey.value) {
+    toast.warning('请输入消息与私钥');
+    return;
   }
+  const result = await runCrypto<string>('sm2-sign', 'sm2_sign', {
+    message: sm2Message.value,
+    privateKey: sm2PrivateKey.value,
+  }, '签名成功');
+  if (result !== null) sm2Output.value = `签名: ${result}`;
 };
 
 const sm2Verify = async () => {
-  try {
-    const result = await invoke<boolean>('sm2_verify', {
-      message: sm2Message.value,
-      signature: sm2Output.value.replace('签名: ', ''),
-      publicKey: sm2PublicKey.value
-    });
-    sm2Output.value = result ? '✓ 签名验证通过' : '✗ 签名验证失败';
-    if ((window as any).$toast) {
-      (window as any).$toast(result ? '签名验证通过' : '签名验证失败', result ? 'success' : 'error');
-    }
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('验证失败: ' + (e as Error).message, 'error');
-    }
+  const signature = sm2Output.value.startsWith('签名: ') ? sm2Output.value.replace('签名: ', '') : sm2Output.value;
+  if (!sm2Message.value || !signature || !sm2PublicKey.value) {
+    toast.warning('请输入消息、签名与公钥');
+    return;
   }
+  const ok = await runCrypto<boolean>('sm2-verify', 'sm2_verify', {
+    message: sm2Message.value,
+    signature,
+    publicKey: sm2PublicKey.value,
+  });
+  if (ok === null) return;
+  sm2Output.value = ok ? '✓ 签名验证通过' : '✗ 签名验证失败';
+  ok ? toast.success('签名验证通过') : toast.error('签名验证失败');
 };
 
 const calcHmacSm3 = async () => {
-  try {
-    const result = await invoke<string>('hmac_sm3', {
-      message: hmacMessage.value,
-      key: hmacKey.value
-    });
-    hmacOutput.value = result;
-  } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('计算失败: ' + (e as Error).message, 'error');
-    }
+  if (!hmacMessage.value || !hmacKey.value) {
+    toast.warning('请输入消息与密钥');
+    return;
   }
+  const result = await runCrypto<string>('hmac-calc', 'hmac_sm3', {
+    message: hmacMessage.value,
+    key: hmacKey.value,
+  }, 'HMAC-SM3 计算成功');
+  if (result !== null) hmacOutput.value = result;
 };
+
+useToolShortcuts(
+  '/gm-crypto',
+  {
+    run: () => {
+      // Dispatch the primary action for the active tab. Cmd/Ctrl+Enter
+      // runs whichever crypto operation the user is currently editing.
+      switch (activeTab.value) {
+        case 'sm3': void calcSm3(); break;
+        case 'sm4': void sm4Encrypt(); break;
+        case 'sm2': void sm2Sign(); break;
+        case 'hmac': void calcHmacSm3(); break;
+      }
+    },
+  },
+  [
+    { id: 'gm-run', group: '工具', description: '执行当前加密 / 解密操作', spec: { key: 'Enter', meta: true } },
+  ],
+);
 </script>
 
 <style scoped>
@@ -268,16 +336,6 @@ const calcHmacSm3 = async () => {
   max-width: 1200px;
   margin: 0 auto;
   padding: 20px;
-}
-
-.tool-header {
-  margin-bottom: 30px;
-}
-
-.tool-header h1 {
-  font-size: 28px;
-  color: var(--text-primary);
-  margin-bottom: 10px;
 }
 
 .tabs {
@@ -356,49 +414,11 @@ const calcHmacSm3 = async () => {
   margin-bottom: 15px;
 }
 
-.text-field {
-  padding: 10px 15px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  font-size: 14px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
 .button-group {
   display: flex;
   gap: 10px;
   margin-bottom: 15px;
-}
-
-.btn-action {
-  padding: 10px 20px;
-  background: var(--primary);
-  color: white;
-  border: none;
-  border-radius: var(--border-radius);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.btn-action:hover {
-  background: var(--secondary);
-}
-
-.btn-action-secondary {
-  padding: 10px 20px;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.btn-action-secondary:hover {
-  background: var(--border-color);
+  flex-wrap: wrap;
 }
 
 .result {
@@ -407,13 +427,20 @@ const calcHmacSm3 = async () => {
   border-radius: var(--border-radius);
   max-height: 300px;
   overflow: auto;
+  margin-top: 8px;
+}
+
+.result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .section-title {
   font-size: 14px;
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: 10px;
 }
 
 .result pre {

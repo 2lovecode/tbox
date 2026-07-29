@@ -21,6 +21,8 @@
         <div class="option-group">
           <label>目标语言:</label>
           <select v-model="selectedLanguage" @change="convertJson">
+            <!-- The dropdown isn't debounced — users explicitly pick
+                 a target language, so an immediate run is fine. -->
             <option value="java">Java</option>
             <option value="csharp">C#</option>
             <option value="go">Go</option>
@@ -35,13 +37,13 @@
             v-model="className"
             type="text"
             placeholder="User"
-            @input="convertJson"
+            @input="convertJsonDebounced"
           />
         </div>
 
-        <button @click="convertJson" class="btn-primary">
-          <i class="fas fa-sync-alt"></i> 转换
-        </button>
+      <button @click="convertJson" class="btn-primary">
+        <i class="fas fa-sync-alt"></i> 转换
+      </button>
 
         <CopyButton v-if="outputCode" :text="outputCode" label="复制代码" variant="action" />
       </div>
@@ -62,12 +64,16 @@ import { invoke } from '@tauri-apps/api/core';
 import CopyButton from '@/components/CopyButton.vue';
 import { useClipboard } from '@/composables/useClipboard';
 import { useToolShortcuts } from '@/composables/useToolShortcuts';
+import { useDebouncedFn } from '@/composables/useDebounce';
+import { useToast } from '@/composables/useToast';
 
 const jsonInput = ref('');
 const jsonError = ref('');
 const selectedLanguage = ref('java');
 const className = ref('User');
 const outputCode = ref('');
+const isConverting = ref(false);
+const toast = useToast();
 
 const { copy } = useClipboard();
 
@@ -75,8 +81,10 @@ useToolShortcuts(
   '/json-to-entity',
   {
     copy: () => { void copy(outputCode.value); },
+    run: () => { void convertJson(); },
   },
   [
+    { id: 'j2e-run', group: '工具', description: '执行实体类转换', spec: { key: 'Enter', meta: true } },
     { id: 'j2e-copy', group: '结果', description: '复制实体类代码', spec: { key: 'C', meta: true, shift: true } },
   ],
 );
@@ -98,6 +106,7 @@ const convertJson = async () => {
     return;
   }
 
+  isConverting.value = true;
   try {
     JSON.parse(jsonInput.value);
     jsonError.value = '';
@@ -137,10 +146,18 @@ const convertJson = async () => {
     }
 
     outputCode.value = result;
+    toast.success('转换成功');
   } catch (e) {
-    jsonError.value = '转换失败: ' + (e as Error).message;
+    jsonError.value = '转换失败: ' + (e instanceof Error ? e.message : String(e));
+  } finally {
+    isConverting.value = false;
   }
 };
+
+// Debounced version of convertJson: each keystroke restarts the 300ms
+// timer so the Rust side isn't hit on every character typed into the
+// class name input.
+const convertJsonDebounced = useDebouncedFn(() => { void convertJson(); }, 300);
 
 // 复制按钮已切到 CopyButton + useClipboard；copyCode 不再需要。
 </script>

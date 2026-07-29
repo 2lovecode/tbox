@@ -5,10 +5,12 @@ import { useSettingsStore } from '@/stores/settings';
 import { useRoleStore } from '@/stores/role';
 import { useLlmStore } from '@/stores/llm';
 import { LLM_PROVIDERS, type LlmProviderId } from '@/types/llm';
+import { useConfirm } from '@/composables/useConfirm';
 
 const settingsStore = useSettingsStore();
 const roleStore = useRoleStore();
 const llmStore = useLlmStore();
+const { confirm: confirmDialog } = useConfirm();
 const { isOpen, activeTab } = storeToRefs(settingsStore);
 const {
   availableRoles,
@@ -92,8 +94,13 @@ const llmStatusClass = computed(() => {
   return 'ok';
 });
 
-function resetLlm() {
-  if (!confirm('确定要清空 LLM 配置吗？此操作会删除已保存的 API Key。')) return;
+async function resetLlm() {
+  const ok = await confirmDialog('此操作会删除已保存的 API Key。', {
+    title: '确定要清空 LLM 配置吗？',
+    confirmLabel: '清空',
+    variant: 'danger',
+  });
+  if (!ok) return;
   void llmStore.deleteConfig();
 }
 </script>

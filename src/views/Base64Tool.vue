@@ -6,6 +6,7 @@ import CopyButton from '@/components/CopyButton.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { useToast } from '@/composables/useToast'
 import { useToolShortcuts } from '@/composables/useToolShortcuts'
+import { encodeBase64, decodeBase64 } from '@/utils/base64'
 
 const mode = ref<'encode' | 'decode'>('encode')
 const input = ref('')
@@ -37,9 +38,9 @@ const encode = () => {
 
   isProcessing.value = true
   try {
-    // 处理中文等 Unicode 字符
-    const encoded = btoa(unescape(encodeURIComponent(input.value)))
-    output.value = encoded
+    // Use the shared UTF-8 safe encoder instead of the deprecated
+    // `unescape(encodeURIComponent(...))` recipe.
+    output.value = encodeBase64(input.value)
     toast.success('编码成功')
   } catch (error) {
     toast.error('编码失败: ' + (error as Error).message)
@@ -56,8 +57,7 @@ const decode = () => {
 
   isProcessing.value = true
   try {
-    const decoded = decodeURIComponent(escape(atob(input.value)))
-    output.value = decoded
+    output.value = decodeBase64(input.value)
     toast.success('解码成功')
   } catch (error) {
     toast.error('解码失败: 请检查输入是否为有效的 Base64 字符串')

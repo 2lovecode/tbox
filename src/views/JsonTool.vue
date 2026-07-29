@@ -83,18 +83,14 @@ const formatJson = async () => {
     return
   }
 
-  isProcessing.value = true
-  try {
-    console.log('开始格式化JSON，输入长度:', inputJson.value.length)
-    console.log('输入JSON前100字符:', inputJson.value.substring(0, 100))
+    isProcessing.value = true
+    try {
+      const result = await invoke('format_json_pretty', {
+        jsonStr: inputJson.value,
+        indentSize: indentSize.value
+      }) as any
 
-    const result = await invoke('format_json_pretty', {
-      jsonStr: inputJson.value,
-      indentSize: indentSize.value
-    }) as any
-
-    console.log('格式化成功，输出长度:', result.formatted.length)
-    outputJson.value = result.formatted
+      outputJson.value = result.formatted
     toast.success('JSON美化成功')
   } catch (error: any) {
     const errorMessage = error?.toString() || '未知错误'

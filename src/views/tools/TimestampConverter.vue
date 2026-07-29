@@ -9,8 +9,7 @@
       <!-- 实时时钟 -->
       <div class="realtime-clock">
         <div class="clock-left">
-          <div class="clock-time">{{ currentTime }}</div>
-          <div class="clock-date">{{ currentDate }}</div>
+          <LiveClock />
         </div>
         <div class="clock-right">
           <div class="timezone-badge">
@@ -118,10 +117,7 @@
         </div>
 
         <div class="timestamps-display">
-          <div class="timestamp-card" v-for="item in currentTimestamps" :key="item.unit" @click="copyResult(item.value)">
-            <div class="timestamp-label">{{ item.label }}</div>
-            <div class="timestamp-value">{{ item.value }}</div>
-          </div>
+          <LiveTimestamp @copy="copyResult" />
         </div>
       </div>
 
@@ -149,9 +145,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed } from 'vue';
 import { useClipboard } from '@/composables/useClipboard';
 import { useToolShortcuts } from '@/composables/useToolShortcuts';
+import LiveClock from '@/components/LiveClock.vue';
+import LiveTimestamp from '@/components/LiveTimestamp.vue';
 
 interface Timezone {
   label: string;
@@ -204,49 +202,6 @@ const isLive = ref(true);
 const showFormats = ref(false);
 
 // 实时时间
-const currentTime = ref('');
-const currentDate = ref('');
-let timeTimer: number | null = null;
-
-const updateCurrentTime = () => {
-  const now = new Date();
-  currentTime.value = now.toLocaleTimeString('zh-CN', {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  });
-  currentDate.value = now.toLocaleDateString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    weekday: 'short',
-  });
-};
-
-// 当前时间戳
-const currentTimestamps = ref([
-  { unit: 's', label: '秒', value: '' },
-  { unit: 'ms', label: '毫秒', value: '' },
-  { unit: 'us', label: '微秒', value: '' },
-  { unit: 'ns', label: '纳秒', value: '' },
-]);
-
-const updateCurrentTimestamps = () => {
-  const now = new Date();
-  const s = Math.floor(now.getTime() / 1000);
-  const ms = now.getTime();
-  const us = ms * 1000;
-  const ns = ms * 1000000;
-
-  currentTimestamps.value[0].value = s.toString();
-  currentTimestamps.value[1].value = ms.toString();
-  currentTimestamps.value[2].value = us.toString();
-  currentTimestamps.value[3].value = ns.toString();
-};
-
-let timestampTimer: number | null = null;
-
 // 转换结果
 const convertedDatetime = ref<ConvertedDatetime | null>(null);
 const convertedTimestamp = ref<ConvertedTimestamp | null>(null);
@@ -382,18 +337,6 @@ const formatExamples = computed(() => {
   ];
 });
 
-onMounted(() => {
-  updateCurrentTime();
-  updateCurrentTimestamps();
-
-  timeTimer = setInterval(updateCurrentTime, 1000) as unknown as number;
-  timestampTimer = setInterval(updateCurrentTimestamps, 1000) as unknown as number;
-});
-
-onUnmounted(() => {
-  if (timeTimer) clearInterval(timeTimer);
-  if (timestampTimer) clearInterval(timestampTimer);
-});
 </script>
 
 <style scoped>

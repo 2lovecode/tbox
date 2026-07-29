@@ -1,9 +1,6 @@
 <template>
   <div class="tool-container">
-    <div class="tool-header">
-      <h1>JSON对比工具</h1>
-      <p>对比两个JSON的差异，高亮显示新增、删除和修改的字段</p>
-    </div>
+    <PageHeader title="JSON 对比工具" description="对比两个 JSON 的差异，高亮显示新增、删除和修改的字段" :show-back="true" />
 
     <div class="tool-content">
       <div class="inputs-grid">
@@ -45,9 +42,9 @@
       </div>
 
       <div class="actions">
-        <button v-if="!hasCompared" @click="compareJson" class="btn-primary">
+        <AsyncButton v-if="!hasCompared" :loading="isComparing" @click="compareJson" variant="primary">
           <i class="fas fa-not-equal"></i> 对比
-        </button>
+        </AsyncButton>
         <button v-else @click="editMode" class="btn-secondary">
           <i class="fas fa-edit"></i> 继续编辑
         </button>
@@ -101,6 +98,10 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import PageHeader from '@/components/PageHeader.vue';
+import AsyncButton from '@/components/AsyncButton.vue';
+import { useToast } from '@/composables/useToast';
+import { useToolShortcuts } from '@/composables/useToolShortcuts';
 
 interface DiffResult {
   added: string[];
@@ -117,6 +118,20 @@ const json1 = ref('');
 const json2 = ref('');
 const diffResult = ref<DiffResult | null>(null);
 const hasCompared = ref(false);
+  const isComparing = ref(false);
+  const toast = useToast();
+
+useToolShortcuts(
+  '/json-diff',
+  {
+    run: () => { void compareJson(); },
+    clear: () => clearAll(),
+  },
+  [
+    { id: 'jd-run', group: '工具', description: '执行 JSON 对比', spec: { key: 'Enter', meta: true } },
+    { id: 'jd-clear', group: '工具', description: '清空所有输入', spec: { key: 'L', meta: true } },
+  ],
+);
 
 const hasChanges = computed(() => {
   return diffResult.value &&
@@ -276,9 +291,7 @@ function escapeHtml(text: string): string {
 
 const compareJson = async () => {
   if (!json1.value.trim() || !json2.value.trim()) {
-    if ((window as any).$toast) {
-      (window as any).$toast('请输入两个JSON', 'warning');
-    }
+    toast.warning('请输入两个JSON');
     return;
   }
 
@@ -286,12 +299,11 @@ const compareJson = async () => {
     JSON.parse(json1.value);
     JSON.parse(json2.value);
   } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('JSON格式错误: ' + (e as Error).message, 'error');
-    }
+    toast.error('JSON格式错误: ' + (e as Error).message);
     return;
   }
 
+  isComparing.value = true;
   try {
     const result = await invoke<DiffResult>('compare_json', {
       json1: json1.value,
@@ -299,10 +311,11 @@ const compareJson = async () => {
     });
     diffResult.value = result;
     hasCompared.value = true;
+    toast.success('对比完成');
   } catch (e) {
-    if ((window as any).$toast) {
-      (window as any).$toast('对比失败: ' + (e as Error).message, 'error');
-    }
+    toast.error('对比失败: ' + (e as Error).message);
+  } finally {
+    isComparing.value = false;
   }
 };
 

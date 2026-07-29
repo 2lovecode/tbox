@@ -178,9 +178,7 @@ const buildTree = (data: any, key = 'root', level = 0, path = 'root'): JsonNodeD
 const jsonTree = computed(() => {
   try {
     if (!parsedData.value) return null
-    console.log('Building jsonTree, parsedData:', parsedData.value)
     const result = buildTree(parsedData.value)
-    console.log('jsonTree built:', result)
     return result
   } catch (e: any) {
     console.error('jsonTree computed error:', e)

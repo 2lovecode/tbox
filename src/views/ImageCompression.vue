@@ -1,6 +1,9 @@
 <script lang="ts" setup>
 import { ref, reactive } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
+import { useToast } from '@/composables/useToast';
+
+const toast = useToast();
 
 // 类型定义
 interface ImageInfo {
@@ -46,7 +49,7 @@ const handleFileSelect = (event: Event) => {
   
   // 检查文件类型
   if (!file.type.match('image.*')) {
-    alert('请选择图片文件')
+    toast.warning('请选择图片文件')
     return
   }
   

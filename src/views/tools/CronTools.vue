@@ -19,78 +19,82 @@
       <div class="cron-builder">
         <div class="field-group">
           <label>分钟 (0-59):</label>
-          <select v-model="cron.minute">
-            <option value="*">*</option>
-            <option value="0">0</option>
-            <option value="5">5</option>
-            <option value="15">15</option>
-            <option value="30">30</option>
-            <option value="*/5">*/5 (每5分钟)</option>
-            <option value="*/10">*/10 (每10分钟)</option>
-            <option value="*/15">*/15 (每15分钟)</option>
-            <option value="*/30">*/30 (每30分钟)</option>
-          </select>
           <input type="text" v-model="cron.minute" placeholder="*" />
+          <div class="preset-chips">
+            <button
+              v-for="preset in MINUTE_PRESETS"
+              :key="preset.value"
+              type="button"
+              :class="['preset-chip', { active: cron.minute === preset.value }]"
+              @click="cron.minute = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
 
         <div class="field-group">
           <label>小时 (0-23):</label>
-          <select v-model="cron.hour">
-            <option value="*">*</option>
-            <option value="0">0</option>
-            <option value="6">6</option>
-            <option value="9">9</option>
-            <option value="12">12</option>
-            <option value="18">18</option>
-          </select>
           <input type="text" v-model="cron.hour" placeholder="*" />
+          <div class="preset-chips">
+            <button
+              v-for="preset in HOUR_PRESETS"
+              :key="preset.value"
+              type="button"
+              :class="['preset-chip', { active: cron.hour === preset.value }]"
+              @click="cron.hour = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
 
         <div class="field-group">
           <label>日期 (1-31):</label>
-          <select v-model="cron.dayOfMonth">
-            <option value="*">*</option>
-            <option value="1">1</option>
-            <option value="15">15</option>
-            <option value="L">L (最后一天)</option>
-          </select>
           <input type="text" v-model="cron.dayOfMonth" placeholder="*" />
+          <div class="preset-chips">
+            <button
+              v-for="preset in DAY_PRESETS"
+              :key="preset.value"
+              type="button"
+              :class="['preset-chip', { active: cron.dayOfMonth === preset.value }]"
+              @click="cron.dayOfMonth = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
 
         <div class="field-group">
           <label>月份 (1-12):</label>
-          <select v-model="cron.month">
-            <option value="*">*</option>
-            <option value="1">1 (一月)</option>
-            <option value="2">2 (二月)</option>
-            <option value="3">3 (三月)</option>
-            <option value="4">4 (四月)</option>
-            <option value="5">5 (五月)</option>
-            <option value="6">6 (六月)</option>
-            <option value="7">7 (七月)</option>
-            <option value="8">8 (八月)</option>
-            <option value="9">9 (九月)</option>
-            <option value="10">10 (十月)</option>
-            <option value="11">11 (十一月)</option>
-            <option value="12">12 (十二月)</option>
-          </select>
           <input type="text" v-model="cron.month" placeholder="*" />
+          <div class="preset-chips">
+            <button
+              v-for="preset in MONTH_PRESETS"
+              :key="preset.value"
+              type="button"
+              :class="['preset-chip', { active: cron.month === preset.value }]"
+              @click="cron.month = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
 
         <div class="field-group">
           <label>星期 (0-6):</label>
-          <select v-model="cron.dayOfWeek">
-            <option value="*">*</option>
-            <option value="0">0 (周日)</option>
-            <option value="1">1 (周一)</option>
-            <option value="2">2 (周二)</option>
-            <option value="3">3 (周三)</option>
-            <option value="4">4 (周四)</option>
-            <option value="5">5 (周五)</option>
-            <option value="6">6 (周六)</option>
-            <option value="MON-FRI">MON-FRI (工作日)</option>
-          </select>
           <input type="text" v-model="cron.dayOfWeek" placeholder="*" />
+          <div class="preset-chips">
+            <button
+              v-for="preset in WEEKDAY_PRESETS"
+              :key="preset.value"
+              type="button"
+              :class="['preset-chip', { active: cron.dayOfWeek === preset.value }]"
+              @click="cron.dayOfWeek = preset.value"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -167,6 +171,60 @@ import { invoke } from '@tauri-apps/api/core';
 import CopyButton from '@/components/CopyButton.vue';
 import { useClipboard } from '@/composables/useClipboard';
 import { useToolShortcuts } from '@/composables/useToolShortcuts';
+
+// Quick-pick presets for each cron field. Replaces the original
+// `<select>` + `<input>` pair that fought over the same ref.
+const MINUTE_PRESETS = [
+  { value: '*', label: '任意' },
+  { value: '0', label: '0' },
+  { value: '5', label: '5' },
+  { value: '15', label: '15' },
+  { value: '30', label: '30' },
+  { value: '*/5', label: '/5' },
+  { value: '*/10', label: '/10' },
+  { value: '*/15', label: '/15' },
+  { value: '*/30', label: '/30' },
+];
+const HOUR_PRESETS = [
+  { value: '*', label: '任意' },
+  { value: '0', label: '0' },
+  { value: '6', label: '6' },
+  { value: '9', label: '9' },
+  { value: '12', label: '12' },
+  { value: '18', label: '18' },
+];
+const DAY_PRESETS = [
+  { value: '*', label: '任意' },
+  { value: '1', label: '1' },
+  { value: '15', label: '15' },
+  { value: 'L', label: '最后一天' },
+];
+const MONTH_PRESETS = [
+  { value: '*', label: '任意' },
+  { value: '1', label: '1月' },
+  { value: '2', label: '2月' },
+  { value: '3', label: '3月' },
+  { value: '4', label: '4月' },
+  { value: '5', label: '5月' },
+  { value: '6', label: '6月' },
+  { value: '7', label: '7月' },
+  { value: '8', label: '8月' },
+  { value: '9', label: '9月' },
+  { value: '10', label: '10月' },
+  { value: '11', label: '11月' },
+  { value: '12', label: '12月' },
+];
+const WEEKDAY_PRESETS = [
+  { value: '*', label: '任意' },
+  { value: '0', label: '周日' },
+  { value: '1', label: '周一' },
+  { value: '2', label: '周二' },
+  { value: '3', label: '周三' },
+  { value: '4', label: '周四' },
+  { value: '5', label: '周五' },
+  { value: '6', label: '周六' },
+  { value: 'MON-FRI', label: '工作日' },
+];
 
 const currentTab = ref('generate');
 const error = ref('');
@@ -339,6 +397,33 @@ async function explainCron() {
   padding: 6px;
   border: 1px solid #d9d9d9;
   border-radius: 4px;
+}
+
+.preset-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.preset-chip {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: inherit;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: white;
+  color: #595959;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+.preset-chip:hover {
+  border-color: #4361ee;
+  color: #4361ee;
+}
+.preset-chip.active {
+  background: #4361ee;
+  color: white;
+  border-color: #4361ee;
 }
 
 .input-group {

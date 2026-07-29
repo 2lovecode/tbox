@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 
 interface RecoverableFile {
   name: string
@@ -18,6 +19,7 @@ const foundFiles = ref<RecoverableFile[]>([])
 const selectedFiles = ref<string[]>([])
 const isRecovering = ref(false)
 
+const { confirm: confirmDialog } = useConfirm();
 const toast = useToast();
 
 const formatFileSize = (bytes: number): string => {
@@ -108,9 +110,11 @@ const recoverFiles = async () => {
     return
   }
   
-  if (!confirm(`确定要恢复 ${selectedFiles.value.length} 个文件吗？`)) {
-    return
-  }
+  const ok = await confirmDialog(
+    `确定要恢复 ${selectedFiles.value.length} 个文件吗？`,
+    { title: '恢复确认', confirmLabel: '恢复', variant: 'danger' },
+  );
+  if (!ok) return;
   
   isRecovering.value = true
   

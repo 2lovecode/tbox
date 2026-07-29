@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
 import CopyButton from '@/components/CopyButton.vue';
 import { useToast } from '@/composables/useToast';
+import { useConfirm } from '@/composables/useConfirm';
 
 interface PasswordEntry {
   id: string
@@ -39,6 +40,7 @@ const filteredEntries = computed(() => {
 })
 
 const toast = useToast();
+const { confirm: confirmDialog } = useConfirm();
 // 复制按钮都走 CopyButton 组件，useClipboard 不再需要在此处显式调用。
 
 // 生成强密码
@@ -106,8 +108,13 @@ const editEntry = (entry: PasswordEntry) => {
 }
 
 // 删除条目
-const deleteEntry = (id: string) => {
-  if (confirm('确定要删除这条密码记录吗？')) {
+const deleteEntry = async (id: string) => {
+  const ok = await confirmDialog('确定要删除这条密码记录吗？', {
+    title: '删除确认',
+    confirmLabel: '删除',
+    variant: 'danger',
+  });
+  if (ok) {
     entries.value = entries.value.filter(e => e.id !== id)
     try {
       localStorage.setItem('passwordEntries', JSON.stringify(entries.value))

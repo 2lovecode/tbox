@@ -6,6 +6,7 @@ import { storeToRefs } from 'pinia';
 import { useRoleStore } from '@/stores/role';
 import { invoke } from '@tauri-apps/api/core';
 import { useRouter, useRoute } from 'vue-router';
+import { useToast } from '@/composables/useToast';
 import RoleSelection from '@/components/onboarding/RoleSelection.vue';
 
 const store = useToolStore();
@@ -157,11 +158,7 @@ const openTool = (tool: Tool) => {
       isNavigating.value = false;
     }, 500);
   } else {
-    if ((window as any).$toast) {
-      (window as any).$toast(`工具 "${tool.name}" 的路由尚未配置`, 'warning');
-    } else {
-      alert(`工具 "${tool.name}" 的路由尚未配置`);
-    }
+    toast.warning(`工具 "${tool.name}" 的路由尚未配置`);
   }
 };
 
@@ -197,6 +194,7 @@ watch(searchQuery, (newVal) => {
 
 // 标记是否正在导航，防止搜索watch干扰导航
 const isNavigating = ref(false);
+const toast = useToast();
 
 </script>
 <template>
