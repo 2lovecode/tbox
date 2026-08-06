@@ -3,7 +3,11 @@ import { createPinia } from "pinia";
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import {router} from "./router/main";
 
-import "@fortawesome/fontawesome-free/css/all.min.css";
+// 全项目只用 solid 图标(grep 确认 regular/brands 零引用)。
+// 拆成 base + solid 两个子集,避免把 brands(115KB)/ regular(20KB)
+// 这两个根本用不到的字体文件打进包。
+import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
+import "@fortawesome/fontawesome-free/css/solid.min.css";
 import App from "./App.vue";
 
 const pinia = createPinia()

@@ -3,6 +3,11 @@ import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import PageHeader from '@/components/PageHeader.vue';
 
+// 声明组件名,供 App.vue 的 <KeepAlive :exclude> 精确排除。
+// 本工具在 document 上挂了 mouseup/mousemove 监听并靠 onUnmounted 释放,
+// keep-alive 下切走不卸载会导致全局监听泄漏,因此不参与缓存。
+defineOptions({ name: 'ScreenRuler' })
+
 interface WindowInfo {
   x: number;
   y: number;

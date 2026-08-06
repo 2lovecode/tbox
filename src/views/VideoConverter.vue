@@ -3,6 +3,11 @@ import { ref } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 
+// 声明组件名,供 App.vue 的 <KeepAlive :exclude> 精确排除。
+// 转换过程用 setInterval 轮询进度且无 onUnmounted 清理,keep-alive 下
+// 切走会让轮询继续在后台跑,因此不参与缓存。
+defineOptions({ name: 'VideoConverter' })
+
 interface VideoFile {
   name: string
   size: number
