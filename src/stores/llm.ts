@@ -41,16 +41,20 @@ export const useLlmStore = defineStore('llm', {
     testResult: null as LlmTestResult | null,
   }),
   getters: {
-    providerMeta: (state) => getProviderMeta(state.config.provider),
-    isConfigured: (state) =>
-      state.config.baseUrl.trim().length > 0 &&
-      state.config.model.trim().length > 0,
+    providerMeta: (state) => getProviderMeta(state.config?.provider),
+    isConfigured: (state) => {
+      const baseUrl = state.config?.baseUrl ?? '';
+      const model = state.config?.model ?? '';
+      return baseUrl.trim().length > 0 && model.trim().length > 0;
+    },
     /** True when the form is valid enough to attempt a save (key is
      * optional if one is already stored). */
     canSave: (state) => {
-      if (!state.config.baseUrl.trim() || !state.config.model.trim()) return false;
+      const baseUrl = state.config?.baseUrl ?? '';
+      const model = state.config?.model ?? '';
+      if (!baseUrl.trim() || !model.trim()) return false;
       // Either the user is supplying a new key, or one is already on disk.
-      return state.apiKeyDraft.trim().length > 0 || state.config.hasApiKey;
+      return state.apiKeyDraft.trim().length > 0 || !!state.config?.hasApiKey;
     },
   },
   actions: {

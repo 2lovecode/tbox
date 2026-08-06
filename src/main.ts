@@ -3,6 +3,7 @@ import { createPinia } from "pinia";
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import {router} from "./router/main";
 
+import "@fortawesome/fontawesome-free/css/all.min.css";
 import App from "./App.vue";
 
 const pinia = createPinia()
