@@ -1,84 +1,49 @@
 import { createMemoryHistory, createRouter } from 'vue-router'
 import HomePage from '@/views/HomePage.vue'
-import ImageCompression from '@/views/ImageCompression.vue'
-import VideoConverter from '@/views/VideoConverter.vue'
-import PasswordManage from '@/views/PasswordManage.vue'
-import PDFToolbox from '@/views/PDFToolbox.vue'
-import ScreenRuler from '@/views/ScreenRuler.vue'
-import CodeFormatter from '@/views/CodeFormatter.vue'
-import FileRecovery from '@/views/FileRecovery.vue'
-import NetworkSpeedTest from '@/views/NetworkSpeedTest.vue'
-import JsonTool from '@/views/JsonTool.vue'
-import Base64Tool from '@/views/Base64Tool.vue'
-import HashGenerator from '@/views/HashGenerator.vue'
 
-// 新增工具
-import JsonToEntity from '@/views/tools/JsonToEntity.vue'
-import JsonDiff from '@/views/tools/JsonDiff.vue'
-import JwtTool from '@/views/tools/JwtTool.vue'
-import RegexTester from '@/views/tools/RegexTester.vue'
-import TimestampConverter from '@/views/tools/TimestampConverter.vue'
-import HttpRequest from '@/views/tools/HttpRequest.vue'
-import TextTools from '@/views/tools/TextTools.vue'
-import EncodingTools from '@/views/tools/EncodingTools.vue'
-import XmlTools from '@/views/tools/XmlTools.vue'
-import YamlTools from '@/views/tools/YamlTools.vue'
-import GmCrypto from '@/views/tools/GmCrypto.vue'
-import SqlTools from '@/views/tools/SqlTools.vue'
-import DatabaseTools from '@/views/tools/DatabaseTools.vue'
-import ImageTools from '@/views/tools/ImageTools.vue'
-import CsvTools from '@/views/tools/CsvTools.vue'
-import LogAnalyzer from '@/views/tools/LogAnalyzer.vue'
-import ColorTools from '@/views/tools/ColorTools.vue'
-import QrcodeTools from '@/views/tools/QrcodeTools.vue'
-import UuidTools from '@/views/tools/UuidTools.vue'
-import CronTools from '@/views/tools/CronTools.vue'
-import NumberTools from '@/views/tools/NumberTools.vue'
-import CharsetTools from '@/views/tools/CharsetTools.vue'
-import JsonToQuery from '@/views/tools/JsonToQuery.vue'
-import CoordinateTools from '@/views/tools/CoordinateTools.vue'
-import CoordinateVisualizer from '@/views/tools/CoordinateVisualizer.vue'
-
+// 首屏 HomePage 保持静态导入(应用启动即渲染);
+// 其余所有工具页改为动态 import,Vite 会按路由自动分片,
+// 避免首屏一次性解析全部 37 个工具的代码。
 const routes = [
   { path: '/', component: HomePage },
-  { path: '/image-compression', component: ImageCompression },
-  { path: '/video-converter', component: VideoConverter },
-  { path: '/password-manage', component: PasswordManage },
-  { path: '/pdf-toolbox', component: PDFToolbox },
-  { path: '/screen-ruler', component: ScreenRuler },
-  { path: '/code-formatter', component: CodeFormatter },
-  { path: '/file-recovery', component: FileRecovery },
-  { path: '/network-speed-test', component: NetworkSpeedTest },
-  { path: '/json-tool', component: JsonTool },
-  { path: '/base64-tool', component: Base64Tool },
-  { path: '/hash-generator', component: HashGenerator },
+  { path: '/image-compression', component: () => import('@/views/ImageCompression.vue') },
+  { path: '/video-converter', component: () => import('@/views/VideoConverter.vue') },
+  { path: '/password-manage', component: () => import('@/views/PasswordManage.vue') },
+  { path: '/pdf-toolbox', component: () => import('@/views/PDFToolbox.vue') },
+  { path: '/screen-ruler', component: () => import('@/views/ScreenRuler.vue') },
+  { path: '/code-formatter', component: () => import('@/views/CodeFormatter.vue') },
+  { path: '/file-recovery', component: () => import('@/views/FileRecovery.vue') },
+  { path: '/network-speed-test', component: () => import('@/views/NetworkSpeedTest.vue') },
+  { path: '/json-tool', component: () => import('@/views/JsonTool.vue') },
+  { path: '/base64-tool', component: () => import('@/views/Base64Tool.vue') },
+  { path: '/hash-generator', component: () => import('@/views/HashGenerator.vue') },
 
   // 新增工具路由
-  { path: '/json-to-entity', component: JsonToEntity },
-  { path: '/json-diff', component: JsonDiff },
-  { path: '/jwt-tool', component: JwtTool },
-  { path: '/regex-tester', component: RegexTester },
-  { path: '/timestamp-converter', component: TimestampConverter },
-  { path: '/http-request', component: HttpRequest },
-  { path: '/text-tools', component: TextTools },
-  { path: '/encoding-tools', component: EncodingTools },
-  { path: '/xml-tools', component: XmlTools },
-  { path: '/yaml-tools', component: YamlTools },
-  { path: '/gm-crypto', component: GmCrypto },
-  { path: '/sql-tools', component: SqlTools },
-  { path: '/database-tools', component: DatabaseTools },
-  { path: '/image-tools', component: ImageTools },
-  { path: '/csv-tools', component: CsvTools },
-  { path: '/log-analyzer', component: LogAnalyzer },
-  { path: '/color-tools', component: ColorTools },
-  { path: '/qrcode-tools', component: QrcodeTools },
-  { path: '/uuid-tools', component: UuidTools },
-  { path: '/cron-tools', component: CronTools },
-  { path: '/number-tools', component: NumberTools },
-  { path: '/charset-tools', component: CharsetTools },
-  { path: '/json-to-query', component: JsonToQuery },
-  { path: '/coordinate-tools', component: CoordinateTools },
-  { path: '/coordinate-visualizer', component: CoordinateVisualizer }
+  { path: '/json-to-entity', component: () => import('@/views/tools/JsonToEntity.vue') },
+  { path: '/json-diff', component: () => import('@/views/tools/JsonDiff.vue') },
+  { path: '/jwt-tool', component: () => import('@/views/tools/JwtTool.vue') },
+  { path: '/regex-tester', component: () => import('@/views/tools/RegexTester.vue') },
+  { path: '/timestamp-converter', component: () => import('@/views/tools/TimestampConverter.vue') },
+  { path: '/http-request', component: () => import('@/views/tools/HttpRequest.vue') },
+  { path: '/text-tools', component: () => import('@/views/tools/TextTools.vue') },
+  { path: '/encoding-tools', component: () => import('@/views/tools/EncodingTools.vue') },
+  { path: '/xml-tools', component: () => import('@/views/tools/XmlTools.vue') },
+  { path: '/yaml-tools', component: () => import('@/views/tools/YamlTools.vue') },
+  { path: '/gm-crypto', component: () => import('@/views/tools/GmCrypto.vue') },
+  { path: '/sql-tools', component: () => import('@/views/tools/SqlTools.vue') },
+  { path: '/database-tools', component: () => import('@/views/tools/DatabaseTools.vue') },
+  { path: '/image-tools', component: () => import('@/views/tools/ImageTools.vue') },
+  { path: '/csv-tools', component: () => import('@/views/tools/CsvTools.vue') },
+  { path: '/log-analyzer', component: () => import('@/views/tools/LogAnalyzer.vue') },
+  { path: '/color-tools', component: () => import('@/views/tools/ColorTools.vue') },
+  { path: '/qrcode-tools', component: () => import('@/views/tools/QrcodeTools.vue') },
+  { path: '/uuid-tools', component: () => import('@/views/tools/UuidTools.vue') },
+  { path: '/cron-tools', component: () => import('@/views/tools/CronTools.vue') },
+  { path: '/number-tools', component: () => import('@/views/tools/NumberTools.vue') },
+  { path: '/charset-tools', component: () => import('@/views/tools/CharsetTools.vue') },
+  { path: '/json-to-query', component: () => import('@/views/tools/JsonToQuery.vue') },
+  { path: '/coordinate-tools', component: () => import('@/views/tools/CoordinateTools.vue') },
+  { path: '/coordinate-visualizer', component: () => import('@/views/tools/CoordinateVisualizer.vue') }
 ]
 
 export const router = createRouter({

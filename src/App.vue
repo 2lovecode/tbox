@@ -29,6 +29,11 @@ const { isDark, toggleTheme } = useTheme()
 const { isOnline } = useOnlineStatus()
 const shortcuts = useKeyboardShortcuts()
 
+// 不参与 keep-alive 缓存的工具:这些工具靠 onUnmounted 清理定时器/
+// 全局事件监听,keep-alive 下切走不会触发卸载,会导致后台定时器空转、
+// document 监听泄漏等问题。其余无副作用的工具进入缓存,切换时保留输入。
+const excludedFromCache = ['NetworkSpeedTest', 'ScreenRuler', 'FileRecovery', 'VideoConverter']
+
 // 工具数据
 const tools = ref<Tool[]>([]);
 const isLoading = ref(true);
@@ -172,7 +177,11 @@ onBeforeUnmount(() => {
       <SideBar v-if="showSidebar"></SideBar>      
       <div class="main-wrapper">
         <Transition name="fade" mode="out-in">
-          <RouterView v-if="!isLoading" />
+          <RouterView v-if="!isLoading" v-slot="{ Component }">
+            <KeepAlive :max="12" :exclude="excludedFromCache">
+              <component :is="Component" />
+            </KeepAlive>
+          </RouterView>
           <div v-else class="loading-container">
             <div class="loading-spinner"></div>
             <p>加载中...</p>

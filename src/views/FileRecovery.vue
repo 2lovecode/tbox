@@ -4,6 +4,11 @@ import PageHeader from '@/components/PageHeader.vue';
 import { useToast } from '@/composables/useToast';
 import { useConfirm } from '@/composables/useConfirm';
 
+// 声明组件名,供 App.vue 的 <KeepAlive :exclude> 精确排除。
+// 扫描过程用 setInterval 轮询且无 onUnmounted 清理,keep-alive 下
+// 切走会让轮询继续在后台跑,因此不参与缓存(每次进入重新开始扫描更合理)。
+defineOptions({ name: 'FileRecovery' })
+
 interface RecoverableFile {
   name: string
   path: string

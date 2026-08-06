@@ -2,6 +2,11 @@
 import { ref, onUnmounted } from 'vue'
 import PageHeader from '@/components/PageHeader.vue';
 
+// 声明组件名,供 App.vue 的 <KeepAlive :exclude> 精确排除。
+// 本工具靠 onUnmounted 清理测速定时器,keep-alive 下切走不会卸载,
+// 会让定时器后台空转,因此不参与缓存。
+defineOptions({ name: 'NetworkSpeedTest' })
+
 const isTesting = ref(false)
 const downloadSpeed = ref(0)
 const uploadSpeed = ref(0)
