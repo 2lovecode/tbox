@@ -94,6 +94,9 @@ once_cell = "1.19"
 # 中文分词
 jieba-rs = "0.6"
 
+[dev-dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Release 构建优化:缩小二进制 + 提升运行时性能。
 # 注意:刻意不加 `panic = "abort"`,保留 unwinding,这样 Rust 端命令
 # 崩溃时能被前端 errorHandler 优雅捕获,而不是直接整进程退出。

@@ -7,7 +7,7 @@
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::ShortcutState;
 
-mod commands;
+pub mod commands;
 mod db;
 
 /// Event name emitted to the frontend when the user invokes the global
@@ -83,11 +83,6 @@ pub fn run() {
             // 工具管理
             commands::tool::get_categories,
             commands::tool::get_all_tools,
-            // 角色管理
-            commands::role::get_roles,
-            commands::role::get_tools_by_role,
-            commands::role::set_user_role,
-            commands::role::get_user_role,
             // 搜索
             commands::search::search_tools,
             // Story 5.1 (Phase 1.5 v0): 本地意图路由

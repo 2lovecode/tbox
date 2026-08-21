@@ -126,17 +126,19 @@ pub fn append_user_message_on(
                 .query_row(params![conv_id], row_to_conversation)
                 .map_err(|_| format!("会话不存在: {conv_id}"))?;
 
-            conn.execute(
+            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+            tx.execute(
                 "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
                 params![ts, conv_id],
             )
             .map_err(|e| e.to_string())?;
-            conn.execute(
+            tx.execute(
                 "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
                  VALUES (?1, ?2, 'user', ?3, NULL, ?4)",
                 params![message_id, conv_id, content, ts],
             )
             .map_err(|e| e.to_string())?;
+            tx.commit().map_err(|e| e.to_string())?;
 
             let message = ChatMessage {
                 id: message_id,
