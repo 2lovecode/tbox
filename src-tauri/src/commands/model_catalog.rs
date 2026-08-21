@@ -86,13 +86,9 @@ fn part_path(id: &str) -> Result<PathBuf, String> {
     Ok(models_dir()?.join(format!("{id}.gguf.part")))
 }
 
+#[allow(dead_code)]
 fn checksum_path(id: &str) -> Result<PathBuf, String> {
     Ok(models_dir()?.join(format!("{id}.sha256")))
-}
-
-#[allow(dead_code)]
-fn _checksum_path_used_by_download(id: &str) -> Result<PathBuf, String> {
-    checksum_path(id)
 }
 
 pub fn find_entry(id: &str) -> Option<&'static CatalogEntry> {
