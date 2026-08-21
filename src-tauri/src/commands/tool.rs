@@ -49,6 +49,8 @@ pub fn init_db_if_needed() -> Result<()> {
     // 分类图标是后续补的能力：老库没有 icon 列，需要在这里幂等补齐
     ensure_category_icons(&conn)?;
 
+    crate::commands::conversation::ensure_conversation_schema(&conn)?;
+
     Ok(())
 }
 
