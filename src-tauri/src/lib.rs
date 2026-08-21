@@ -55,6 +55,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .manage(commands::agent::AgentCancel::default())
         .setup(|app| {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -153,6 +154,11 @@ pub fn run() {
             commands::conversation::get_conversation_messages,
             commands::conversation::delete_conversation,
             commands::conversation::append_user_message,
+
+            // Agent 对话
+            commands::agent::check_llm_ready,
+            commands::agent::send_chat_turn,
+            commands::agent::cancel_chat_turn,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

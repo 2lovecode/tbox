@@ -37,6 +37,7 @@ const NONCE_LEN: usize = 12;
 #[serde(rename_all = "lowercase")]
 pub enum LlmProvider {
     #[default]
+    Local,
     Openai,
     Deepseek,
     Anthropic,
@@ -45,9 +46,10 @@ pub enum LlmProvider {
 
 impl LlmProvider {
     /// Sensible default `base_url` for each provider. Returned as `Option`
-    /// because `Custom` has no canonical endpoint.
+    /// because `Custom` / `Local` have no canonical remote endpoint.
     pub fn default_base_url(self) -> Option<&'static str> {
         match self {
+            LlmProvider::Local => None,
             LlmProvider::Openai => Some("https://api.openai.com/v1"),
             LlmProvider::Deepseek => Some("https://api.deepseek.com/v1"),
             LlmProvider::Anthropic => Some("https://api.anthropic.com"),
@@ -59,6 +61,7 @@ impl LlmProvider {
     /// for each provider so the form is functional on first save.
     pub fn default_model(self) -> Option<&'static str> {
         match self {
+            LlmProvider::Local => None,
             LlmProvider::Openai => Some("gpt-4o-mini"),
             LlmProvider::Deepseek => Some("deepseek-chat"),
             LlmProvider::Anthropic => Some("claude-3-5-haiku-latest"),
@@ -376,5 +379,17 @@ pub async fn test_llm_connection() -> Result<LlmTestResult, String> {
             message: format!("请求失败: {}", e),
             elapsed_ms: started.elapsed().as_millis(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_config_defaults_to_local() {
+        assert_eq!(LlmProvider::default(), LlmProvider::Local);
+        let cfg = LlmConfig::default();
+        assert_eq!(cfg.provider, LlmProvider::Local);
     }
 }

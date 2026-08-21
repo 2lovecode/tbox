@@ -13,12 +13,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 pub const MAX_TOOL_ITERATIONS: usize = 8;
 
 /// Streaming / progress events for the frontend.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
-    Token(String),
+    Token { text: String },
     ToolStart { id: String, args: Value },
     ToolEnd { id: String, result: String },
-    Error(String),
+    Error { message: String },
+    Interrupted,
     Done,
 }
 
@@ -57,7 +59,7 @@ pub fn run_agent_on(
     mut emit: impl FnMut(AgentEvent),
 ) -> Result<(), String> {
     if cancel.load(Ordering::SeqCst) {
-        emit(AgentEvent::Done);
+        emit(AgentEvent::Interrupted);
         return Ok(());
     }
 
@@ -70,21 +72,25 @@ pub fn run_agent_on(
     loop {
         if cancel.load(Ordering::SeqCst) {
             let _ = append_assistant_message_on(conn, conv_id, "", None);
-            emit(AgentEvent::Done);
+            emit(AgentEvent::Interrupted);
             return Ok(());
         }
 
         let turn = match model.complete(&msgs) {
             Ok(t) => t,
             Err(e) => {
-                emit(AgentEvent::Error(e.clone()));
+                emit(AgentEvent::Error {
+                    message: e.clone(),
+                });
                 return Err(e);
             }
         };
 
         match turn {
             ModelTurn::Text(text) => {
-                emit(AgentEvent::Token(text.clone()));
+                emit(AgentEvent::Token {
+                    text: text.clone(),
+                });
                 append_assistant_message_on(conn, conv_id, &text, None)?;
                 emit(AgentEvent::Done);
                 return Ok(());
@@ -94,7 +100,9 @@ pub fn run_agent_on(
                     let msg = format!(
                         "exceeded max tool iterations ({MAX_TOOL_ITERATIONS})"
                     );
-                    emit(AgentEvent::Error(msg.clone()));
+                    emit(AgentEvent::Error {
+                        message: msg.clone(),
+                    });
                     emit(AgentEvent::Done);
                     return Err(msg);
                 }
@@ -216,7 +224,7 @@ mod tests {
         assert_eq!(msgs[1].role, "assistant");
         assert_eq!(msgs[1].content, "hi there");
         let ev = events.lock().unwrap();
-        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Token(_))));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Token { .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
     }
 
@@ -371,7 +379,8 @@ mod tests {
         let ev = events.lock().unwrap();
         assert!(
             ev.iter().any(|e| matches!(e, AgentEvent::Done))
-                || ev.iter().any(|e| matches!(e, AgentEvent::Error(_)))
+                || ev.iter().any(|e| matches!(e, AgentEvent::Interrupted))
+                || ev.iter().any(|e| matches!(e, AgentEvent::Error { .. }))
         );
     }
 

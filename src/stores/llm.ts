@@ -24,9 +24,9 @@ import {
 export const useLlmStore = defineStore('llm', {
   state: () => ({
     config: {
-      provider: LLM_PROVIDERS[0].id,
-      baseUrl: LLM_PROVIDERS[0].defaultBaseUrl ?? '',
-      model: LLM_PROVIDERS[0].defaultModel ?? '',
+      provider: 'local' as LlmProviderId,
+      baseUrl: '',
+      model: '',
       hasApiKey: false,
     } as LlmConfig,
     /** In-progress API key typed by the user, never persisted. */
@@ -47,9 +47,12 @@ export const useLlmStore = defineStore('llm', {
       const model = state.config?.model ?? '';
       return baseUrl.trim().length > 0 && model.trim().length > 0;
     },
-    /** True when the form is valid enough to attempt a save (key is
-     * optional if one is already stored). */
     canSave: (state) => {
+      if (state.config?.provider === 'local') {
+        // Local models are selected via download UI (Task 5.2); saving
+        // provider=local alone is always valid.
+        return true;
+      }
       const baseUrl = state.config?.baseUrl ?? '';
       const model = state.config?.model ?? '';
       if (!baseUrl.trim() || !model.trim()) return false;
@@ -139,9 +142,9 @@ export const useLlmStore = defineStore('llm', {
       try {
         await invoke('delete_llm_config');
         this.config = {
-          provider: LLM_PROVIDERS[0].id,
-          baseUrl: LLM_PROVIDERS[0].defaultBaseUrl ?? '',
-          model: LLM_PROVIDERS[0].defaultModel ?? '',
+          provider: 'local',
+          baseUrl: '',
+          model: '',
           hasApiKey: false,
         };
         this.apiKeyDraft = '';

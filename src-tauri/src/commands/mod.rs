@@ -10,6 +10,7 @@ pub mod encoding;
 pub mod screen;
 pub mod search;
 pub mod conversation;
+pub mod agent;
 
 // 新增模块 (TODO: uncomment as modules are implemented)
 // pub mod data_convert;

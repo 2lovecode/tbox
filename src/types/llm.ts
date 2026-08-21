@@ -4,7 +4,7 @@
  * authoritative; if you add a provider there, add it here too.
  */
 
-export type LlmProviderId = 'openai' | 'deepseek' | 'anthropic' | 'custom';
+export type LlmProviderId = 'local' | 'openai' | 'deepseek' | 'anthropic' | 'custom';
 
 export interface LlmProviderMeta {
   id: LlmProviderId;
@@ -20,6 +20,14 @@ export interface LlmProviderMeta {
 }
 
 export const LLM_PROVIDERS: LlmProviderMeta[] = [
+  {
+    id: 'local',
+    label: '本地（需下载模型）',
+    description: '使用内置推理引擎；请在设置中下载推荐小模型后启用',
+    defaultBaseUrl: null,
+    defaultModel: null,
+    supportsConnectionTest: false,
+  },
   {
     id: 'openai',
     label: 'OpenAI',
@@ -44,8 +52,6 @@ export const LLM_PROVIDERS: LlmProviderMeta[] = [
     description: 'Claude 系列，自有鉴权头，连接测试受限',
     defaultBaseUrl: 'https://api.anthropic.com',
     defaultModel: 'claude-3-5-haiku-latest',
-    // Anthropic doesn't expose /models; the test endpoint check is
-    // skipped and the user is told to just save and use.
     supportsConnectionTest: false,
     docsUrl: 'https://docs.anthropic.com/',
   },
