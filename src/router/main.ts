@@ -6,6 +6,7 @@ import HomePage from '@/views/HomePage.vue'
 // 避免首屏一次性解析全部 37 个工具的代码。
 const routes = [
   { path: '/', component: HomePage },
+  { path: '/toolbox', component: () => import('@/views/ToolboxPage.vue') },
   { path: '/image-compression', component: () => import('@/views/ImageCompression.vue') },
   { path: '/video-converter', component: () => import('@/views/VideoConverter.vue') },
   { path: '/password-manage', component: () => import('@/views/PasswordManage.vue') },

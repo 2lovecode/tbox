@@ -1,189 +1,152 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
-import { storeToRefs } from 'pinia';
-import { Category } from '@/types/tools';
-import { useToolStore } from '@/stores/tools';
-import { useRoleStore } from '@/stores/role';
-import { useRouter } from 'vue-router';
+import { useRouter, useRoute } from 'vue-router';
 
-const store = useToolStore();
-const roleStore = useRoleStore();
 const router = useRouter();
+const route = useRoute();
 
-const { selectedRoleIds, roleToolIds, showAllTools } = storeToRefs(roleStore);
-
-// 首次挂载时拉取当前角色对应的工具集合，与 HomePage 共享同一份数据
-onMounted(async () => {
-  if (selectedRoleIds.value.length > 0 && roleToolIds.value.size === 0) {
-    await roleStore.refreshRoleTools();
-  }
-});
-
-// 与 HomePage.filteredTools 对齐的角色过滤条件：
-// showAllTools 或未选角色时返回 null 表示不过滤。
-const visibleToolIds = computed<Set<number> | null>(() => {
-  if (showAllTools.value) return null;
-  if (selectedRoleIds.value.length === 0) return null;
-  if (roleToolIds.value.size === 0) return null;
-  return roleToolIds.value;
-});
-
-const categoryCounts = computed<Record<number, number>>(() => {
-  const counts: Record<number, number> = {};
-  const allow = visibleToolIds.value;
-  for (const tool of store.tools) {
-    const catId = tool.category?.id;
-    if (catId == null) continue;
-    if (allow && !allow.has(tool.id)) continue;
-    counts[catId] = (counts[catId] ?? 0) + 1;
-  }
-  return counts;
-});
-
-const categories = computed<Category[]>(() => {
-  const total = Object.values(categoryCounts.value).reduce((sum, n) => sum + n, 0);
-  return [
-    { id: 0, name: '全部工具', icon: 'fas fa-star', count: total },
-    ...store.categories.map((c) => ({ ...c, count: categoryCounts.value[c.id] ?? 0 })),
-  ];
-});
-
-const openCategory = (category: Category) => {
-  store.setActiveCategory(category);
+const newChat = () => {
   router.push({ path: '/' });
 };
+
+const goToolbox = () => {
+  router.push({ path: '/toolbox' });
+};
 </script>
+
 <template>
-    <aside class="sidebar">
-        <h3><i class="fas fa-th-large"></i> 工具分类</h3>
-        <div class="categories">
-          <div
-            v-for="category in categories"
-            :key="category.id"
-            class="category"
-            :class="{ active: store.activeCategory?.id === category.id }"
-            @click="openCategory(category)"
-          >
-            <div class="category-left">
-              <i :class="category.icon"></i>
-              <span class="category-name">{{ category.name }}</span>
-            </div>
-            <span class="tool-count">{{ category.count }}</span>
-          </div>
-        </div>
-    </aside>
+  <aside class="sidebar">
+    <button type="button" class="new-chat-btn" @click="newChat">
+      <i class="fas fa-plus"></i>
+      新建对话
+    </button>
+
+    <div class="history-section">
+      <h3>历史对话</h3>
+      <div class="history-empty">
+        <p>暂无会话</p>
+        <span>发送第一条消息后会出现在这里</span>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <button
+        type="button"
+        class="toolbox-btn"
+        :class="{ active: route.path === '/toolbox' }"
+        @click="goToolbox"
+      >
+        <i class="fas fa-th-large"></i>
+        工具箱
+      </button>
+    </div>
+  </aside>
 </template>
 
-
 <style scoped>
-  /* 侧边栏样式 */
-  .sidebar {
-    background: white;
-    border-radius: var(--border-radius);
-    padding: 20px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-    height: fit-content;
-  }
+.sidebar {
+  background: white;
+  border-radius: var(--border-radius);
+  padding: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  height: fit-content;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 420px;
+}
 
-  .sidebar h3 {
-    margin-bottom: 16px;
-    font-size: 13px;
-    color: #94a3b8;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
+.new-chat-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px dashed rgba(67, 97, 238, 0.35);
+  background: rgba(67, 97, 238, 0.06);
+  color: var(--primary);
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
 
-  .sidebar h3 i {
-    color: var(--primary);
-    font-size: 12px;
-  }
+.new-chat-btn:hover {
+  background: rgba(67, 97, 238, 0.12);
+  border-color: var(--primary);
+}
 
-  .categories {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
+.history-section {
+  flex: 1;
+  min-height: 0;
+}
 
-  .category {
-    padding: 10px 12px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    color: #64748b;
-    font-size: 14px;
-    position: relative;
-  }
+.history-section h3 {
+  margin: 0 0 12px;
+  font-size: 12px;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
 
-  .category-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-  }
+.history-empty {
+  padding: 20px 12px;
+  text-align: center;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-radius: 10px;
+}
 
-  .category:hover {
-    background: #f1f5f9;
-    color: var(--primary);
-  }
+.history-empty p {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #64748b;
+  font-weight: 500;
+}
 
-  .category.active {
-    background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(67, 97, 238, 0.05));
-    color: var(--primary);
-    font-weight: 600;
-  }
+.history-empty span {
+  font-size: 12px;
+  line-height: 1.4;
+}
 
-  .category.active::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    top: 50%;
-    transform: translateY(-50%);
-    width: 4px;
-    height: 24px;
-    background: var(--primary);
-    border-radius: 0 4px 4px 0;
-  }
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid #eef2f7;
+}
 
-  .category i {
-    width: 18px;
-    text-align: center;
-    font-size: 15px;
-    flex-shrink: 0;
-  }
+.toolbox-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
 
-  .category-name {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+.toolbox-btn:hover {
+  background: #f1f5f9;
+  color: var(--primary);
+}
 
-  .tool-count {
-    background: #f1f5f9;
-    color: #94a3b8;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 12px;
-    font-weight: 500;
-    flex-shrink: 0;
-    min-width: 28px;
-    text-align: center;
-    transition: all 0.2s ease;
-  }
+.toolbox-btn.active {
+  background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(67, 97, 238, 0.05));
+  color: var(--primary);
+  font-weight: 600;
+}
 
-  .category:hover .tool-count {
-    background: rgba(67, 97, 238, 0.1);
-    color: var(--primary);
-  }
-
-  .category.active .tool-count {
-    background: var(--primary);
-    color: white;
-  }
+.toolbox-btn i {
+  width: 18px;
+  text-align: center;
+}
 </style>

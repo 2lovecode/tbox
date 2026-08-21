@@ -112,8 +112,8 @@ onMounted(async () => {
   }
 })
 
-// 计算是否显示侧边栏（在工具页面不显示）
-const showSidebar = computed(() => route.path === '/')
+// 对话首页与工具箱页显示侧栏；具体工具页不显示
+const showSidebar = computed(() => route.path === '/' || route.path === '/toolbox')
 
 // Detect platform once for the keyboard-shortcut hint in the header.
 const isMac = detectPlatform() === 'mac';
