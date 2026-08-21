@@ -7,6 +7,7 @@
 use tauri::Emitter;
 use tauri_plugin_global_shortcut::ShortcutState;
 
+pub mod agent;
 pub mod commands;
 mod db;
 
