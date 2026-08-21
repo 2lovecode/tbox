@@ -3,3 +3,4 @@
 //! 本模块第一期仅暴露 allowlisted 纯计算工具注册与调度。
 
 pub mod registry;
+pub mod skills;

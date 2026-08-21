@@ -6,7 +6,7 @@
 ## 2. Agent 工具注册表与 Skill
 
 - [x] 2.1 实现工具注册表：第一期 12 个纯计算工具的 id、JSON Schema、`side_effect=none`、调度现有 command 函数。验证：单元测试校验合法/非法参数、未注册 id 被拒绝、不调用 HTTP/数据库 command。
-- [ ] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
+- [x] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
 - [ ] 2.3 用 mock LLM 实现 Agent 循环：纯回复、一次 tool call、连续两次、工具失败回填、取消。验证：`cargo test` 相关模块；CI 不启动 sidecar、不下载 GGUF。
 
 ## 3. 对话壳与工具箱
