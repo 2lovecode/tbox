@@ -76,7 +76,7 @@ export const useConversationsStore = defineStore('conversations', {
       this.activeId = id;
       try {
         this.messages = await invoke<ChatMessage[]>('get_conversation_messages', {
-          conversation_id: id,
+          conversationId: id,
         });
         try {
           sessionStorage.setItem(LAST_ACTIVE_KEY, id);
@@ -95,7 +95,7 @@ export const useConversationsStore = defineStore('conversations', {
     async deleteConversation(id: string) {
       this.lastError = null;
       try {
-        await invoke('delete_conversation', { conversation_id: id });
+        await invoke('delete_conversation', { conversationId: id });
         if (this.activeId === id) {
           this.newChat();
         }

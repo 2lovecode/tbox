@@ -263,14 +263,16 @@ pub fn get_messages(conversation_id: &str) -> Result<Vec<ChatMessage>, String> {
 }
 
 #[tauri::command]
-pub fn get_conversation_messages(conversation_id: String) -> Result<Vec<ChatMessage>, String> {
-    get_messages(&conversation_id)
+#[allow(non_snake_case)]
+pub fn get_conversation_messages(conversationId: String) -> Result<Vec<ChatMessage>, String> {
+    get_messages(&conversationId)
 }
 
 #[tauri::command]
-pub fn delete_conversation(conversation_id: String) -> Result<(), String> {
+#[allow(non_snake_case)]
+pub fn delete_conversation(conversationId: String) -> Result<(), String> {
     let conn = open_connection()?;
-    delete_conversation_on(&conn, &conversation_id)
+    delete_conversation_on(&conn, &conversationId)
 }
 
 #[cfg(test)]
