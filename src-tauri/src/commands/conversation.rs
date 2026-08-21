@@ -158,6 +158,47 @@ pub fn append_user_message_on(
     }
 }
 
+pub fn append_assistant_message_on(
+    conn: &Connection,
+    conversation_id: &str,
+    content: &str,
+    tool_calls_json: Option<&str>,
+) -> Result<ChatMessage, String> {
+    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+
+    let mut exists = conn
+        .prepare("SELECT id FROM conversations WHERE id = ?1")
+        .map_err(|e| e.to_string())?;
+    exists
+        .query_row(params![conversation_id], |_| Ok(()))
+        .map_err(|_| format!("会话不存在: {conversation_id}"))?;
+
+    let ts = now_ts();
+    let message_id = Uuid::new_v4().to_string();
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+        params![ts, conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.execute(
+        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
+         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5)",
+        params![message_id, conversation_id, content, tool_calls_json, ts],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(ChatMessage {
+        id: message_id,
+        conversation_id: conversation_id.to_string(),
+        role: "assistant".to_string(),
+        content: content.to_string(),
+        tool_calls_json: tool_calls_json.map(|s| s.to_string()),
+        created_at: ts,
+    })
+}
+
 pub fn list_conversations_on(conn: &Connection) -> Result<Vec<Conversation>, String> {
     ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
 
