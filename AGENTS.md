@@ -94,8 +94,8 @@ Schema：
 | 硬件信息 | `openspec/specs/hardware-info/` |
 | 本地智能搜索 | `openspec/specs/local-ai-search/` |
 | 编码/加密 | `openspec/specs/encoding-crypto/` |
-| Agent 对话 | `openspec/specs/agent-chat/`（归档后；active change 见 `openspec/changes/add-chat-home-agent/specs/agent-chat/`） |
-| 本地 LLM 运行时 | `openspec/specs/local-llm-runtime/`（归档后；active change 见 `openspec/changes/add-chat-home-agent/specs/local-llm-runtime/`） |
+| Agent 对话 | `openspec/specs/agent-chat/` |
+| 本地 LLM 运行时 | `openspec/specs/local-llm-runtime/` |
 
 Backlog 清单可参考 `ROADMAP.md`（不是行为规格）。
 
