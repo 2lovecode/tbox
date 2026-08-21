@@ -1,12 +1,40 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, onMounted } from 'vue';
+import { useConversationsStore } from '@/stores/conversations';
 
+const conversations = useConversationsStore();
 const draft = ref('');
+
+const canSend = computed(
+  () => draft.value.trim().length > 0 && !conversations.isSending,
+);
+
+onMounted(() => {
+  void conversations.restoreLastActive();
+});
+
+const send = async () => {
+  if (!canSend.value) return;
+  const text = draft.value;
+  draft.value = '';
+  try {
+    await conversations.appendUser(text);
+  } catch {
+    draft.value = text;
+  }
+};
+
+const onKeydown = (event: KeyboardEvent) => {
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    void send();
+  }
+};
 </script>
 
 <template>
   <main class="chat-home">
-    <div class="chat-empty">
+    <div v-if="!conversations.hasMessages" class="chat-empty">
       <div class="welcome-icon" aria-hidden="true">
         <i class="fas fa-comments"></i>
       </div>
@@ -14,16 +42,39 @@ const draft = ref('');
       <p class="welcome-subtitle">用自然语言提问，或从侧栏打开工具箱浏览全部工具。</p>
     </div>
 
-    <form class="composer" @submit.prevent>
+    <div v-else class="message-list" role="log" aria-live="polite">
+      <div
+        v-for="msg in conversations.messages"
+        :key="msg.id"
+        class="message"
+        :class="msg.role"
+      >
+        <div class="message-role">{{ msg.role === 'user' ? '你' : '助手' }}</div>
+        <div class="message-body">{{ msg.content }}</div>
+      </div>
+    </div>
+
+    <p v-if="conversations.lastError" class="chat-error" role="alert">
+      {{ conversations.lastError }}
+    </p>
+
+    <form class="composer" @submit.prevent="send">
       <textarea
         v-model="draft"
         class="composer-input"
         rows="1"
-        placeholder="输入消息…（对话即将开放）"
-        disabled
+        placeholder="输入消息…"
         aria-label="对话输入"
+        :disabled="conversations.isSending"
+        @keydown="onKeydown"
       />
-      <button type="submit" class="composer-send" disabled title="对话即将开放" aria-label="发送">
+      <button
+        type="submit"
+        class="composer-send"
+        :disabled="!canSend"
+        :title="canSend ? '发送' : '输入消息后发送'"
+        aria-label="发送"
+      >
         <i class="fas fa-paper-plane"></i>
       </button>
     </form>
@@ -83,6 +134,74 @@ const draft = ref('');
   line-height: 1.5;
 }
 
+.message-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 4px 24px;
+}
+
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: 92%;
+}
+
+.message.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.message.assistant,
+.message.tool {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.message-role {
+  font-size: 12px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.message-body {
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.user .message-body {
+  background: var(--primary);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message.assistant .message-body,
+.message.tool .message-body {
+  background: white;
+  color: var(--dark);
+  border: 1px solid #e8ecf1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  border-bottom-left-radius: 4px;
+}
+
+.chat-error {
+  margin: 0 0 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.08);
+  color: #b91c1c;
+  font-size: 13px;
+}
+
 .composer {
   display: flex;
   align-items: flex-end;
@@ -130,10 +249,10 @@ const draft = ref('');
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  opacity: 0.45;
 }
 
 .composer-send:disabled {
   cursor: not-allowed;
+  opacity: 0.45;
 }
 </style>

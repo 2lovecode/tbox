@@ -1,15 +1,37 @@
 <script setup lang="ts">
+import { onMounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
+import { useConversationsStore } from '@/stores/conversations';
 
 const router = useRouter();
 const route = useRoute();
+const conversations = useConversationsStore();
+
+onMounted(() => {
+  void conversations.loadList();
+});
 
 const newChat = () => {
-  router.push({ path: '/' });
+  conversations.newChat();
+  if (route.path !== '/') {
+    router.push({ path: '/' });
+  }
 };
 
 const goToolbox = () => {
   router.push({ path: '/toolbox' });
+};
+
+const openConversation = (id: string) => {
+  void conversations.openConversation(id);
+  if (route.path !== '/') {
+    router.push({ path: '/' });
+  }
+};
+
+const deleteConversation = (id: string, event: Event) => {
+  event.stopPropagation();
+  void conversations.deleteConversation(id);
 };
 </script>
 
@@ -22,10 +44,30 @@ const goToolbox = () => {
 
     <div class="history-section">
       <h3>历史对话</h3>
-      <div class="history-empty">
+      <div v-if="conversations.items.length === 0" class="history-empty">
         <p>暂无会话</p>
         <span>发送第一条消息后会出现在这里</span>
       </div>
+      <ul v-else class="history-list" role="list">
+        <li
+          v-for="item in conversations.items"
+          :key="item.id"
+          class="history-item"
+          :class="{ active: conversations.activeId === item.id }"
+          @click="openConversation(item.id)"
+        >
+          <span class="history-title" :title="item.title">{{ item.title }}</span>
+          <button
+            type="button"
+            class="history-delete"
+            title="删除会话"
+            aria-label="删除会话"
+            @click="deleteConversation(item.id, $event)"
+          >
+            <i class="fas fa-trash-alt"></i>
+          </button>
+        </li>
+      </ul>
     </div>
 
     <div class="sidebar-footer">
@@ -80,6 +122,8 @@ const goToolbox = () => {
 .history-section {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .history-section h3 {
@@ -109,6 +153,70 @@ const goToolbox = () => {
 .history-empty span {
   font-size: 12px;
   line-height: 1.4;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 360px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  color: #475569;
+  transition: background 0.15s ease;
+}
+
+.history-item:hover {
+  background: #f1f5f9;
+}
+
+.history-item.active {
+  background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(67, 97, 238, 0.05));
+  color: var(--primary);
+  font-weight: 600;
+}
+
+.history-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.history-delete {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.history-item:hover .history-delete,
+.history-item.active .history-delete {
+  opacity: 1;
+}
+
+.history-delete:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
 }
 
 .sidebar-footer {
