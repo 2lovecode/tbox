@@ -32,3 +32,4 @@
 - [x] 6.1 将真实 LLM 路由（sidecar OpenAI 兼容 / 现有云端）接入 Agent 循环，限制 tool 迭代次数。验证：`cargo check`；手动：云端或已下模型下完成 Base64 对话。
 - [x] 6.2 更新 `AGENTS.md` living specs 表（`agent-chat`、`local-llm-runtime`）。验证：文档与 `openspec/specs/` 目录名一致（归档后生效，实现期可先改表）。
 - [ ] 6.3 全量检查：`make check` 与 `make test` 通过。手动冒烟：工具箱、Spotlight 打开工具、对话调工具、无模型提示。
+  - 注（本机）：`make` 不可用；`cd src-tauri && cargo check` / `cargo test --lib --no-run` 曾通过；`cargo test --lib` 运行时仍可能遇 Windows Tauri cdylib `STATUS_ENTRYPOINT_NOT_FOUND`；`vue-tsc` 仍有既有 SettingsModal/Spotlight/`$router` 类型债，未纳入本 change 全量清零。
