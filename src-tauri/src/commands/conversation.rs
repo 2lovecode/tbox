@@ -1,18 +1,19 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::db::open_connection;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Conversation {
     pub id: String,
     pub title: String,
     pub updated_at: i64,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChatMessage {
     pub id: String,
     pub conversation_id: String,
@@ -199,14 +200,17 @@ pub fn delete_conversation_on(conn: &Connection, conversation_id: &str) -> Resul
     Ok(())
 }
 
+#[tauri::command]
+#[allow(non_snake_case)]
 pub fn append_user_message(
-    conversation_id: Option<String>,
-    content: &str,
+    conversationId: Option<String>,
+    content: String,
 ) -> Result<(Conversation, ChatMessage), String> {
     let conn = open_connection()?;
-    append_user_message_on(&conn, conversation_id, content)
+    append_user_message_on(&conn, conversationId, &content)
 }
 
+#[tauri::command]
 pub fn list_conversations() -> Result<Vec<Conversation>, String> {
     let conn = open_connection()?;
     list_conversations_on(&conn)
@@ -217,9 +221,15 @@ pub fn get_messages(conversation_id: &str) -> Result<Vec<ChatMessage>, String> {
     get_messages_on(&conn, conversation_id)
 }
 
-pub fn delete_conversation(conversation_id: &str) -> Result<(), String> {
+#[tauri::command]
+pub fn get_conversation_messages(conversation_id: String) -> Result<Vec<ChatMessage>, String> {
+    get_messages(&conversation_id)
+}
+
+#[tauri::command]
+pub fn delete_conversation(conversation_id: String) -> Result<(), String> {
     let conn = open_connection()?;
-    delete_conversation_on(&conn, conversation_id)
+    delete_conversation_on(&conn, &conversation_id)
 }
 
 #[cfg(test)]

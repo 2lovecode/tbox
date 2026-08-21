@@ -1,7 +1,7 @@
 ## 1. 会话存储
 
 - [x] 1.1 在 SQLite 增加 `conversations` / `messages` 表与启动迁移，提供创建（首条用户消息才插入）、列表、打开、删除 API。验证：`cargo test -p tbox --lib conversation`（或模块名）覆盖空会话不落库、删除级联；`cargo check`。
-- [ ] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
+- [x] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
 
 ## 2. Agent 工具注册表与 Skill
 

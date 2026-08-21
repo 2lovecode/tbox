@@ -146,6 +146,12 @@ pub fn run() {
             commands::encoding::punycode_decode,
             commands::encoding::binary_to_hex,
             commands::encoding::hex_to_binary,
+
+            // 会话
+            commands::conversation::list_conversations,
+            commands::conversation::get_conversation_messages,
+            commands::conversation::delete_conversation,
+            commands::conversation::append_user_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
