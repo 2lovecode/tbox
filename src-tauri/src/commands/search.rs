@@ -419,8 +419,6 @@ impl SearchIndex {
 ///   - `query`: the user's natural-language query
 ///   - `tool_ids`: tools the frontend wants considered (typically the current
 ///     `search_tools` result ids). Empty means "rank the whole index".
-///   - `role_ids`: tools mapped to any of these roles are weighted higher
-///     (Story 2.4 role-aware boost, applied at the local AI layer).
 #[tauri::command]
 pub fn ai_route_intent(
     query: String,
@@ -436,12 +434,6 @@ pub fn ai_route_intent(
     };
 
     let scored = index.rank_intent(&query, &candidate_ids);
-
-    // Story 2.4 role boost is applied client-side inside
-    // `displayedResults`. By design this command stays role-agnostic —
-    // it scores purely on jieba/pinyin/tag/description intent signals
-    // derived from `query` + `tool_ids`. Keeping it pure makes it easy
-    // to unit-test and avoids loading the tool<->role mapping here.
 
     scored
         .into_iter()

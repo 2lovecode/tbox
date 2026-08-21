@@ -1,0 +1,448 @@
+ openspec/changes/add-chat-home-agent/tasks.md |   2 +-
+ src-tauri/skills/base64.md                    |  13 ++
+ src-tauri/skills/charset.convert.md           |  12 ++
+ src-tauri/skills/cron.explain.md              |  10 ++
+ src-tauri/skills/encoding.convert.md          |  10 ++
+ src-tauri/skills/hash.digest.md               |  12 ++
+ src-tauri/skills/json.format.md               |  12 ++
+ src-tauri/skills/jwt.parse.md                 |  14 ++
+ src-tauri/skills/number.convert.md            |  13 ++
+ src-tauri/skills/timestamp.convert.md         |  12 ++
+ src-tauri/skills/uuid.generate.md             |  10 ++
+ src-tauri/skills/xml.format.md                |  10 ++
+ src-tauri/skills/yaml.format.md               |  10 ++
+ src-tauri/src/agent/mod.rs                    |   1 +
+ src-tauri/src/agent/skills.rs                 | 181 ++++++++++++++++++++++++++
+ 15 files changed, 321 insertions(+), 1 deletion(-)
+3a7d810 feat: retrieve preset tool skills for agent context
+diff --git a/openspec/changes/add-chat-home-agent/tasks.md b/openspec/changes/add-chat-home-agent/tasks.md
+index 3a35fff..ace606e 100644
+--- a/openspec/changes/add-chat-home-agent/tasks.md
++++ b/openspec/changes/add-chat-home-agent/tasks.md
+@@ -1,17 +1,17 @@
+ ## 1. 会话存储
+ 
+ - [x] 1.1 在 SQLite 增加 `conversations` / `messages` 表与启动迁移，提供创建（首条用户消息才插入）、列表、打开、删除 API。验证：`cargo test -p tbox --lib conversation`（或模块名）覆盖空会话不落库、删除级联；`cargo check`。
+ - [x] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
+ 
+ ## 2. Agent 工具注册表与 Skill
+ 
+ - [x] 2.1 实现工具注册表：第一期 12 个纯计算工具的 id、JSON Schema、`side_effect=none`、调度现有 command 函数。验证：单元测试校验合法/非法参数、未注册 id 被拒绝、不调用 HTTP/数据库 command。
+-- [ ] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
++- [x] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
+ - [ ] 2.3 用 mock LLM 实现 Agent 循环：纯回复、一次 tool call、连续两次、工具失败回填、取消。验证：`cargo test` 相关模块；CI 不启动 sidecar、不下载 GGUF。
+ 
+ ## 3. 对话壳与工具箱
+ 
+ - [ ] 3.1 将现有首页网格迁到 `/toolbox`，侧栏改为新建对话、历史列表、底部工具箱入口；`/` 为对话空态。验证：`pnpm exec vue-tsc --noEmit`；手动：启动后 `/` 不是卡片网格，工具箱能打开 id 10 Base64 页。
+ - [ ] 3.2 接会话列表/删除/打开；首条消息发出后历史出现标题。验证：手动新建空会话不出现在历史；发一条后出现；删除后消失。`vue-tsc`。
+ - [ ] 3.3 从工具页返回 `/` 恢复上次会话。验证：手动路径。
+ 
+diff --git a/src-tauri/skills/base64.md b/src-tauri/skills/base64.md
+new file mode 100644
+index 0000000..c8345f8
+--- /dev/null
++++ b/src-tauri/skills/base64.md
+@@ -0,0 +1,13 @@
++---
++tool_id: base64.encode,base64.decode
++keywords: base64, Base64, 编码, 解码, encode, decode
++---
++
++# Base64 编解码
++
++- `base64.encode`：将明文编码为 Base64。
++- `base64.decode`：将 Base64 字符串解码为 UTF-8 文本。
++
++参数：`input` — 待处理字符串。
++
++常见场景：HTTP Basic、数据 URI、JWT 片段外的独立编解码需求。
+diff --git a/src-tauri/skills/charset.convert.md b/src-tauri/skills/charset.convert.md
+new file mode 100644
+index 0000000..96a859e
+--- /dev/null
++++ b/src-tauri/skills/charset.convert.md
+@@ -0,0 +1,12 @@
++---
++tool_id: charset.convert
++keywords: charset, 字符集, encoding, 编码, UTF-8, GBK
++---
++
++# 字符集标签校验
++
++使用 `charset.convert` 按给定字符集标签解码/校验文本（UTF-8 等）。
++
++参数：
++- `input` — 文本内容
++- `charset` — 字符集标签，例如 `UTF-8`
+diff --git a/src-tauri/skills/cron.explain.md b/src-tauri/skills/cron.explain.md
+new file mode 100644
+index 0000000..1fdb4c9
+--- /dev/null
++++ b/src-tauri/skills/cron.explain.md
+@@ -0,0 +1,10 @@
++---
++tool_id: cron.explain
++keywords: cron, Cron, 表达式, 定时, schedule, 计划任务
++---
++
++# Cron 表达式说明
++
++使用 `cron.explain` 用中文简述标准 5 字段 cron（分 时 日 月 周）。
++
++参数：`input` — 五个字段以空格分隔，例如 `*/5 * * * *`。
+diff --git a/src-tauri/skills/encoding.convert.md b/src-tauri/skills/encoding.convert.md
+new file mode 100644
+index 0000000..1a35d43
+--- /dev/null
++++ b/src-tauri/skills/encoding.convert.md
+@@ -0,0 +1,10 @@
++---
++tool_id: encoding.convert
++keywords: url, URL, 编码, encode, percent, 百分号, query
++---
++
++# URL 编码
++
++使用 `encoding.convert` 对文本进行 URL 百分号编码（encodeURIComponent 语义）。
++
++参数：`input` — 待编码文本。
+diff --git a/src-tauri/skills/hash.digest.md b/src-tauri/skills/hash.digest.md
+new file mode 100644
+index 0000000..c94fd98
+--- /dev/null
++++ b/src-tauri/skills/hash.digest.md
+@@ -0,0 +1,12 @@
++---
++tool_id: hash.digest
++keywords: hash, 哈希, 摘要, md5, sha256, MD5, SHA256, 校验
++---
++
++# 哈希摘要
++
++使用 `hash.digest` 计算文本的 MD5 或 SHA256 十六进制摘要。
++
++参数：
++- `input` — 待哈希文本
++- `algorithm` — `md5` 或 `sha256`
+diff --git a/src-tauri/skills/json.format.md b/src-tauri/skills/json.format.md
+new file mode 100644
+index 0000000..44415eb
+--- /dev/null
++++ b/src-tauri/skills/json.format.md
+@@ -0,0 +1,12 @@
++---
++tool_id: json.format
++keywords: json, JSON, 格式化, 美化, pretty, format
++---
++
++# JSON 格式化
++
++使用 `json.format` 将 JSON 字符串格式化为带缩进的可读形式。
++
++参数：`input` — 待格式化的 JSON 字符串。
++
++示例：用户给出压缩 JSON 或需要校验/美化时，调用此工具。
+diff --git a/src-tauri/skills/jwt.parse.md b/src-tauri/skills/jwt.parse.md
+new file mode 100644
+index 0000000..38a4926
+--- /dev/null
++++ b/src-tauri/skills/jwt.parse.md
+@@ -0,0 +1,14 @@
++---
++tool_id: jwt.parse
++keywords: jwt, JWT, token, 令牌, 解析, payload, header, 验签
++---
++
++# JWT 解析（不验签）
++
++使用 `jwt.parse` 解析 JWT 的 header 与 payload JSON。
++
++**重要：只解析结构，不验证签名。** 输出中 `verified` 恒为 `false`；不可用于鉴权决策。
++
++参数：`input` — 完整 JWT 字符串（`header.payload[.signature]`）。
++
++适用：调试 token 内容、查看 claims、检查过期字段等只读场景。
+diff --git a/src-tauri/skills/number.convert.md b/src-tauri/skills/number.convert.md
+new file mode 100644
+index 0000000..b4ffb82
+--- /dev/null
++++ b/src-tauri/skills/number.convert.md
+@@ -0,0 +1,13 @@
++---
++tool_id: number.convert
++keywords: 进制, 转换, binary, hex, 十六进制, 二进制, 八进制, base
++---
++
++# 进制转换
++
++使用 `number.convert` 在 2..=36 进制之间转换整数。
++
++参数：
++- `input` — 源进制数字字符串
++- `from_base` — 源进制
++- `to_base` — 目标进制
+diff --git a/src-tauri/skills/timestamp.convert.md b/src-tauri/skills/timestamp.convert.md
+new file mode 100644
+index 0000000..bd20ebe
+--- /dev/null
++++ b/src-tauri/skills/timestamp.convert.md
+@@ -0,0 +1,12 @@
++---
++tool_id: timestamp.convert
++keywords: timestamp, 时间戳, unix, 毫秒, 秒, ISO, 日期, 时间转换
++---
++
++# 时间戳转换
++
++使用 `timestamp.convert` 在 Unix 秒/毫秒与 ISO-8601 之间转换。
++
++参数：
++- `input` — 数字时间戳或 ISO/常见日期时间字符串
++- `unit`（可选）— `seconds`、`millis` 或 `iso`
+diff --git a/src-tauri/skills/uuid.generate.md b/src-tauri/skills/uuid.generate.md
+new file mode 100644
+index 0000000..622d424
+--- /dev/null
++++ b/src-tauri/skills/uuid.generate.md
+@@ -0,0 +1,10 @@
++---
++tool_id: uuid.generate
++keywords: uuid, UUID, 生成, generate, v4, 唯一标识
++---
++
++# 生成 UUID v4
++
++使用 `uuid.generate` 生成随机 UUID v4 字符串。无需参数。
++
++适用：需要新唯一 ID、mock 数据、占位符标识。
+diff --git a/src-tauri/skills/xml.format.md b/src-tauri/skills/xml.format.md
+new file mode 100644
+index 0000000..779f2b9
+--- /dev/null
++++ b/src-tauri/skills/xml.format.md
+@@ -0,0 +1,10 @@
++---
++tool_id: xml.format
++keywords: xml, XML, 格式化, format, 美化
++---
++
++# XML 格式化
++
++使用 `xml.format` 整理 XML 字符串，便于阅读。
++
++参数：`input` — 待格式化的 XML。
+diff --git a/src-tauri/skills/yaml.format.md b/src-tauri/skills/yaml.format.md
+new file mode 100644
+index 0000000..ab8c318
+--- /dev/null
++++ b/src-tauri/skills/yaml.format.md
+@@ -0,0 +1,10 @@
++---
++tool_id: yaml.format
++keywords: yaml, YAML, 格式化, format, 美化
++---
++
++# YAML 格式化
++
++使用 `yaml.format` 解析并重新输出 YAML，统一缩进与结构。
++
++参数：`input` — 待格式化的 YAML 字符串。
+diff --git a/src-tauri/src/agent/mod.rs b/src-tauri/src/agent/mod.rs
+index 382ad33..7b78943 100644
+--- a/src-tauri/src/agent/mod.rs
++++ b/src-tauri/src/agent/mod.rs
+@@ -1,5 +1,6 @@
+ //! Agent 子系统（工具注册表、后续循环与 Skill）。
+ //!
+ //! 本模块第一期仅暴露 allowlisted 纯计算工具注册与调度。
+ 
+ pub mod registry;
++pub mod skills;
+diff --git a/src-tauri/src/agent/skills.rs b/src-tauri/src/agent/skills.rs
+new file mode 100644
+index 0000000..632f265
+--- /dev/null
++++ b/src-tauri/src/agent/skills.rs
+@@ -0,0 +1,181 @@
++//! 预置 Skill 检索：按关键词匹配工具说明书，不扩展注册表。
++
++/// 检索命中的 Skill 文档（tool_id + 正文）。
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct SkillDoc {
++    pub tool_id: String,
++    pub body: String,
++}
++
++struct EmbeddedSkill {
++    source: &'static str,
++}
++
++static SKILLS: &[EmbeddedSkill] = &[
++    EmbeddedSkill {
++        source: include_str!("../../skills/json.format.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/base64.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/hash.digest.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/jwt.parse.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/timestamp.convert.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/encoding.convert.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/xml.format.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/yaml.format.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/uuid.generate.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/cron.explain.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/number.convert.md"),
++    },
++    EmbeddedSkill {
++        source: include_str!("../../skills/charset.convert.md"),
++    },
++];
++
++struct ParsedSkill {
++    tool_ids: Vec<String>,
++    keywords: Vec<String>,
++    body: String,
++}
++
++fn parse_skill(source: &str) -> Option<ParsedSkill> {
++    let rest = source.strip_prefix("---\n")?;
++    let end = rest.find("\n---\n")?;
++    let front_matter = &rest[..end];
++    let body = rest[end + 5..].trim().to_string();
++
++    let mut tool_ids = Vec::new();
++    let mut keywords = Vec::new();
++
++    for line in front_matter.lines() {
++        if let Some(value) = line.strip_prefix("tool_id:") {
++            for id in value.split(',') {
++                let id = id.trim();
++                if !id.is_empty() {
++                    tool_ids.push(id.to_string());
++                }
++            }
++        } else if let Some(value) = line.strip_prefix("keywords:") {
++            for kw in value.split(',') {
++                let kw = kw.trim();
++                if !kw.is_empty() {
++                    keywords.push(kw.to_string());
++                }
++            }
++        }
++    }
++
++    if tool_ids.is_empty() {
++        return None;
++    }
++
++    Some(ParsedSkill {
++        tool_ids,
++        keywords,
++        body,
++    })
++}
++
++fn contains_match(haystack: &str, needle: &str) -> bool {
++    if needle.is_empty() {
++        return false;
++    }
++    if needle.is_ascii() {
++        haystack
++            .to_ascii_lowercase()
++            .contains(&needle.to_ascii_lowercase())
++    } else {
++        haystack.contains(needle)
++    }
++}
++
++fn score_skill(query: &str, parsed: &ParsedSkill) -> i32 {
++    let mut score = 0;
++
++    for kw in &parsed.keywords {
++        if contains_match(query, kw) {
++            score += 1;
++        }
++    }
++
++    for tool_id in &parsed.tool_ids {
++        if contains_match(query, tool_id) {
++            score += 3;
++        }
++        for segment in tool_id.split('.') {
++            if segment.len() >= 2 && contains_match(query, segment) {
++                score += 2;
++            }
++        }
++    }
++
++    score
++}
++
++/// 按 query 关键词/工具名/中文别名匹配预置 Skill，最多返回 `limit` 条。
++pub fn retrieve_skills(query: &str, limit: usize) -> Vec<SkillDoc> {
++    if limit == 0 || query.trim().is_empty() {
++        return Vec::new();
++    }
++
++    let mut ranked: Vec<(i32, SkillDoc)> = SKILLS
++        .iter()
++        .filter_map(|embedded| {
++            let parsed = parse_skill(embedded.source)?;
++            let score = score_skill(query, &parsed);
++            if score <= 0 {
++                return None;
++            }
++            Some((
++                score,
++                SkillDoc {
++                    tool_id: parsed.tool_ids[0].clone(),
++                    body: parsed.body,
++                },
++            ))
++        })
++        .collect();
++
++    ranked.sort_by(|a, b| b.0.cmp(&a.0));
++    ranked.truncate(limit);
++    ranked.into_iter().map(|(_, doc)| doc).collect()
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::agent::registry::lookup;
++
++    #[test]
++    fn jwt_query_hits_jwt_skill() {
++        let hits = retrieve_skills("帮我解析这段 JWT", 3);
++        assert!(hits.iter().any(|s| s.tool_id.contains("jwt")));
++        assert!(hits.len() <= 3);
++    }
++
++    #[test]
++    fn loading_skills_does_not_register_tools() {
++        let before = lookup("http.request");
++        let _ = retrieve_skills("http", 3);
++        assert!(before.is_none());
++        assert!(lookup("http.request").is_none());
++    }
++}

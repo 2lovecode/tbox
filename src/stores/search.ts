@@ -19,9 +19,6 @@ export interface SearchHistoryItem {
  */
 export type AiRouteTool = Tool & { score: number; reason: string };
 
-/** Whether the spotlight shows all tools or just those mapped to the user's roles. */
-export type SearchScope = 'all' | 'mine';
-
 const MAX_HISTORY = 50;
 const MAX_RECENT = 30;
 
@@ -49,11 +46,8 @@ function dedupAndTrim(items: SearchHistoryItem[]): SearchHistoryItem[] {
  * decoupled from the HomePage header search so the two flows don't fight
  * over the same DOM ref or query state.
  *
- * Story 2.4 added:
- *   - `scope` ('all' | 'mine') — toggled by Tab in Spotlight
- *   - `lastUsedAt` — recent-usage timestamps per tool id
- *   - `displayedResults` — applies the scope filter and boosts role-matched
- *     and recently-used tools on top of the relevance-ranked result set.
+ * Recency ranking (`lastUsedAt`) and local AI routing live in this store;
+ * result presentation is handled by SpotlightSearch.
  */
 export const useSearchStore = defineStore('search', {
   state: () => ({
@@ -64,7 +58,6 @@ export const useSearchStore = defineStore('search', {
     searchHistory: [] as SearchHistoryItem[],
     selectedIndex: 0,
         lastError: null as string | null,
-        scope: 'all' as SearchScope,
         lastUsedAt: {} as Record<number, number>,
         // Story 5.1 v0: lightweight local AI routing toggle. Persisted so a
         // user who prefers AI ranking doesn't have to re-enable it every launch.
@@ -164,14 +157,6 @@ export const useSearchStore = defineStore('search', {
       this.selectedIndex = index;
     },
 
-    setScope(scope: SearchScope) {
-      this.scope = scope;
-    },
-
-    toggleScope() {
-      this.scope = this.scope === 'all' ? 'mine' : 'all';
-    },
-
     /**
      * Mark a tool as recently used. The timestamp is what powers the
      * recency boost in `displayedResults`.
@@ -191,9 +176,9 @@ export const useSearchStore = defineStore('search', {
 
     /**
      * Story 5.1 Phase 1.5 v0: lightweight local intent routing. Calls the
-     * Rust `ai_route_intent` command which combines jieba + pinyin tokenisation
-     * with role-aware weighting. No LLM, no network — just a richer local
-     * scorer built on top of the existing search index.
+     * Rust `ai_route_intent` command which combines jieba + pinyin tokenisation.
+     * No LLM, no network — just a richer local scorer built on top of the
+     * existing search index.
      *
      * Failure modes: any error clears the cached AI results so the next
      * render falls back to the regular `displayedResults` ordering.
@@ -242,6 +227,6 @@ export const useSearchStore = defineStore('search', {
   persist: {
     key: 'tbox-search',
     storage: localStorage,
-    pick: ['searchHistory', 'lastUsedAt', 'scope', 'aiMode'],
+    pick: ['searchHistory', 'lastUsedAt', 'aiMode'],
   },
 });

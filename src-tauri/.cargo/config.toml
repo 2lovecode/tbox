@@ -1,0 +1,8 @@
+# MinGW's PE/COFF export table is 16-bit (max 65535 ordinals).
+# Building the Tauri `cdylib` (`tbox_lib.dll`) on `x86_64-pc-windows-gnu`
+# re-exports the whole dependency graph and fails with:
+#   ld: error: export ordinal too large
+# Desktop links the `rlib`; the cdylib is for mobile. Drop auto-export
+# on GNU so the DLL can still be produced without overflowing ordinals.
+[target.x86_64-pc-windows-gnu]
+rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]

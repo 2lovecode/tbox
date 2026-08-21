@@ -1,0 +1,50 @@
+schema: spec-driven
+
+# 大功能 / 高风险改动可改用：
+#   openspec new change <name> --schema superpowers-bridge
+# 或在 /opsx-propose 时指定 superpowers-bridge（OpenSpec 管「改什么」，Superpowers 管「怎么做」）
+
+context: |
+  Language: zh
+  All artifacts must be written in zh.
+  Keep OpenSpec structural headings and SHALL/MUST keywords in English.
+
+  POLICY (mandatory for every coding agent — see root AGENTS.md; CLAUDE.md points there):
+  - Behavioral changes and new capabilities MUST go through OpenSpec propose → apply → archive.
+  - openspec/specs/ is the source of truth for behavior.
+  - Exempt only: bugfix/typo/docs/refactor with no observable behavior change.
+
+  Project: TBox — 本地化开发者工具箱（Tauri 2 + Vue 3 + TypeScript + Rust）。
+  目标用户: 后端 / 测试 / 运维工程师。
+  差异化: 国密、离线可用、批量处理。
+
+  架构约定:
+  - 前端: src/views/tools/*.vue，路由在 src/router/
+  - 后端命令: src-tauri/src/commands/*.rs，经 Tauri invoke 暴露
+  - 工具元数据 / SQLite: src-tauri（工具 id、分类、标签）
+  - 新增工具通常包含: Rust command + Vue 页面 + 路由 + 工具注册(id)
+
+  产品 backlog 参考（非 OpenSpec living spec）: ROADMAP.md
+  已迁移自 BMAD 的行为规格见 openspec/specs/
+
+  协作约定:
+  - 小改动 / bugfix: 可直接改代码，不必开 OpenSpec change
+  - 新能力 / 契约变更: /opsx-propose → /opsx-apply → /opsx-archive
+  - 高风险实现: 使用 schema superpowers-bridge，并遵循 Superpowers TDD / 子代理审查
+
+rules:
+  proposal:
+    - 写清 Non-goals
+    - 说明涉及的前端页面、Rust command、工具 id（如有）
+  tasks:
+    - 任务粒度保持小（可在一次会话内完成并验证）
+    - 每个任务写明验证方式（cargo check / vue-tsc / 手动路径）
+
+operations:
+  apply:
+    guidance:
+      - 优先复用现有 commands/ 与 tools UI 模式，避免平行抽象
+      - 改完后至少跑相关的 cargo check；触及前端类型时跑 vue-tsc
+  archive:
+    guidance:
+      - 确认 delta 已正确合并进 openspec/specs/ 对应 capability

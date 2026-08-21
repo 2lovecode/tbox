@@ -1,0 +1,193 @@
+ca02edb fix: transactional append for existing conversations
+ src-tauri/Cargo.toml                   |  3 ++
+ src-tauri/src/commands/conversation.rs |  6 ++--
+ src-tauri/src/lib.rs                   |  7 +---
+ src-tauri/tests/conversation.rs        | 63 ++++++++++++++++++++++++++++++++++
+ 4 files changed, 71 insertions(+), 8 deletions(-)
+diff --git a/src-tauri/Cargo.toml b/src-tauri/Cargo.toml
+index 38ef232..4e79b3f 100644
+--- a/src-tauri/Cargo.toml
++++ b/src-tauri/Cargo.toml
+@@ -87,18 +87,21 @@ os_info = "3"
+ 
+ # 拼音
+ pinyin = "0.4"
+ 
+ # 一次性初始化
+ once_cell = "1.19"
+ 
+ # 中文分词
+ jieba-rs = "0.6"
+ 
++[dev-dependencies]
++rusqlite = { version = "0.32", features = ["bundled"] }
++
+ # Release 构建优化:缩小二进制 + 提升运行时性能。
+ # 注意:刻意不加 `panic = "abort"`,保留 unwinding,这样 Rust 端命令
+ # 崩溃时能被前端 errorHandler 优雅捕获,而不是直接整进程退出。
+ [profile.release]
+ opt-level = "s"
+ lto = true
+ codegen-units = 1
+ strip = true
+diff --git a/src-tauri/src/commands/conversation.rs b/src-tauri/src/commands/conversation.rs
+index 4067d50..14e7478 100644
+--- a/src-tauri/src/commands/conversation.rs
++++ b/src-tauri/src/commands/conversation.rs
+@@ -119,31 +119,33 @@ pub fn append_user_message_on(
+             Ok((conversation, message))
+         }
+         Some(conv_id) => {
+             let mut exists = conn
+                 .prepare("SELECT id, title, updated_at FROM conversations WHERE id = ?1")
+                 .map_err(|e| e.to_string())?;
+             let conversation = exists
+                 .query_row(params![conv_id], row_to_conversation)
+                 .map_err(|_| format!("会话不存在: {conv_id}"))?;
+ 
+-            conn.execute(
++            let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
++            tx.execute(
+                 "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
+                 params![ts, conv_id],
+             )
+             .map_err(|e| e.to_string())?;
+-            conn.execute(
++            tx.execute(
+                 "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
+                  VALUES (?1, ?2, 'user', ?3, NULL, ?4)",
+                 params![message_id, conv_id, content, ts],
+             )
+             .map_err(|e| e.to_string())?;
++            tx.commit().map_err(|e| e.to_string())?;
+ 
+             let message = ChatMessage {
+                 id: message_id,
+                 conversation_id: conv_id.clone(),
+                 role: "user".to_string(),
+                 content: content.to_string(),
+                 tool_calls_json: None,
+                 created_at: ts,
+             };
+             let updated = Conversation {
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 6801a05..2ac5f48 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -1,20 +1,20 @@
+ //! Tauri library entry point.
+ //!
+ //! Per the Tauri 2.x convention, all builder configuration lives here and
+ //! `main.rs` simply calls [`run`]. This keeps the entry point tiny and lets
+ //! the same setup be reused by the mobile entry point and integration tests.
+ 
+ use tauri::Emitter;
+ use tauri_plugin_global_shortcut::ShortcutState;
+ 
+-mod commands;
++pub mod commands;
+ mod db;
+ 
+ /// Event name emitted to the frontend when the user invokes the global
+ /// Spotlight shortcut. The frontend listens on this channel to toggle the
+ /// Spotlight search modal.
+ pub const SPOTLIGHT_EVENT: &str = "spotlight:toggle";
+ 
+ /// Build and launch the Tauri application.
+ #[cfg_attr(mobile, tauri::mobile_entry_point)]
+ pub fn run() {
+@@ -76,25 +76,20 @@ pub fn run() {
+                     eprintln!("[tbox] 注册全局快捷键 {:?} 失败: {}", shortcut, e);
+                 }
+             }
+ 
+             Ok(())
+         })
+         .invoke_handler(tauri::generate_handler![
+             // 工具管理
+             commands::tool::get_categories,
+             commands::tool::get_all_tools,
+-            // 角色管理
+-            commands::role::get_roles,
+-            commands::role::get_tools_by_role,
+-            commands::role::set_user_role,
+-            commands::role::get_user_role,
+             // 搜索
+             commands::search::search_tools,
+             // Story 5.1 (Phase 1.5 v0): 本地意图路由
+             commands::search::ai_route_intent,
+ 
+             // Story 5.1 v1: LLM provider configuration
+             commands::llm::get_llm_config,
+             commands::llm::save_llm_config,
+             commands::llm::clear_llm_api_key,
+             commands::llm::delete_llm_config,
+diff --git a/src-tauri/tests/conversation.rs b/src-tauri/tests/conversation.rs
+new file mode 100644
+index 0000000..3cd3da7
+--- /dev/null
++++ b/src-tauri/tests/conversation.rs
+@@ -0,0 +1,63 @@
++//! Integration coverage for conversation persistence when lib unit-test binaries
++//! cannot start on Windows (Tauri native DLL chain).
++
++use rusqlite::Connection;
++use std::fs;
++use std::path::PathBuf;
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use tbox_lib::commands::conversation::{
++    append_user_message_on, delete_conversation_on, get_messages_on, list_conversations_on,
++};
++
++fn test_db() -> Connection {
++    let mut dir = std::env::temp_dir();
++    let unique = SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .unwrap()
++        .as_nanos();
++    dir.push(format!("tbox-conversation-itest-{unique}"));
++    fs::create_dir_all(&dir).unwrap();
++    let path: PathBuf = dir.join("tools.db");
++    Connection::open(path).unwrap()
++}
++
++#[test]
++fn first_user_message_creates_conversation() {
++    let db = test_db();
++    let (conv, msg) = append_user_message_on(&db, None, "请把 hello 做 Base64").unwrap();
++    assert!(!conv.id.is_empty());
++    assert!(conv.title.contains("Base64") || conv.title.contains("hello"));
++    assert_eq!(msg.role, "user");
++    assert_eq!(list_conversations_on(&db).unwrap().len(), 1);
++}
++
++#[test]
++fn delete_removes_messages() {
++    let db = test_db();
++    let (conv, _) = append_user_message_on(&db, None, "hi").unwrap();
++    delete_conversation_on(&db, &conv.id).unwrap();
++    assert!(list_conversations_on(&db).unwrap().is_empty());
++    assert!(get_messages_on(&db, &conv.id).unwrap().is_empty());
++}
++
++#[test]
++fn list_empty_without_any_message() {
++    let db = test_db();
++    assert!(list_conversations_on(&db).unwrap().is_empty());
++}
++
++#[test]
++fn append_existing_conversation_is_transactional() {
++    let db = test_db();
++    let (conv, _) = append_user_message_on(&db, None, "first").unwrap();
++    let before = conv.updated_at;
++
++    std::thread::sleep(std::time::Duration::from_millis(1100));
++
++    let (updated, msg) = append_user_message_on(&db, Some(conv.id.clone()), "second").unwrap();
++    assert_eq!(updated.id, conv.id);
++    assert!(updated.updated_at >= before);
++    assert_eq!(msg.content, "second");
++    assert_eq!(get_messages_on(&db, &conv.id).unwrap().len(), 2);
++}

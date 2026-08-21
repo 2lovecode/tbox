@@ -3,13 +3,10 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useRouter } from 'vue-router';
 import { useSearchStore } from '@/stores/search';
-import { useRoleStore } from '@/stores/role';
-import { invoke } from '@tauri-apps/api/core';
 import type { Tool } from '@/types/tools';
 
 const router = useRouter();
 const searchStore = useSearchStore();
-const roleStore = useRoleStore();
 const {
   isOpen,
   query,
@@ -17,14 +14,12 @@ const {
   isSearching,
   searchHistory,
   selectedIndex,
-  scope,
   lastUsedAt,
   aiMode,
   aiResults,
   aiIsLoading,
   aiError,
 } = storeToRefs(searchStore);
-const { selectedRoleIds } = storeToRefs(roleStore);
 const routerMap: Record<number, string> = {
   1: 'image-compression',
   2: 'video-converter',
@@ -65,54 +60,11 @@ const routerMap: Record<number, string> = {
 };
 
 const isQueryEmpty = computed(() => query.value.trim().length === 0);
-// ---- Story 2.4 + 5.1: scope, role, recency, and AI-driven ranking --------
+// ---- Recency and AI-driven ranking ----------------------------------------
 
 const inputRef = ref<HTMLInputElement | null>(null);
 const debounceId = ref<ReturnType<typeof setTimeout> | null>(null);
 const aiDebounceId = ref<ReturnType<typeof setTimeout> | null>(null);
-
-/** Tools mapped to the user's selected roles. Story 2.4 — scope filter. */
-const roleToolIds = ref<Set<number>>(new Set());
-/** Reverse map: tool id -> role display names. Story 2.4 — chips. */
-const toolRolesMap = ref<Record<number, string[]>>({});
-
-const hasSelectedRoles = computed(() => selectedRoleIds.value.length > 0);
-
-async function refreshRoleTools() {
-  if (!hasSelectedRoles.value) {
-    roleToolIds.value = new Set();
-    toolRolesMap.value = {};
-    return;
-  }
-  try {
-    const merged = new Set<number>();
-    const reverse: Record<number, string[]> = {};
-    for (const role of roleStore.selectedRoles) {
-      const tools = await invoke<Array<{ id: number }>>('get_tools_by_role', {
-        roleId: role.id,
-      });
-      for (const tool of tools) {
-        merged.add(tool.id);
-        const list = reverse[tool.id] ?? [];
-        if (!list.includes(role.displayName)) list.push(role.displayName);
-        reverse[tool.id] = list;
-      }
-    }
-    roleToolIds.value = merged;
-    toolRolesMap.value = reverse;
-  } catch (error) {
-    console.error('[spotlight] failed to load role tools:', error);
-    roleToolIds.value = new Set();
-    toolRolesMap.value = {};
-  }
-}
-
-watch(
-  () => selectedRoleIds.value.slice(),
-  () => {
-    void refreshRoleTools();
-  },
-);
 
 function recencyBoost(toolId: number): number {
   const ts = lastUsedAt.value[toolId];
@@ -125,12 +77,7 @@ function recencyBoost(toolId: number): number {
   return ((halflifeMs - elapsedMs) / halflifeMs) * 30;
 }
 
-function roleToolBoost(toolId: number): number {
-  return roleToolIds.value.has(toolId) ? 20 : 0;
-}
-
 type RankedTool = Tool & {
-  _roleBoost: number;
   _recencyBoost: number;
   _reason?: string;
 };
@@ -138,15 +85,9 @@ type RankedTool = Tool & {
 const rankedBase = computed<RankedTool[]>(() => {
   const base: RankedTool[] = results.value.map((t) => ({
     ...t,
-    _roleBoost: roleToolBoost(t.id),
     _recencyBoost: recencyBoost(t.id),
   }));
-  const filtered =
-    scope.value === 'mine'
-      ? base.filter((t) => roleToolIds.value.has(t.id))
-      : base;
-  return [...filtered].sort((a, b) => {
-    if (b._roleBoost !== a._roleBoost) return b._roleBoost - a._roleBoost;
+  return [...base].sort((a, b) => {
     if (Math.abs(b._recencyBoost - a._recencyBoost) > 0.01) {
       return b._recencyBoost - a._recencyBoost;
     }
@@ -156,9 +97,6 @@ const rankedBase = computed<RankedTool[]>(() => {
 
 const aiRanked = computed<RankedTool[]>(() => {
   if (!aiMode.value || aiResults.value.length === 0) return [];
-  // Merge role/recency metadata onto AI scored results. Search.ts sends
-  // them through the Rust intent router already scored; we just attach
-  // the local Story 2.4 boosts and the human-readable reason.
   const byId = new Map<number, RankedTool>();
   for (const t of rankedBase.value) byId.set(t.id, t);
   const merged: RankedTool[] = [];
@@ -170,28 +108,16 @@ const aiRanked = computed<RankedTool[]>(() => {
   return merged;
 });
 
-const displayedResults = computed(() => {
-  const list = aiMode.value ? aiRanked.value : rankedBase.value;
-  return list.map((t) => ({
-    ...t,
-    categories: toolRolesMap.value[t.id] ?? [],
-  }));
-});
+const displayedResults = computed(() =>
+  aiMode.value ? aiRanked.value : rankedBase.value,
+);
 
 const visibleHistory = computed(() =>
   isQueryEmpty.value ? searchHistory.value.slice(0, 8) : [],
 );
 
-const scopeLabel = computed(() => (scope.value === 'mine' ? '我的' : '全部'));
-const scopeEmptyHint = computed(() =>
-  scope.value === 'mine' && !hasSelectedRoles.value
-    ? '未选择角色，按 Tab 切到全部'
-    : '',
-);
-
 watch(isOpen, (open) => {
   if (open) {
-    void refreshRoleTools();
     if (aiMode.value && query.value.trim()) {
       void searchStore.runAiRoute();
     }
@@ -210,17 +136,6 @@ watch(query, () => {
     }, 150);
   }
 });
-
-watch(
-  () => selectedRoleIds.value.length,
-  (count) => {
-    // Don't strand the user on an empty 'mine' scope if they cleared
-    // their roles from the home page.
-    if (scope.value === 'mine' && count === 0) {
-      searchStore.setScope('all');
-    }
-  },
-);
 
 watch(query, () => {
   if (debounceId.value) clearTimeout(debounceId.value);
@@ -253,19 +168,13 @@ function handleKeydown(event: KeyboardEvent) {
   } else if (event.key === 'ArrowUp') {
     event.preventDefault();
     if (displayedResults.value.length > 0) searchStore.selectPrevious();
-  } else if (event.key === 'Tab') {
-    // Story 2.4: tab toggles 'all' / 'mine' scope. We preventDefault so
-    // the browser doesn't move focus to the next field.
-    event.preventDefault();
-    searchStore.toggleScope();
   } else if (
     event.key.toLowerCase() === 'i' &&
     (event.metaKey || event.ctrlKey) &&
     !event.altKey &&
     !event.shiftKey
   ) {
-    // Story 5.1: Cmd/Ctrl+I toggles the local AI intent router. Tab is
-    // already taken by scope; I is mnemonic for "intent".
+    // Cmd/Ctrl+I toggles the local AI intent router.
     event.preventDefault();
     searchStore.toggleAiMode();
   } else if (event.key === 'Enter') {
@@ -357,15 +266,6 @@ onBeforeUnmount(() => {
           </span>
           <button
             type="button"
-            :class="['scope-toggle', { active: scope === 'mine' }]"
-            :title="scope === 'mine' ? '当前仅显示当前角色的工具 (Tab 切到全部)' : '显示全部工具 (Tab 切到我的)'"
-            @click="searchStore.toggleScope()"
-          >
-            <i class="fas" :class="scope === 'mine' ? 'fa-user-shield' : 'fa-globe'"></i>
-            <span>{{ scopeLabel }}</span>
-          </button>
-          <button
-            type="button"
             :class="['ai-toggle', { active: aiMode }]"
             :title="aiMode ? 'AI 意图路由开启 (⌘I 关闭)' : '开启 AI 意图路由 (⌘I 切换)'"
             @click="searchStore.toggleAiMode()"
@@ -385,12 +285,8 @@ onBeforeUnmount(() => {
 
         <div class="results-area">
           <template v-if="!isQueryEmpty">
-            <div v-if="scopeEmptyHint" class="empty">
-              <i class="fas fa-user-shield"></i>
-              <span>{{ scopeEmptyHint }}</span>
-            </div>
             <div
-              v-else-if="
+              v-if="
                 aiMode &&
                 aiResults.length === 0 &&
                 !aiIsLoading &&
@@ -452,17 +348,6 @@ onBeforeUnmount(() => {
                   <i class="fas fa-folder"></i>
                   {{ tool.category.name }}
                 </div>
-                <div class="result-roles" v-if="tool.categories?.length">
-                  <span
-                    v-for="roleName in tool.categories"
-                    :key="roleName"
-                    class="role-chip"
-                    :title="`匹配当前角色：${roleName}`"
-                  >
-                    <i class="fas fa-user-shield"></i>
-                    {{ roleName }}
-                  </span>
-                </div>
                 <div class="result-tags" v-if="tool.tags.length">
                   <span
                     v-for="tag in tool.tags.slice(0, 2)"
@@ -514,9 +399,6 @@ onBeforeUnmount(() => {
           </span>
           <span class="hint"><kbd>↵</kbd> 打开</span>
           <span class="hint"><kbd>esc</kbd> 关闭</span>
-          <span class="hint">
-            <kbd>Tab</kbd> {{ scopeLabel }}
-          </span>
           <span class="hint">
             <kbd>⌘</kbd><kbd>I</kbd> {{ aiMode ? 'AI 开' : 'AI' }}
           </span>
@@ -601,9 +483,7 @@ onBeforeUnmount(() => {
   font-family: inherit;
 }
 
-/* Story 2.4 + 5.1: scope and AI toggle buttons live next to esc-hint
- * so the search row stays compact. */
-.scope-toggle,
+/* AI toggle lives next to esc-hint so the search row stays compact. */
 .ai-toggle {
   display: inline-flex;
   align-items: center;
@@ -618,16 +498,9 @@ onBeforeUnmount(() => {
   font-family: inherit;
   transition: all 0.15s ease;
 }
-.scope-toggle:hover,
 .ai-toggle:hover {
   background: rgba(67, 97, 238, 0.08);
   color: var(--primary, #4361ee);
-}
-.scope-toggle.active {
-  background: linear-gradient(135deg, #4361ee, #3f37c9);
-  color: #ffffff;
-  border-color: transparent;
-  box-shadow: 0 2px 8px rgba(67, 97, 238, 0.25);
 }
 .ai-toggle.active {
   background: linear-gradient(135deg, #7209b7, #560bad);
@@ -751,36 +624,7 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 
-/* Story 2.4 role chips: matches the role picked during onboarding. */
-.result-roles {
-  display: flex;
-  gap: 4px;
-  flex-wrap: wrap;
-  margin-top: 4px;
-}
-
-.role-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  background: linear-gradient(
-    135deg,
-    rgba(67, 97, 238, 0.12),
-    rgba(63, 55, 201, 0.12)
-  );
-  color: var(--primary, #4361ee);
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 10.5px;
-  font-weight: 500;
-  border: 1px solid rgba(67, 97, 238, 0.2);
-}
-
-.role-chip i {
-  font-size: 9px;
-}
-
-/* Story 5.1 AI intent reason line, only shown while AI mode is on. */
+/* AI intent reason line, only shown while AI mode is on. */
 .result-reason {
   display: inline-flex;
   align-items: center;

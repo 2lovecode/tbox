@@ -1,0 +1,145 @@
+ad0a18f feat: expose conversation commands to the frontend
+ openspec/changes/add-chat-home-agent/tasks.md |  2 +-
+ src-tauri/src/commands/conversation.rs        | 24 +++++++++++++++++-------
+ src-tauri/src/lib.rs                          |  6 ++++++
+ 3 files changed, 24 insertions(+), 8 deletions(-)
+diff --git a/openspec/changes/add-chat-home-agent/tasks.md b/openspec/changes/add-chat-home-agent/tasks.md
+index 19fe9f9..5ffcf0a 100644
+--- a/openspec/changes/add-chat-home-agent/tasks.md
++++ b/openspec/changes/add-chat-home-agent/tasks.md
+@@ -1,14 +1,14 @@
+ ## 1. 会话存储
+ 
+ - [x] 1.1 在 SQLite 增加 `conversations` / `messages` 表与启动迁移，提供创建（首条用户消息才插入）、列表、打开、删除 API。验证：`cargo test -p tbox --lib conversation`（或模块名）覆盖空会话不落库、删除级联；`cargo check`。
+-- [ ] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
++- [x] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
+ 
+ ## 2. Agent 工具注册表与 Skill
+ 
+ - [ ] 2.1 实现工具注册表：第一期 12 个纯计算工具的 id、JSON Schema、`side_effect=none`、调度现有 command 函数。验证：单元测试校验合法/非法参数、未注册 id 被拒绝、不调用 HTTP/数据库 command。
+ - [ ] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
+ - [ ] 2.3 用 mock LLM 实现 Agent 循环：纯回复、一次 tool call、连续两次、工具失败回填、取消。验证：`cargo test` 相关模块；CI 不启动 sidecar、不下载 GGUF。
+ 
+ ## 3. 对话壳与工具箱
+ 
+ - [ ] 3.1 将现有首页网格迁到 `/toolbox`，侧栏改为新建对话、历史列表、底部工具箱入口；`/` 为对话空态。验证：`pnpm exec vue-tsc --noEmit`；手动：启动后 `/` 不是卡片网格，工具箱能打开 id 10 Base64 页。
+diff --git a/src-tauri/src/commands/conversation.rs b/src-tauri/src/commands/conversation.rs
+index 14e7478..77c2099 100644
+--- a/src-tauri/src/commands/conversation.rs
++++ b/src-tauri/src/commands/conversation.rs
+@@ -1,25 +1,26 @@
+ use std::time::{SystemTime, UNIX_EPOCH};
+ 
+ use rusqlite::{params, Connection};
++use serde::Serialize;
+ use uuid::Uuid;
+ 
+ use crate::db::open_connection;
+ 
+-#[derive(Debug, Clone, PartialEq, Eq)]
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+ pub struct Conversation {
+     pub id: String,
+     pub title: String,
+     pub updated_at: i64,
+ }
+ 
+-#[derive(Debug, Clone, PartialEq, Eq)]
++#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+ pub struct ChatMessage {
+     pub id: String,
+     pub conversation_id: String,
+     pub role: String,
+     pub content: String,
+     pub tool_calls_json: Option<String>,
+     pub created_at: i64,
+ }
+ 
+ const SCHEMA_SQL: &str = "
+@@ -192,41 +193,50 @@ pub fn delete_conversation_on(conn: &Connection, conversation_id: &str) -> Resul
+     ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+ 
+     conn.execute(
+         "DELETE FROM conversations WHERE id = ?1",
+         params![conversation_id],
+     )
+     .map_err(|e| e.to_string())?;
+     Ok(())
+ }
+ 
++#[tauri::command]
++#[allow(non_snake_case)]
+ pub fn append_user_message(
+-    conversation_id: Option<String>,
+-    content: &str,
++    conversationId: Option<String>,
++    content: String,
+ ) -> Result<(Conversation, ChatMessage), String> {
+     let conn = open_connection()?;
+-    append_user_message_on(&conn, conversation_id, content)
++    append_user_message_on(&conn, conversationId, &content)
+ }
+ 
++#[tauri::command]
+ pub fn list_conversations() -> Result<Vec<Conversation>, String> {
+     let conn = open_connection()?;
+     list_conversations_on(&conn)
+ }
+ 
+ pub fn get_messages(conversation_id: &str) -> Result<Vec<ChatMessage>, String> {
+     let conn = open_connection()?;
+     get_messages_on(&conn, conversation_id)
+ }
+ 
+-pub fn delete_conversation(conversation_id: &str) -> Result<(), String> {
++#[tauri::command]
++pub fn get_conversation_messages(conversation_id: String) -> Result<Vec<ChatMessage>, String> {
++    get_messages(&conversation_id)
++}
++
++#[tauri::command]
++pub fn delete_conversation(conversation_id: String) -> Result<(), String> {
+     let conn = open_connection()?;
+-    delete_conversation_on(&conn, conversation_id)
++    delete_conversation_on(&conn, &conversation_id)
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+     use rusqlite::Connection;
+     use std::fs;
+     use std::path::PathBuf;
+     use std::time::{SystemTime, UNIX_EPOCH};
+ 
+diff --git a/src-tauri/src/lib.rs b/src-tauri/src/lib.rs
+index 2ac5f48..6f6f12e 100644
+--- a/src-tauri/src/lib.rs
++++ b/src-tauri/src/lib.rs
+@@ -139,20 +139,26 @@ pub fn run() {
+             commands::encoding::base58_encode,
+             commands::encoding::base58_decode,
+             commands::encoding::base62_encode,
+             commands::encoding::base62_decode,
+             commands::encoding::hex_to_string,
+             commands::encoding::string_to_hex,
+             commands::encoding::punycode_encode,
+             commands::encoding::punycode_decode,
+             commands::encoding::binary_to_hex,
+             commands::encoding::hex_to_binary,
++
++            // 会话
++            commands::conversation::list_conversations,
++            commands::conversation::get_conversation_messages,
++            commands::conversation::delete_conversation,
++            commands::conversation::append_user_message,
+         ])
+         .run(tauri::generate_context!())
+         .expect("error while running tauri application");
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     #[test]
+     fn it_works() {
+         let result = 2 + 2;

@@ -1,0 +1,569 @@
+ openspec/changes/add-chat-home-agent/tasks.md |   2 +-
+ src-tauri/src/agent/llm.rs                    |  62 ++++
+ src-tauri/src/agent/loop.rs                   | 388 ++++++++++++++++++++++++++
+ src-tauri/src/agent/mod.rs                    |   6 +-
+ src-tauri/src/commands/conversation.rs        |  41 +++
+ 5 files changed, 495 insertions(+), 4 deletions(-)
+021f245 feat: run agent loop against a mock chat model
+diff --git a/openspec/changes/add-chat-home-agent/tasks.md b/openspec/changes/add-chat-home-agent/tasks.md
+index ace606e..fa1984a 100644
+--- a/openspec/changes/add-chat-home-agent/tasks.md
++++ b/openspec/changes/add-chat-home-agent/tasks.md
+@@ -2,17 +2,17 @@
+ 
+ - [x] 1.1 在 SQLite 增加 `conversations` / `messages` 表与启动迁移，提供创建（首条用户消息才插入）、列表、打开、删除 API。验证：`cargo test -p tbox --lib conversation`（或模块名）覆盖空会话不落库、删除级联；`cargo check`。
+ - [x] 1.2 将会话命令注册到 Tauri invoke。验证：`cargo check`；命令名可被前端 `invoke`。
+ 
+ ## 2. Agent 工具注册表与 Skill
+ 
+ - [x] 2.1 实现工具注册表：第一期 12 个纯计算工具的 id、JSON Schema、`side_effect=none`、调度现有 command 函数。验证：单元测试校验合法/非法参数、未注册 id 被拒绝、不调用 HTTP/数据库 command。
+ - [x] 2.2 为上述工具添加预置 `SKILL.md` 与按问题检索（关键词/名称），只返回少量相关 Skill。验证：JWT 问题命中 JWT Skill 且结果数量有上限；Skill 加载不扩大注册表。
+-- [ ] 2.3 用 mock LLM 实现 Agent 循环：纯回复、一次 tool call、连续两次、工具失败回填、取消。验证：`cargo test` 相关模块；CI 不启动 sidecar、不下载 GGUF。
++- [x] 2.3 用 mock LLM 实现 Agent 循环：纯回复、一次 tool call、连续两次、工具失败回填、取消。验证：`cargo test` 相关模块；CI 不启动 sidecar、不下载 GGUF。
+ 
+ ## 3. 对话壳与工具箱
+ 
+ - [ ] 3.1 将现有首页网格迁到 `/toolbox`，侧栏改为新建对话、历史列表、底部工具箱入口；`/` 为对话空态。验证：`pnpm exec vue-tsc --noEmit`；手动：启动后 `/` 不是卡片网格，工具箱能打开 id 10 Base64 页。
+ - [ ] 3.2 接会话列表/删除/打开；首条消息发出后历史出现标题。验证：手动新建空会话不出现在历史；发一条后出现；删除后消失。`vue-tsc`。
+ - [ ] 3.3 从工具页返回 `/` 恢复上次会话。验证：手动路径。
+ 
+ ## 4. 流式对话 UI
+diff --git a/src-tauri/src/agent/llm.rs b/src-tauri/src/agent/llm.rs
+new file mode 100644
+index 0000000..139259e
+--- /dev/null
++++ b/src-tauri/src/agent/llm.rs
+@@ -0,0 +1,62 @@
++//! ChatModel abstraction and model turn types for the agent loop.
++
++use serde_json::Value;
++
++/// One message sent to the model (system / user / assistant / tool).
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct ModelMessage {
++    pub role: String,
++    pub content: String,
++}
++
++impl ModelMessage {
++    pub fn system(content: impl Into<String>) -> Self {
++        Self {
++            role: "system".to_string(),
++            content: content.into(),
++        }
++    }
++
++    pub fn user(content: impl Into<String>) -> Self {
++        Self {
++            role: "user".to_string(),
++            content: content.into(),
++        }
++    }
++
++    pub fn assistant(content: impl Into<String>) -> Self {
++        Self {
++            role: "assistant".to_string(),
++            content: content.into(),
++        }
++    }
++
++    pub fn tool(content: impl Into<String>) -> Self {
++        Self {
++            role: "tool".to_string(),
++            content: content.into(),
++        }
++    }
++}
++
++/// One tool call requested by the model.
++#[derive(Debug, Clone, PartialEq)]
++pub struct ToolCall {
++    /// Call instance id (for event correlation).
++    pub id: String,
++    /// Registry tool id, e.g. base64.encode.
++    pub name: String,
++    pub arguments: Value,
++}
++
++/// Single model turn: plain text or tool calls.
++#[derive(Debug, Clone, PartialEq)]
++pub enum ModelTurn {
++    Text(String),
++    ToolCalls(Vec<ToolCall>),
++}
++
++/// Swappable chat model backend (real LLM or Scripted mock).
++pub trait ChatModel {
++    fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String>;
++}
+diff --git a/src-tauri/src/agent/loop.rs b/src-tauri/src/agent/loop.rs
+new file mode 100644
+index 0000000..f3d3e4a
+--- /dev/null
++++ b/src-tauri/src/agent/loop.rs
+@@ -0,0 +1,388 @@
++//! Agent tool loop: retrieve skills -> model -> dispatch -> feed results; max 8 tool iterations.
++
++use super::llm::{ChatModel, ModelMessage, ModelTurn};
++use super::registry;
++use super::skills::retrieve_skills;
++use crate::commands::conversation::{append_assistant_message_on, get_messages_on};
++use crate::db::open_connection;
++use rusqlite::Connection;
++use serde_json::Value;
++use std::sync::atomic::{AtomicBool, Ordering};
++
++/// Hard cap on tool-call rounds per `run_agent` invocation.
++pub const MAX_TOOL_ITERATIONS: usize = 8;
++
++/// Streaming / progress events for the frontend.
++#[derive(Debug, Clone, PartialEq)]
++pub enum AgentEvent {
++    Token(String),
++    ToolStart { id: String, args: Value },
++    ToolEnd { id: String, result: String },
++    Error(String),
++    Done,
++}
++
++fn build_system_prompt(user_text: &str) -> String {
++    let skills = retrieve_skills(user_text, 3);
++    let mut prompt = String::from(
++        "You are the TBox local agent. Prefer registered pure-compute tools when helpful.\n",
++    );
++    if !skills.is_empty() {
++        prompt.push_str("\nRelevant skills:\n");
++        for sk in &skills {
++            prompt.push_str(&format!("### {}\n{}\n\n", sk.tool_id, sk.body));
++        }
++    }
++    prompt
++}
++
++fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<ModelMessage>, String> {
++    let history = get_messages_on(conn, conv_id)?;
++    Ok(history
++        .into_iter()
++        .map(|m| ModelMessage {
++            role: m.role,
++            content: m.content,
++        })
++        .collect())
++}
++
++/// Connection-injected agent loop (unit tests + shared DB handle).
++pub fn run_agent_on(
++    conn: &Connection,
++    model: &mut impl ChatModel,
++    conv_id: &str,
++    user_text: &str,
++    cancel: &AtomicBool,
++    mut emit: impl FnMut(AgentEvent),
++) -> Result<(), String> {
++    if cancel.load(Ordering::SeqCst) {
++        emit(AgentEvent::Done);
++        return Ok(());
++    }
++
++    let mut msgs = Vec::new();
++    msgs.push(ModelMessage::system(build_system_prompt(user_text)));
++    msgs.extend(history_to_model_messages(conn, conv_id)?);
++
++    let mut tool_iterations = 0usize;
++
++    loop {
++        if cancel.load(Ordering::SeqCst) {
++            let _ = append_assistant_message_on(conn, conv_id, "", None);
++            emit(AgentEvent::Done);
++            return Ok(());
++        }
++
++        let turn = match model.complete(&msgs) {
++            Ok(t) => t,
++            Err(e) => {
++                emit(AgentEvent::Error(e.clone()));
++                return Err(e);
++            }
++        };
++
++        match turn {
++            ModelTurn::Text(text) => {
++                emit(AgentEvent::Token(text.clone()));
++                append_assistant_message_on(conn, conv_id, &text, None)?;
++                emit(AgentEvent::Done);
++                return Ok(());
++            }
++            ModelTurn::ToolCalls(calls) => {
++                if tool_iterations >= MAX_TOOL_ITERATIONS {
++                    let msg = format!(
++                        "exceeded max tool iterations ({MAX_TOOL_ITERATIONS})"
++                    );
++                    emit(AgentEvent::Error(msg.clone()));
++                    emit(AgentEvent::Done);
++                    return Err(msg);
++                }
++                tool_iterations += 1;
++
++                for call in calls {
++                    let tool_id = call.name.clone();
++                    emit(AgentEvent::ToolStart {
++                        id: tool_id.clone(),
++                        args: call.arguments.clone(),
++                    });
++                    let result = match registry::dispatch(&call.name, &call.arguments) {
++                        Ok(s) => s,
++                        Err(e) => e,
++                    };
++                    emit(AgentEvent::ToolEnd {
++                        id: tool_id,
++                        result: result.clone(),
++                    });
++                    msgs.push(ModelMessage::tool(result));
++                }
++            }
++        }
++    }
++}
++
++/// Agent loop using the application SQLite database.
++pub fn run_agent(
++    model: &mut impl ChatModel,
++    conv_id: &str,
++    user_text: &str,
++    cancel: &AtomicBool,
++    emit: impl FnMut(AgentEvent),
++) -> Result<(), String> {
++    let conn = open_connection()?;
++    run_agent_on(&conn, model, conv_id, user_text, cancel, emit)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use crate::agent::llm::ToolCall;
++    use crate::commands::conversation::{append_user_message_on, get_messages_on};
++    use rusqlite::Connection;
++    use serde_json::json;
++    use std::collections::VecDeque;
++    use std::fs;
++    use std::path::PathBuf;
++    use std::sync::atomic::AtomicBool;
++    use std::sync::{Arc, Mutex};
++    use std::time::{SystemTime, UNIX_EPOCH};
++
++    struct Scripted {
++        turns: VecDeque<ModelTurn>,
++        pub received: Vec<Vec<ModelMessage>>,
++    }
++
++    impl Scripted {
++        fn new(turns: Vec<ModelTurn>) -> Self {
++            Self {
++                turns: turns.into(),
++                received: Vec::new(),
++            }
++        }
++    }
++
++    impl ChatModel for Scripted {
++        fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
++            self.received.push(msgs.to_vec());
++            self.turns
++                .pop_front()
++                .ok_or_else(|| "Scripted: no more turns".to_string())
++        }
++    }
++
++    fn test_db() -> Connection {
++        let mut dir = std::env::temp_dir();
++        let unique = SystemTime::now()
++            .duration_since(UNIX_EPOCH)
++            .unwrap()
++            .as_nanos();
++        dir.push(format!("tbox-agent-loop-test-{unique}"));
++        fs::create_dir_all(&dir).unwrap();
++        let path: PathBuf = dir.join("tools.db");
++        Connection::open(path).unwrap()
++    }
++
++    fn collect_events() -> (impl FnMut(AgentEvent), Arc<Mutex<Vec<AgentEvent>>>) {
++        let events = Arc::new(Mutex::new(Vec::new()));
++        let events_c = events.clone();
++        let emit = move |e: AgentEvent| {
++            events_c.lock().unwrap().push(e);
++        };
++        (emit, events)
++    }
++
++    #[test]
++    fn text_only_reply() {
++        let db = test_db();
++        let user_text = "hello";
++        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
++        let mut model = Scripted::new(vec![ModelTurn::Text("hi there".into())]);
++        let cancel = AtomicBool::new(false);
++        let (mut emit, events) = collect_events();
++
++        run_agent_on(
++            &db,
++            &mut model,
++            &conv.id,
++            user_text,
++            &cancel,
++            &mut emit,
++        )
++        .unwrap();
++
++        let msgs = get_messages_on(&db, &conv.id).unwrap();
++        assert_eq!(msgs.len(), 2);
++        assert_eq!(msgs[0].role, "user");
++        assert_eq!(msgs[1].role, "assistant");
++        assert_eq!(msgs[1].content, "hi there");
++        let ev = events.lock().unwrap();
++        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Token(_))));
++        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
++    }
++
++    #[test]
++    fn one_tool_call_then_text() {
++        let db = test_db();
++        let user_text = "base64 encode hi";
++        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
++        let mut model = Scripted::new(vec![
++            ModelTurn::ToolCalls(vec![ToolCall {
++                id: "c1".into(),
++                name: "base64.encode".into(),
++                arguments: json!({"input": "hi"}),
++            }]),
++            ModelTurn::Text("encoded".into()),
++        ]);
++        let cancel = AtomicBool::new(false);
++        let (mut emit, events) = collect_events();
++
++        run_agent_on(
++            &db,
++            &mut model,
++            &conv.id,
++            user_text,
++            &cancel,
++            &mut emit,
++        )
++        .unwrap();
++
++        let msgs = get_messages_on(&db, &conv.id).unwrap();
++        assert_eq!(msgs.last().unwrap().role, "assistant");
++        assert_eq!(msgs.last().unwrap().content, "encoded");
++        let ev = events.lock().unwrap();
++        assert!(ev.iter().any(|e| matches!(
++            e,
++            AgentEvent::ToolStart { id, .. } if id == "base64.encode"
++        )));
++        assert!(ev.iter().any(|e| matches!(
++            e,
++            AgentEvent::ToolEnd { id, .. } if id == "base64.encode"
++        )));
++        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
++        assert_eq!(model.received.len(), 2);
++    }
++
++    #[test]
++    fn two_tool_calls_then_text() {
++        let db = test_db();
++        let user_text = "base64 then hash";
++        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
++        let mut model = Scripted::new(vec![
++            ModelTurn::ToolCalls(vec![ToolCall {
++                id: "c1".into(),
++                name: "base64.encode".into(),
++                arguments: json!({"input": "hi"}),
++            }]),
++            ModelTurn::ToolCalls(vec![ToolCall {
++                id: "c2".into(),
++                name: "hash.digest".into(),
++                arguments: json!({"input": "aGk=", "algorithm": "md5"}),
++            }]),
++            ModelTurn::Text("both done".into()),
++        ]);
++        let cancel = AtomicBool::new(false);
++        let (mut emit, _) = collect_events();
++
++        run_agent_on(
++            &db,
++            &mut model,
++            &conv.id,
++            user_text,
++            &cancel,
++            &mut emit,
++        )
++        .unwrap();
++
++        assert_eq!(model.received.len(), 3);
++        let msgs = get_messages_on(&db, &conv.id).unwrap();
++        assert_eq!(msgs.last().unwrap().content, "both done");
++    }
++
++    #[test]
++    fn dispatch_failure_fed_back_to_model() {
++        let db = test_db();
++        let user_text = "call unknown tool";
++        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
++        let mut model = Scripted::new(vec![
++            ModelTurn::ToolCalls(vec![ToolCall {
++                id: "c1".into(),
++                name: "http.request".into(),
++                arguments: json!({}),
++            }]),
++            ModelTurn::Text("tool unavailable".into()),
++        ]);
++        let cancel = AtomicBool::new(false);
++        let (mut emit, _) = collect_events();
++
++        run_agent_on(
++            &db,
++            &mut model,
++            &conv.id,
++            user_text,
++            &cancel,
++            &mut emit,
++        )
++        .unwrap();
++
++        assert_eq!(model.received.len(), 2);
++        let second = &model.received[1];
++        let tool_msgs: Vec<_> = second.iter().filter(|m| m.role == "tool").collect();
++        assert!(
++            !tool_msgs.is_empty(),
++            "second turn should include tool role messages"
++        );
++        assert!(
++            tool_msgs.iter().any(|m| {
++                m.content.contains("未注册") || m.content.contains("unknown")
++            }),
++            "tool result should contain dispatch error, got: {:?}",
++            tool_msgs
++        );
++    }
++
++    #[test]
++    fn cancel_stops_and_keeps_user_message() {
++        let db = test_db();
++        let user_text = "will cancel";
++        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
++        let mut model = Scripted::new(vec![ModelTurn::Text("should not appear".into())]);
++        let cancel = AtomicBool::new(true);
++        let (mut emit, events) = collect_events();
++
++        let _ = run_agent_on(
++            &db,
++            &mut model,
++            &conv.id,
++            user_text,
++            &cancel,
++            &mut emit,
++        );
++
++        assert!(
++            model.received.is_empty(),
++            "cancel=true must not call the model"
++        );
++        let msgs = get_messages_on(&db, &conv.id).unwrap();
++        assert!(
++            msgs.iter()
++                .any(|m| m.role == "user" && m.content == user_text),
++            "persisted user message must remain"
++        );
++        let ev = events.lock().unwrap();
++        assert!(
++            ev.iter().any(|e| matches!(e, AgentEvent::Done))
++                || ev.iter().any(|e| matches!(e, AgentEvent::Error(_)))
++        );
++    }
++
++    #[allow(dead_code)]
++    fn _signature_check(
++        model: &mut impl ChatModel,
++        conv_id: &str,
++        user_text: &str,
++        cancel: &AtomicBool,
++        emit: impl FnMut(AgentEvent),
++    ) -> Result<(), String> {
++        run_agent(model, conv_id, user_text, cancel, emit)
++    }
++}
+diff --git a/src-tauri/src/agent/mod.rs b/src-tauri/src/agent/mod.rs
+index 7b78943..f8e23cc 100644
+--- a/src-tauri/src/agent/mod.rs
++++ b/src-tauri/src/agent/mod.rs
+@@ -1,6 +1,6 @@
+-//! Agent 子系统（工具注册表、后续循环与 Skill）。
+-//!
+-//! 本模块第一期仅暴露 allowlisted 纯计算工具注册与调度。
++//! Agent subsystem (tool registry, skills, chat loop).
+ 
++pub mod llm;
+ pub mod registry;
+ pub mod skills;
++pub mod r#loop;
+\ No newline at end of file
+diff --git a/src-tauri/src/commands/conversation.rs b/src-tauri/src/commands/conversation.rs
+index 77c2099..ae7510e 100644
+--- a/src-tauri/src/commands/conversation.rs
++++ b/src-tauri/src/commands/conversation.rs
+@@ -153,16 +153,57 @@ pub fn append_user_message_on(
+                 updated_at: ts,
+                 ..conversation
+             };
+             Ok((updated, message))
+         }
+     }
+ }
+ 
++pub fn append_assistant_message_on(
++    conn: &Connection,
++    conversation_id: &str,
++    content: &str,
++    tool_calls_json: Option<&str>,
++) -> Result<ChatMessage, String> {
++    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
++
++    let mut exists = conn
++        .prepare("SELECT id FROM conversations WHERE id = ?1")
++        .map_err(|e| e.to_string())?;
++    exists
++        .query_row(params![conversation_id], |_| Ok(()))
++        .map_err(|_| format!("会话不存在: {conversation_id}"))?;
++
++    let ts = now_ts();
++    let message_id = Uuid::new_v4().to_string();
++    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
++    tx.execute(
++        "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
++        params![ts, conversation_id],
++    )
++    .map_err(|e| e.to_string())?;
++    tx.execute(
++        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
++         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5)",
++        params![message_id, conversation_id, content, tool_calls_json, ts],
++    )
++    .map_err(|e| e.to_string())?;
++    tx.commit().map_err(|e| e.to_string())?;
++
++    Ok(ChatMessage {
++        id: message_id,
++        conversation_id: conversation_id.to_string(),
++        role: "assistant".to_string(),
++        content: content.to_string(),
++        tool_calls_json: tool_calls_json.map(|s| s.to_string()),
++        created_at: ts,
++    })
++}
++
+ pub fn list_conversations_on(conn: &Connection) -> Result<Vec<Conversation>, String> {
+     ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+ 
+     let mut stmt = conn
+         .prepare("SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC")
+         .map_err(|e| e.to_string())?;
+     let rows = stmt
+         .query_map([], row_to_conversation)

@@ -37,13 +37,22 @@ NUL
 COM1 COM2 COM3 COM4 COM5 COM6 COM7 COM8 COM9
 LPT1 LPT2 LPT3 LPT4 LPT5 LPT6 LPT7 LPT8 LPT9
 
-# Claude Code / local AI agent tooling
-.claude/
-.cursor
-.agents/
+# Local AI tooling — ignore junk, keep shared OpenSpec/Superpowers artifacts in git
+.claude/*
+!.claude/commands/
+!.claude/commands/**
+!.claude/skills/
+!.claude/skills/**
 
-_bmad
-_bmad-output
+.agents/*
+!.agents/skills/
+!.agents/skills/**
+
+_bmad/
+_bmad-output/
+
+# Cursor: local only（rules/commands/skills 本机生成，不进 git）
+.cursor/
 
 # Documentation (keep only important ones)
 IMPROVEMENTS.md
