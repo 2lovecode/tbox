@@ -43,6 +43,9 @@ export const useLlmStore = defineStore('llm', {
   getters: {
     providerMeta: (state) => getProviderMeta(state.config?.provider),
     isConfigured: (state) => {
+      if (state.config?.provider === 'local') {
+        return true;
+      }
       const baseUrl = state.config?.baseUrl ?? '';
       const model = state.config?.model ?? '';
       return baseUrl.trim().length > 0 && model.trim().length > 0;

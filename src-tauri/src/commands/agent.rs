@@ -6,9 +6,11 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn};
+use crate::agent::llm::{
+    resolve_from_disk, ChatModel, ModelMessage, ModelTurn, OpenAiCompatModel, ReadyLlm,
+    AgentError,
+};
 use crate::agent::r#loop::{run_agent, AgentEvent};
-use crate::commands::llm::{self, LlmProvider};
 
 pub const AGENT_EVENT: &str = "agent-event";
 
@@ -103,39 +105,13 @@ pub const LLM_UNAVAILABLE: &str = "llm_unavailable";
 
 /// Whether the current provider can run an agent turn.
 pub fn llm_is_ready() -> Result<(), String> {
-    let cfg = llm::get_llm_config();
-    match cfg.provider {
-        LlmProvider::Local => {
-            // Local model download lands in Task 5.2; until then local is never ready
-            // unless a mock/debug path is enabled.
-            if mock_agent_enabled() {
-                return Ok(());
-            }
-            Err(LLM_UNAVAILABLE.to_string())
-        }
-        LlmProvider::Openai | LlmProvider::Deepseek | LlmProvider::Custom => {
-            if cfg.base_url.trim().is_empty() || cfg.model.trim().is_empty() {
-                return Err(LLM_UNAVAILABLE.to_string());
-            }
-            if !cfg.has_api_key {
-                return Err(LLM_UNAVAILABLE.to_string());
-            }
-            // Real HTTP routing is Task 6.1; until then allow mock so UI can be developed.
-            if mock_agent_enabled() {
-                return Ok(());
-            }
-            Err(LLM_UNAVAILABLE.to_string())
-        }
-        LlmProvider::Anthropic => {
-            if cfg.base_url.trim().is_empty() || cfg.model.trim().is_empty() || !cfg.has_api_key
-            {
-                return Err(LLM_UNAVAILABLE.to_string());
-            }
-            if mock_agent_enabled() {
-                return Ok(());
-            }
-            Err(LLM_UNAVAILABLE.to_string())
-        }
+    if mock_agent_enabled() {
+        return Ok(());
+    }
+    match resolve_from_disk() {
+        Ok(_) => Ok(()),
+        Err(AgentError::LlmUnavailable) => Err(LLM_UNAVAILABLE.to_string()),
+        Err(AgentError::Other(e)) => Err(e),
     }
 }
 
@@ -200,29 +176,59 @@ pub async fn send_chat_turn(
     let cancel = Arc::clone(&cancel_state.0);
     let conv_id = conversationId.clone();
     let user_text = content;
+    let use_mock = mock_agent_enabled();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut model = DevMockModel {
-            user_text: user_text.clone(),
-            emitted_tool: false,
-        };
         let cancel_flag = cancel;
         let emit = |ev: AgentEvent| {
             let payload = wire_event(conv_id.clone(), ev);
             let _ = app.emit(AGENT_EVENT, payload);
         };
-        let result = run_agent(
-            &mut model,
-            &conv_id,
-            &user_text,
-            cancel_flag.as_ref(),
-            emit,
-        );
+
+        let result = if use_mock {
+            let mut model = DevMockModel {
+                user_text: user_text.clone(),
+                emitted_tool: false,
+            };
+            run_agent(
+                &mut model,
+                &conv_id,
+                &user_text,
+                cancel_flag.as_ref(),
+                emit,
+            )
+        } else {
+            match resolve_from_disk() {
+                Ok(ReadyLlm::OpenAiCompat {
+                    base_url,
+                    model,
+                    api_key,
+                }) => {
+                    let mut model = OpenAiCompatModel::new(base_url, model, api_key);
+                    run_agent(
+                        &mut model,
+                        &conv_id,
+                        &user_text,
+                        cancel_flag.as_ref(),
+                        emit,
+                    )
+                }
+                Err(AgentError::LlmUnavailable) => {
+                    let payload = wire_event(
+                        conv_id.clone(),
+                        AgentEvent::Error {
+                            message: LLM_UNAVAILABLE.into(),
+                        },
+                    );
+                    let _ = app.emit(AGENT_EVENT, payload);
+                    Err(LLM_UNAVAILABLE.into())
+                }
+                Err(AgentError::Other(e)) => Err(e),
+            }
+        };
+
         if let Err(e) = result {
-            let payload = wire_event(
-                conv_id,
-                AgentEvent::Error { message: e },
-            );
+            let payload = wire_event(conv_id, AgentEvent::Error { message: e });
             let _ = app.emit(AGENT_EVENT, &payload);
         }
     });

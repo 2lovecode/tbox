@@ -23,12 +23,12 @@
 ## 5. 本地模型与 sidecar
 
 - [x] 5.1 `LlmProvider` 增加 `local`；无配置文件时默认 `local`；已有 `llm_config.json` 不改写。验证：单元测试默认与保留；设置 UI 出现本地项。`cargo test` + `vue-tsc`。
-- [ ] 5.2 精选模型目录、下载进度/取消、完整性校验、启用；失败不得标为已安装。验证：用本地临时文件/mock HTTP 测成功、取消、失败；不在 CI 打真实 HuggingFace。
-- [ ] 5.3 sidecar 生命周期：仅 `127.0.0.1`、避开 11434、按需启动、退出关闭、崩溃不杀主进程、可重启。验证：状态机单测（不强制起真进程）；能起真进程的环境再手动看端口。
-- [ ] 5.4 设置中可切换 local ↔ 云端；选 local 且无模型时不得静默打云端。验证：单元测试路由；手动切换后对话走对应后端。
+- [x] 5.2 精选模型目录、下载进度/取消、完整性校验、启用；失败不得标为已安装。验证：用本地临时文件/mock HTTP 测成功、取消、失败；不在 CI 打真实 HuggingFace。
+- [x] 5.3 sidecar 生命周期：仅 `127.0.0.1`、避开 11434、按需启动、退出关闭、崩溃不杀主进程、可重启。验证：状态机单测（不强制起真进程）；能起真进程的环境再手动看端口。
+- [x] 5.4 设置中可切换 local ↔ 云端；选 local 且无模型时不得静默打云端。验证：单元测试路由；手动切换后对话走对应后端。
 
 ## 6. 打通与文档
 
-- [ ] 6.1 将真实 LLM 路由（sidecar OpenAI 兼容 / 现有云端）接入 Agent 循环，限制 tool 迭代次数。验证：`cargo check`；手动：云端或已下模型下完成 Base64 对话。
-- [ ] 6.2 更新 `AGENTS.md` living specs 表（`agent-chat`、`local-llm-runtime`）。验证：文档与 `openspec/specs/` 目录名一致（归档后生效，实现期可先改表）。
+- [x] 6.1 将真实 LLM 路由（sidecar OpenAI 兼容 / 现有云端）接入 Agent 循环，限制 tool 迭代次数。验证：`cargo check`；手动：云端或已下模型下完成 Base64 对话。
+- [x] 6.2 更新 `AGENTS.md` living specs 表（`agent-chat`、`local-llm-runtime`）。验证：文档与 `openspec/specs/` 目录名一致（归档后生效，实现期可先改表）。
 - [ ] 6.3 全量检查：`make check` 与 `make test` 通过。手动冒烟：工具箱、Spotlight 打开工具、对话调工具、无模型提示。

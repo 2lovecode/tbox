@@ -1,23 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { storeToRefs } from 'pinia';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useSettingsStore } from '@/stores/settings';
-import { useRoleStore } from '@/stores/role';
 import { useLlmStore } from '@/stores/llm';
 import { LLM_PROVIDERS, type LlmProviderId } from '@/types/llm';
 import { useConfirm } from '@/composables/useConfirm';
 
+interface LocalModelInfo {
+  id: string;
+  label: string;
+  recommended: boolean;
+  installed: boolean;
+  sizeBytes: number;
+}
+
+interface ModelDownloadProgress {
+  id: string;
+  received: number;
+  total: number;
+}
+
 const settingsStore = useSettingsStore();
-const roleStore = useRoleStore();
 const llmStore = useLlmStore();
 const { confirm: confirmDialog } = useConfirm();
 const { isOpen, activeTab } = storeToRefs(settingsStore);
-const {
-  availableRoles,
-  selectedRoleIds,
-  isLoading: isLoadingRoles,
-  lastError: roleError,
-} = storeToRefs(roleStore);
 const {
   config: llmConfig,
   apiKeyDraft,
@@ -33,15 +41,21 @@ const {
 } = storeToRefs(llmStore);
 
 const panelRef = ref<HTMLDivElement | null>(null);
+const localModels = ref<LocalModelInfo[]>([]);
+const downloadProgress = ref<Record<string, ModelDownloadProgress>>({});
+let unlistenDownload: UnlistenFn | null = null;
 
-// Lazy-load data the first time the modal opens. Roles are loaded by the
-// onboarding flow too, but loading here keeps a returning user from
-// seeing an empty state.
-async function refreshData() {
-  if (availableRoles.value.length === 0) {
-    await roleStore.loadAvailableRoles();
+async function refreshLocalModels() {
+  try {
+    localModels.value = await invoke<LocalModelInfo[]>('list_local_models');
+  } catch (error) {
+    console.error('[settings] list_local_models failed:', error);
   }
+}
+
+async function refreshData() {
   await llmStore.loadConfig();
+  await refreshLocalModels();
 }
 
 watch(isOpen, async (open) => {
@@ -52,9 +66,23 @@ watch(isOpen, async (open) => {
   }
 });
 
-onMounted(() => {
+onMounted(async () => {
   if (isOpen.value) {
     void refreshData();
+  }
+  unlistenDownload = await listen<ModelDownloadProgress>('model-download-progress', (event) => {
+    const p = event.payload;
+    downloadProgress.value = { ...downloadProgress.value, [p.id]: p };
+    if (p.total > 0 && p.received >= p.total) {
+      void refreshLocalModels();
+    }
+  });
+});
+
+onBeforeUnmount(() => {
+  if (unlistenDownload) {
+    unlistenDownload();
+    unlistenDownload = null;
   }
 });
 
@@ -69,30 +97,54 @@ function close() {
   settingsStore.close();
 }
 
-function toggleRole(roleId: number) {
-  roleStore.toggleRole(roleId);
-}
-
-function isRoleSelected(roleId: number): boolean {
-  return selectedRoleIds.value.includes(roleId);
-}
-
 function onProviderChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value as LlmProviderId;
   llmStore.applyProviderDefaults(value);
 }
 
+const isLocalProvider = computed(() => llmConfig.value?.provider === 'local');
+
 const llmStatusLabel = computed(() => {
+  if (isLocalProvider.value) {
+    const installed = localModels.value.some((m) => m.installed);
+    return installed ? '本地模型已就绪' : '需下载本地模型';
+  }
   if (!isConfigured.value) return '未配置';
   if (!llmConfig.value.hasApiKey) return '缺少 API Key';
   return '已配置';
 });
 
 const llmStatusClass = computed(() => {
+  if (isLocalProvider.value) {
+    return localModels.value.some((m) => m.installed) ? 'ok' : 'warn';
+  }
   if (!isConfigured.value) return 'muted';
   if (!llmConfig.value.hasApiKey) return 'warn';
   return 'ok';
 });
+
+async function startDownload(id: string) {
+  try {
+    await invoke('start_model_download', { id });
+  } catch (error) {
+    console.error('[settings] start_model_download failed:', error);
+  }
+}
+
+async function cancelDownload(id: string) {
+  try {
+    await invoke('cancel_model_download', { id });
+  } catch (error) {
+    console.error('[settings] cancel_model_download failed:', error);
+  }
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 async function resetLlm() {
   const ok = await confirmDialog('此操作会删除已保存的 API Key。', {
@@ -126,7 +178,7 @@ async function resetLlm() {
             <i class="fas fa-sliders" aria-hidden="true"></i>
             <div>
               <h2>设置</h2>
-              <p>角色与 LLM 配置，所有改动点击保存后立即生效</p>
+              <p>LLM 配置，所有改动点击保存后立即生效</p>
             </div>
           </div>
           <button
@@ -143,16 +195,6 @@ async function resetLlm() {
           <button
             type="button"
             role="tab"
-            :aria-selected="activeTab === 'role'"
-            :class="['tab', { active: activeTab === 'role' }]"
-            @click="settingsStore.setActiveTab('role')"
-          >
-            <i class="fas fa-user-shield" aria-hidden="true"></i>
-            角色
-          </button>
-          <button
-            type="button"
-            role="tab"
             :aria-selected="activeTab === 'llm'"
             :class="['tab', { active: activeTab === 'llm' }]"
             @click="settingsStore.setActiveTab('llm')"
@@ -163,56 +205,6 @@ async function resetLlm() {
         </nav>
 
         <div class="settings-body">
-          <!-- 角色 tab -->
-          <section v-show="activeTab === 'role'" role="tabpanel">
-            <div class="section-intro">
-              <h3>当前角色</h3>
-              <p>支持多选；切换后侧边栏计数与首页工具集会自动更新。</p>
-            </div>
-
-            <div v-if="isLoadingRoles" class="state-line">加载角色中…</div>
-            <div v-else-if="roleError" class="state-line error">
-              加载失败：{{ roleError }}
-              <button class="link" type="button" @click="roleStore.loadAvailableRoles()">
-                <i class="fas fa-rotate-right" aria-hidden="true"></i>
-                重试
-              </button>
-            </div>
-            <div v-else-if="availableRoles.length === 0" class="state-line">
-              暂无可选角色
-            </div>
-            <div v-else class="role-chips">
-              <button
-                v-for="role in availableRoles"
-                :key="role.id"
-                type="button"
-                :class="['role-chip', { selected: isRoleSelected(role.id) }]"
-                :aria-pressed="isRoleSelected(role.id)"
-                @click="toggleRole(role.id)"
-              >
-                <i :class="role.icon" aria-hidden="true"></i>
-                <span class="chip-label">
-                  <span class="chip-name">{{ role.displayName }}</span>
-                  <span class="chip-desc">{{ role.description }}</span>
-                </span>
-                <i
-                  v-if="isRoleSelected(role.id)"
-                  class="fas fa-check chip-check"
-                  aria-hidden="true"
-                ></i>
-              </button>
-            </div>
-
-            <div class="section-footer">
-              <span class="muted">已选 {{ selectedRoleIds.length }} 个角色</span>
-              <span class="muted">·</span>
-              <button class="link" type="button" @click="roleStore.setShowOnboarding(true)">
-                <i class="fas fa-rotate-left" aria-hidden="true"></i>
-                重新进入引导
-              </button>
-            </div>
-          </section>
-
           <!-- LLM 配置 tab -->
           <section v-show="activeTab === 'llm'" role="tabpanel">
             <div class="section-intro">
@@ -245,7 +237,40 @@ async function resetLlm() {
                   <span class="field-hint">{{ providerMeta.description }}</span>
                 </label>
 
-                <label class="field">
+                <div v-if="isLocalProvider" class="field local-models">
+                  <span class="field-label">本地模型</span>
+                  <ul class="model-list">
+                    <li v-for="m in localModels" :key="m.id" class="model-row">
+                      <div class="model-meta">
+                        <strong>{{ m.label }}</strong>
+                        <span>{{ formatBytes(m.sizeBytes) }}</span>
+                        <span v-if="m.installed" class="status-pill ok inline">已安装</span>
+                      </div>
+                      <div class="model-actions">
+                        <template v-if="downloadProgress[m.id] && !m.installed">
+                          <span class="progress-text">
+                            {{ formatBytes(downloadProgress[m.id].received) }} /
+                            {{ formatBytes(downloadProgress[m.id].total || m.sizeBytes) }}
+                          </span>
+                          <button type="button" class="btn ghost" @click="cancelDownload(m.id)">
+                            取消
+                          </button>
+                        </template>
+                        <button
+                          v-else-if="!m.installed"
+                          type="button"
+                          class="btn primary"
+                          @click="startDownload(m.id)"
+                        >
+                          下载
+                        </button>
+                      </div>
+                    </li>
+                  </ul>
+                  <span class="field-hint">模型保存到 ~/.toolbox/models；下载失败不会标记为已安装。</span>
+                </div>
+
+                <label v-if="!isLocalProvider" class="field">
                   <span class="field-label">Base URL</span>
                   <input
                     class="field-input"
@@ -259,7 +284,7 @@ async function resetLlm() {
                   <span class="field-hint">OpenAI 兼容端点；自定义请填写完整 URL（不含尾部路径）。</span>
                 </label>
 
-                <label class="field">
+                <label v-if="!isLocalProvider" class="field">
                   <span class="field-label">模型</span>
                   <input
                     class="field-input"
@@ -272,7 +297,7 @@ async function resetLlm() {
                   <span class="field-hint">填写该提供方下你想使用的模型标识。</span>
                 </label>
 
-                <div class="field">
+                <div v-if="!isLocalProvider" class="field">
                   <span class="field-label">
                     API Key
                     <span v-if="llmConfig.hasApiKey && !apiKeyDraft" class="status-pill ok inline">
@@ -575,107 +600,8 @@ async function resetLlm() {
   color: #c62828;
 }
 
-.role-chips {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: 10px;
-}
-
-.role-chip {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 12px 14px;
-  background: var(--bg-primary, #ffffff);
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.1));
-  border-radius: 10px;
-  cursor: pointer;
-  text-align: left;
-  font-family: inherit;
-  color: var(--text-primary, #212529);
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
-
-.role-chip:hover {
-  border-color: var(--primary, #4361ee);
-}
-
-.role-chip.selected {
-  border-color: var(--primary, #4361ee);
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.08), rgba(67, 97, 238, 0.02));
-}
-
-.role-chip > i:first-of-type {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: rgba(67, 97, 238, 0.1);
-  color: var(--primary, #4361ee);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  flex-shrink: 0;
-}
-
-.chip-label {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-  flex: 1;
-}
-
-.chip-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.chip-desc {
-  font-size: 11px;
-  color: var(--text-secondary, #6c757d);
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.chip-check {
-  color: var(--primary, #4361ee);
-  font-size: 13px;
-  flex-shrink: 0;
-  align-self: center;
-}
-
-.section-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 12px;
-  border-top: 1px dashed var(--border-color, rgba(0, 0, 0, 0.08));
-  padding-top: 12px;
-}
-
 .muted {
   color: var(--text-secondary, #6c757d);
-}
-
-.link {
-  background: transparent;
-  border: none;
-  color: var(--primary, #4361ee);
-  cursor: pointer;
-  font-size: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-}
-
-.link:hover {
-  text-decoration: underline;
 }
 
 /* ---- LLM form ---- */
@@ -737,6 +663,51 @@ select.field-input {
   font-size: 11px;
   color: var(--text-secondary, #6c757d);
   line-height: 1.5;
+}
+
+.model-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.model-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary, #6c757d);
+}
+
+.model-meta strong {
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+}
+
+.model-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: #64748b;
 }
 
 .api-key-row {

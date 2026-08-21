@@ -56,6 +56,7 @@ pub fn run() {
                 .build(),
         )
         .manage(commands::agent::AgentCancel::default())
+        .manage(commands::model_catalog::DownloadCancels::default())
         .setup(|app| {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -159,6 +160,11 @@ pub fn run() {
             commands::agent::check_llm_ready,
             commands::agent::send_chat_turn,
             commands::agent::cancel_chat_turn,
+
+            // 本地模型目录
+            commands::model_catalog::list_local_models,
+            commands::model_catalog::start_model_download,
+            commands::model_catalog::cancel_model_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

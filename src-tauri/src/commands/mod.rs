@@ -11,6 +11,7 @@ pub mod screen;
 pub mod search;
 pub mod conversation;
 pub mod agent;
+pub mod model_catalog;
 
 // 新增模块 (TODO: uncomment as modules are implemented)
 // pub mod data_convert;

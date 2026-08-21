@@ -27,7 +27,7 @@ serde_yaml = "0.9"
 serde-xml-rs = "0.6"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 dirs = "3.0"
-reqwest = { version = "0.12.24", features = ["json"] }
+reqwest = { version = "0.12.24", features = ["json", "blocking"] }
 image = "0.25"
 lopdf = "0.32"
 base64 = "0.22"

@@ -298,6 +298,17 @@ pub fn delete_llm_config() -> Result<(), String> {
     Ok(())
 }
 
+/// Decrypt the stored API key for agent HTTP calls. Returns `None` when
+/// no secret is on disk. Never expose this through a Tauri command.
+pub fn read_api_key_for_agent() -> Result<Option<String>, String> {
+    let Some(bundle) = read_secret()? else {
+        return Ok(None);
+    };
+    let bytes = decrypt_secret(&bundle)?;
+    let key = String::from_utf8(bytes).map_err(|e| format!("密钥不是合法 UTF-8: {e}"))?;
+    Ok(Some(key))
+}
+
 /// Probe the configured LLM endpoint with a HEAD/GET to `/models` using
 /// the stored API key. Returns a structured result the UI can render
 /// inline. Anthropic doesn't expose `/models`, so for that provider we

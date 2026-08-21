@@ -184,6 +184,24 @@ pub fn lookup(tool_id: &str) -> Option<&'static ToolSpec> {
     BY_ID.get(tool_id).map(|&i| &TOOLS[i])
 }
 
+/// OpenAI Chat Completions `tools` array for the registered allowlist.
+pub fn tools_as_openai_json() -> Value {
+    let tools: Vec<Value> = TOOLS
+        .iter()
+        .map(|t| {
+            json!({
+                "type": "function",
+                "function": {
+                    "name": t.id,
+                    "description": t.name,
+                    "parameters": t.schema,
+                }
+            })
+        })
+        .collect();
+    Value::Array(tools)
+}
+
 /// 校验 args 是否满足工具 schema 的必填字段与基本类型（手写，无 jsonschema 依赖）。
 fn validate_args(spec: &ToolSpec, args: &Value) -> Result<(), String> {
     let obj = args.as_object().ok_or_else(|| {
