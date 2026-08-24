@@ -24,5 +24,5 @@
 
 ## 5. 收尾
 
-- [ ] 5.1 回归：无模型 local 发消息有引导；切换云端/Ollama 后对话走对应后端。验证：手动 checklist。
+- [x] 5.1 回归：无模型 local 发消息有引导；切换云端/Ollama 后对话走对应后端。验证：手动 checklist。
 - [x] 5.2 `openspec validate llm-multi-provider-protocols`（或项目等价校验）通过。验证：CLI 无 error。

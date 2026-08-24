@@ -100,12 +100,14 @@ plan.md 无 `[~]` 标记行；本节按 5.1 手动项对照自动化覆盖：
 
 ## Overall Decision
 
-- [ ] ✅ PASS — 可進入 finishing-a-development-branch 與 archive
-- [x] ⚠️ PASS WITH WARNINGS — 可進入後續步驟但需注意：**5.1 手动回归未完成；实现未 commit**
+- [x] ✅ PASS — 可進入 finishing-a-development-branch 與 archive
+- [ ] ⚠️ PASS WITH WARNINGS — 可進入後續步驟但需注意：**5.1 手动回归未完成；实现未 commit**
 - [ ] ❌ FAIL — 返回失敗的 artifact 修正後重跑 verify
 
 **下一步**：
 
-1. 在 worktree 执行 `pnpm tauri dev`，按 5.1 checklist 完成手动回归并勾选 `tasks.md` 5.1。
-2. 用户确认后 **commit** feature 分支改动（代码 + `openspec/changes/llm-multi-provider-protocols/`）。
-3. 更新本文件 Overall Decision 为 ✅ PASS，再写 `retrospective.md` 并 `openspec archive -y`。
+1. ~~在 worktree 执行 `pnpm tauri dev`，按 5.1 checklist 完成手动回归并勾选 `tasks.md` 5.1。~~ ✅ 2026-08-24 用户已在本机 UI 完成手动回归（无模型 local 引导、云端/Ollama 路由、下载进度条），5.1 已勾选。
+2. ~~用户确认后 **commit** feature 分支改动~~ ✅ feature 分支已合并至 main（`90bae44`）。
+3. ~~更新本文件 Overall Decision 为 ✅ PASS，再写 `retrospective.md` 并 `openspec archive -y`。~~ ✅ Overall Decision 已更新为 ✅ PASS（合并后 main 工作区 `cargo test` 35 passed, 0 failed）。
+
+> **Update 2026-08-24**: 原警告项（5.1 手动回归未完成、实现未 commit）均已解除；§2/§5 中的历史记录保留作审计轨迹。
