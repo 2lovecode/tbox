@@ -192,6 +192,33 @@ fn resolve_url(entry: &CatalogEntry) -> String {
         .unwrap_or_else(|| entry.url.to_string())
 }
 
+/// Candidate URLs for a catalog entry, in fallback order:
+/// 1. `HF_ENDPOINT` env override (e.g. `https://hf-mirror.com`) applied to
+///    huggingface.co URLs,
+/// 2. the original URL,
+/// 3. the hf-mirror.com variant when the original points at huggingface.co
+///    (the origin is unreachable from some networks, e.g. mainland China).
+fn resolve_url_candidates(entry: &CatalogEntry) -> Vec<String> {
+    let primary = resolve_url(entry);
+    let mut urls = vec![primary.clone()];
+    if primary.starts_with("https://huggingface.co/") {
+        if let Ok(endpoint) = std::env::var("HF_ENDPOINT") {
+            let endpoint = endpoint.trim_end_matches('/').to_string();
+            if !endpoint.is_empty() {
+                urls.insert(
+                    0,
+                    format!("{}{}", endpoint, &primary["https://huggingface.co".len()..]),
+                );
+            }
+        }
+        urls.push(format!(
+            "https://hf-mirror.com{}",
+            &primary["https://huggingface.co".len()..]
+        ));
+    }
+    urls
+}
+
 fn sha256_hex(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -222,15 +249,21 @@ pub fn download_model_to(
         return Ok(final_path);
     }
 
-    let url = resolve_url(entry);
+    let urls = resolve_url_candidates(entry);
     let client = reqwest::blocking::Client::new();
-    let mut resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("下载失败: {e}"))?;
-    if !resp.status().is_success() {
-        return Err(format!("下载失败: HTTP {}", resp.status()));
+    let mut resp = None;
+    let mut last_err = String::new();
+    for url in &urls {
+        match client.get(url).send() {
+            Ok(r) if r.status().is_success() => {
+                resp = Some(r);
+                break;
+            }
+            Ok(r) => last_err = format!("HTTP {}", r.status()),
+            Err(e) => last_err = e.to_string(),
+        }
     }
+    let mut resp = resp.ok_or_else(|| format!("下载失败（已尝试 {} 个源）: {}", urls.len(), last_err))?;
     let total = resp.content_length().unwrap_or(entry.size_bytes);
 
     let mut out = File::create(&partial).map_err(|e| e.to_string())?;

@@ -52,7 +52,7 @@ fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<Mod
 /// Connection-injected agent loop (unit tests + shared DB handle).
 pub fn run_agent_on(
     conn: &Connection,
-    model: &mut impl ChatModel,
+    model: &mut dyn ChatModel,
     conv_id: &str,
     user_text: &str,
     cancel: &AtomicBool,
@@ -131,7 +131,7 @@ pub fn run_agent_on(
 
 /// Agent loop using the application SQLite database.
 pub fn run_agent(
-    model: &mut impl ChatModel,
+    model: &mut dyn ChatModel,
     conv_id: &str,
     user_text: &str,
     cancel: &AtomicBool,

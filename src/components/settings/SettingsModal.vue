@@ -57,6 +57,7 @@ const localModels = ref<LocalModelInfo[]>([]);
 const downloadProgress = ref<Record<string, ModelDownloadProgress>>({});
 const downloadFeedback = ref<Record<string, string>>({});
 const presetFilter = ref('');
+const engineInfo = ref<{ engine: { state: string; model?: string; reason?: string }; effectiveBackend: string } | null>(null);
 const ollamaPullProgress = ref<OllamaPullProgress | null>(null);
 const ollamaPullFeedback = ref<string | null>(null);
 let unlistenDownload: UnlistenFn | null = null;
@@ -69,9 +70,14 @@ let unlistenOllamaFail: UnlistenFn | null = null;
 const filteredPresets = computed(() => {
   const q = presetFilter.value.trim().toLowerCase();
   if (!q) return presets.value;
-  return presets.value.filter(
-    (p) => p.label.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
-  );
+  // Multi-term AND match over label / id / base URL / default model, so
+  // e.g. "minimax" finds both direct MiniMax presets and aggregators whose
+  // default model is a MiniMax one.
+  const terms = q.split(/\s+/).filter(Boolean);
+  return presets.value.filter((p) => {
+    const hay = `${p.label} ${p.id} ${p.defaultBaseUrl} ${p.defaultModel}`.toLowerCase();
+    return terms.every((t) => hay.includes(t));
+  });
 });
 
 async function refreshLocalModels() {
@@ -80,7 +86,26 @@ async function refreshLocalModels() {
   } catch (error) {
     console.error('[settings] list_local_models failed:', error);
   }
+  try {
+    engineInfo.value = await invoke('get_engine_status');
+  } catch (error) {
+    console.error('[settings] get_engine_status failed:', error);
+  }
 }
+
+const backendLabel = computed(() => {
+  const b = engineInfo.value?.effectiveBackend;
+  switch (b) {
+    case 'embedded':
+      return '内置引擎（进程内推理，已下载模型）';
+    case 'ollama':
+      return '本机 Ollama（未检测到已下载模型，自动回退）';
+    case 'cloud':
+      return '云端提供方';
+    default:
+      return '不可用（无已下载模型且本机无 Ollama）';
+  }
+});
 
 async function refreshData() {
   await llmStore.loadConfig();
@@ -164,6 +189,11 @@ function close() {
 function onProviderChange(event: Event) {
   const value = (event.target as HTMLSelectElement).value;
   llmStore.applyPreset(value);
+}
+
+function applyPresetAndClearFilter(id: string) {
+  llmStore.applyPreset(id);
+  presetFilter.value = '';
 }
 
 function onProtocolChange(event: Event) {
@@ -339,12 +369,13 @@ async function resetLlm() {
                     autocomplete="off"
                   />
                   <select
+                    v-if="!presetFilter"
                     class="field-input"
                     :value="llmConfig.provider"
                     @change="onProviderChange"
                   >
                     <option
-                      v-for="p in filteredPresets"
+                      v-for="p in presets"
                       :key="p.id"
                       :value="p.id"
                       :disabled="p.requiresOauth"
@@ -352,11 +383,45 @@ async function resetLlm() {
                       {{ p.label }}{{ p.requiresOauth ? '（OAuth 暂不支持）' : '' }}
                     </option>
                   </select>
+                  <!-- Filtering: a native <select> cannot be opened
+                       programmatically, so show matches as a visible list
+                       that updates as you type. -->
+                  <ul v-else class="preset-result-list">
+                    <li v-for="p in filteredPresets" :key="p.id">
+                      <button
+                        type="button"
+                        class="preset-result-item"
+                        :disabled="p.requiresOauth"
+                        :class="{ active: p.id === llmConfig.provider }"
+                        @click="applyPresetAndClearFilter(p.id)"
+                      >
+                        <span class="preset-result-label">
+                          {{ p.label }}{{ p.requiresOauth ? '（OAuth 暂不支持）' : '' }}
+                        </span>
+                        <span class="preset-result-url">{{ p.defaultBaseUrl || '本地 / 自定义端点' }}</span>
+                      </button>
+                    </li>
+                    <li v-if="filteredPresets.length === 0" class="preset-result-empty">
+                      无匹配提供商
+                    </li>
+                  </ul>
                   <span v-if="isOAuthPreset" class="field-hint error">
                     该提供商需要 OAuth 登录，当前版本仅展示预设，无法保存为可用后端。
                   </span>
                   <span v-else-if="currentPreset" class="field-hint">
                     {{ currentPreset.defaultBaseUrl || '本地 / 自定义端点' }}
+                  </span>
+                  <span v-if="isLocalProvider" class="field-hint">
+                    当前实际后端：{{ backendLabel }}
+                    <template v-if="engineInfo?.engine.state === 'loading'">
+                      （模型加载中：{{ engineInfo.engine.model }}…）
+                    </template>
+                    <template v-else-if="engineInfo?.engine.state === 'ready'">
+                      （已就绪：{{ engineInfo.engine.model }}）
+                    </template>
+                    <template v-else-if="engineInfo?.engine.state === 'error'">
+                      （引擎错误：{{ engineInfo.engine.reason }}）
+                    </template>
                   </span>
                 </label>
 
@@ -839,6 +904,62 @@ select.field-input {
   background-repeat: no-repeat;
   background-position: right 12px center;
   padding-right: 32px;
+}
+
+/* Provider filter results — shown in place of the native <select> while a
+   filter term is typed (a native select cannot be opened programmatically). */
+.preset-result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+  border-radius: 8px;
+  background: var(--bg-primary, #ffffff);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.preset-result-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.preset-result-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.preset-result-item:not(:disabled):hover {
+  background: rgba(67, 97, 238, 0.08);
+}
+
+.preset-result-item.active {
+  background: rgba(67, 97, 238, 0.14);
+}
+
+.preset-result-label {
+  font-size: 13px;
+  color: var(--text-primary, #212529);
+}
+
+.preset-result-url {
+  font-size: 11px;
+  color: var(--text-secondary, #6c757d);
+}
+
+.preset-result-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-secondary, #6c757d);
 }
 
 .field-hint {

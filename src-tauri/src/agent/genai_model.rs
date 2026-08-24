@@ -31,7 +31,11 @@ impl GenaiChatModel {
         let endpoint_arc: Arc<str> = Arc::from(endpoint);
         let auth = match api_key {
             Some(k) if !k.is_empty() => AuthData::from_single(k),
-            _ => AuthData::None,
+            // The OpenAI adapter requires single-value auth (it always sends
+            // `Authorization: Bearer …`); AuthData::None fails with
+            // ResolverAuthDataNotSingleValue. Local/Ollama backends ignore
+            // the key, so send a placeholder.
+            _ => AuthData::from_single("not-set"),
         };
 
         let resolver = ServiceTargetResolver::from_resolver_fn(
@@ -68,19 +72,21 @@ fn resolve_target(
     protocol: LlmProtocol,
 ) -> Result<(AdapterKind, String, String, Option<String>), AgentError> {
     if cfg.is_local() {
-        if local_model.is_none() {
-            return Err(AgentError::LlmUnavailable);
+        // Embedded engine handles the installed-GGUF case (see
+        // `build_model_from_disk`); when it has no model, fall back to a
+        // local Ollama instance (OpenAI-compatible /v1) and pick one of its
+        // installed models.
+        if port_open(11434) {
+            if let Some(model) = first_ollama_model() {
+                return Ok((
+                    AdapterKind::OpenAI,
+                    "http://127.0.0.1:11434/v1/".into(),
+                    model,
+                    None,
+                ));
+            }
         }
-        let model = local_model
-            .as_ref()
-            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "local".into());
-        return Ok((
-            AdapterKind::OpenAI,
-            "http://127.0.0.1:11435/v1/".into(),
-            model,
-            None,
-        ));
+        return Err(AgentError::LlmUnavailable);
     }
 
     if cfg.is_ollama() {
@@ -121,8 +127,38 @@ fn resolve_target(
     Ok((adapter, endpoint, cfg.model.clone(), api_key))
 }
 
-fn protocol_to_adapter(protocol: LlmProtocol) -> AdapterKind {
-    match protocol {
+/// True when a TCP connect to 127.0.0.1:port succeeds quickly.
+fn port_open(port: u16) -> bool {
+    use std::net::TcpStream;
+    TcpStream::connect(("127.0.0.1", port)).is_ok()
+}
+
+/// True when a local Ollama answers on 11434 and has at least one model.
+/// Used by `effective_local_backend` for backend visibility.
+pub fn ollama_available_with_model() -> bool {
+    port_open(11434) && first_ollama_model().is_some()
+}
+
+/// First installed model name from a local Ollama instance, if reachable.
+/// Uses a raw TCP HTTP request: `reqwest::blocking` builds and drops an
+/// internal tokio runtime, which panics when called from an async context.
+fn first_ollama_model() -> Option<String> {
+    use std::io::{Read, Write};
+    let mut stream = std::net::TcpStream::connect(("127.0.0.1", 11434)).ok()?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+    stream
+        .write_all(b"GET /api/tags HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
+        .ok()?;
+    let mut body = String::new();
+    stream.read_to_string(&mut body).ok()?;
+    let json_part = body.split("\r\n\r\n").nth(1)?;
+    let v: serde_json::Value = serde_json::from_str(json_part).ok()?;
+    v.pointer("/models/0/name")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+fn protocol_to_adapter(protocol: LlmProtocol) -> AdapterKind {    match protocol {
         LlmProtocol::OpenaiChat => AdapterKind::OpenAI,
         LlmProtocol::OpenaiResponses => AdapterKind::OpenAIResp,
         LlmProtocol::AnthropicMessages => AdapterKind::Anthropic,
@@ -225,7 +261,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_without_model_is_unavailable() {
+    fn local_without_model_needs_a_local_backend() {
         let cfg = LlmConfig {
             provider: "local".into(),
             protocol: None,
@@ -233,7 +269,15 @@ mod tests {
             model: String::new(),
             has_api_key: false,
         };
-        assert!(GenaiChatModel::from_config(&cfg, None).is_err());
+        // With any local backend up (embedded or Ollama) resolution succeeds
+        // (falling back to Ollama's first model); with none it errors.
+        let result = resolve_target(&cfg, None, LlmProtocol::OpenaiChat);
+        if port_open(11435) || port_open(11434) {
+            let (_, endpoint, _, _) = result.expect("local backend should resolve");
+            assert!(endpoint.starts_with("http://127.0.0.1:1143"));
+        } else {
+            assert!(result.is_err());
+        }
     }
 
     #[test]

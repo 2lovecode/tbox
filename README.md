@@ -15,7 +15,7 @@
 | **对话首页** `/` | 新建 / 历史会话；Agent 可调用白名单内纯计算工具（JSON、Base64、哈希、JWT 解析等） |
 | **工具箱** `/toolbox` | 原首页工具网格迁至此；按分类浏览全部独立工具页 |
 | **Spotlight** | 全局快捷键唤起；本地分词 / 拼音搜索，不依赖对话 LLM |
-| **本地 / 云端 LLM** | 默认 `local`（需在设置中下载精选 GGUF）；可切换已配置的 OpenAI 兼容 / DeepSeek 等；本地无模型时不会静默打云端 |
+| **本地 / 云端 LLM** | 默认 `local`（内置 llama.cpp 进程内推理引擎，需在设置中下载精选 GGUF；无已下载模型时回退本机 Ollama）；可切换已配置的 OpenAI 兼容 / DeepSeek 等；本地无模型时不会静默打云端 |
 | **国密与编码** | SM2/SM3/SM4、哈希、各类编解码等，数据留在本地进程 |
 
 产品行为规格见 [`openspec/specs/`](openspec/specs/)（如 [`product`](openspec/specs/product/spec.md)、[`agent-chat`](openspec/specs/agent-chat/spec.md)、[`local-llm-runtime`](openspec/specs/local-llm-runtime/spec.md)）。规划清单见 [`ROADMAP.md`](ROADMAP.md)。
@@ -60,7 +60,7 @@ tbox/
 │   ├── stores/              # Pinia（tools / conversations / llm / …）
 │   └── router/main.ts
 ├── src-tauri/src/
-│   ├── agent/               # 工具注册表、Skill、Agent 循环、sidecar
+│   ├── agent/               # 工具注册表、Skill、Agent 循环、嵌入式 LLM 引擎
 │   ├── commands/            # Tauri invoke 命令
 │   ├── skills/              # 预置 Skill 文档
 │   └── lib.rs

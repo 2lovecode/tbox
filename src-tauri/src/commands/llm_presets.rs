@@ -15,9 +15,14 @@ pub struct LlmPreset {
 }
 
 const TBOX_OWN: &[LlmPreset] = &[
-    LlmPreset { id: "local", label: "本地（内置 sidecar）", default_base_url: "", default_model: "", default_protocol: LlmProtocol::OpenaiChat, requires_oauth: false },
+    LlmPreset { id: "local", label: "本地（内置引擎）", default_base_url: "", default_model: "", default_protocol: LlmProtocol::OpenaiChat, requires_oauth: false },
     LlmPreset { id: "ollama", label: "Ollama", default_base_url: "http://127.0.0.1:11434", default_model: "llama3.2", default_protocol: LlmProtocol::OllamaNative, requires_oauth: false },
     LlmPreset { id: "custom", label: "自定义端点", default_base_url: "", default_model: "", default_protocol: LlmProtocol::OpenaiChat, requires_oauth: false },
+    // MiniMax official endpoints. Anthropic-compatible route is the coding
+    // plan endpoint; /v1 is the OpenAI-compatible chat completions API.
+    LlmPreset { id: "minimax", label: "MiniMax（Anthropic 兼容）", default_base_url: "https://api.minimax.io/anthropic", default_model: "MiniMax-M2", default_protocol: LlmProtocol::AnthropicMessages, requires_oauth: false },
+    LlmPreset { id: "minimax-openai", label: "MiniMax（OpenAI 兼容）", default_base_url: "https://api.minimax.io/v1", default_model: "MiniMax-M2", default_protocol: LlmProtocol::OpenaiChat, requires_oauth: false },
+    LlmPreset { id: "minimax-cn", label: "MiniMax 国内（OpenAI 兼容）", default_base_url: "https://api.minimaxi.com/v1", default_model: "MiniMax-M2", default_protocol: LlmProtocol::OpenaiChat, requires_oauth: false },
 ];
 
 const CC_SWITCH: &[LlmPreset] = &[

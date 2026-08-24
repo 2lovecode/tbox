@@ -61,18 +61,22 @@ pub fn run() {
         .setup(|app| {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
-            // Default shortcuts registered at startup. Ctrl+Space works on
-            // every platform; on macOS we also try Cmd+Shift+Space because
-            // Cmd+Space is already claimed by the system Spotlight. The
-            // plugin logs and skips any shortcut that fails to register
-            // (e.g. due to OS conflicts).
+            // Give the embedded LLM engine an app handle for status events.
+            agent::embedded_engine::set_app_handle(app.handle().clone());
+
+            // Default shortcuts registered at startup. Ctrl+Space is NOT
+            // registered: it conflicts with common IME toggle habits. macOS
+            // uses Cmd+Shift+Space (Cmd+Space is claimed by the system
+            // Spotlight); other platforms use Ctrl+Shift+Space. The plugin
+            // logs and skips any shortcut that fails to register (e.g. due
+            // to OS conflicts).
             let defaults: Vec<Shortcut> = if cfg!(target_os = "macos") {
-                vec![
-                    Shortcut::new(Some(Modifiers::CONTROL), Code::Space),
-                    Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space),
-                ]
+                vec![Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::Space)]
             } else {
-                vec![Shortcut::new(Some(Modifiers::CONTROL), Code::Space)]
+                vec![Shortcut::new(
+                    Some(Modifiers::CONTROL | Modifiers::SHIFT),
+                    Code::Space,
+                )]
             };
 
             for shortcut in defaults {
@@ -162,6 +166,7 @@ pub fn run() {
             commands::agent::check_llm_ready,
             commands::agent::send_chat_turn,
             commands::agent::cancel_chat_turn,
+            commands::agent::get_engine_status,
 
             // 本地模型目录
             commands::model_catalog::list_local_models,

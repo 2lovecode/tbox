@@ -5,4 +5,4 @@ pub mod llm;
 pub mod registry;
 pub mod skills;
 pub mod r#loop;
-pub mod sidecar;
+pub mod embedded_engine;

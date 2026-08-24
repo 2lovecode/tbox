@@ -6,7 +6,6 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::agent::genai_model::build_from_disk;
 use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn, AgentError};
 use crate::agent::r#loop::{run_agent, AgentEvent};
 
@@ -106,7 +105,7 @@ pub fn llm_is_ready() -> Result<(), String> {
     if mock_agent_enabled() {
         return Ok(());
     }
-    match build_from_disk() {
+    match crate::agent::llm::build_model_from_disk() {
         Ok(_) => Ok(()),
         Err(AgentError::LlmUnavailable) => Err(LLM_UNAVAILABLE.to_string()),
         Err(AgentError::Other(e)) => Err(e),
@@ -196,15 +195,14 @@ pub async fn send_chat_turn(
                 emit,
             )
         } else {
-            match build_from_disk() {
+            match crate::agent::llm::build_model_from_disk() {
                 Ok(mut model) => run_agent(
-                    &mut model,
+                    model.as_mut(),
                     &conv_id,
                     &user_text,
                     cancel_flag.as_ref(),
                     emit,
-                ),
-                Err(AgentError::LlmUnavailable) => {
+                ),                Err(AgentError::LlmUnavailable) => {
                     let payload = wire_event(
                         conv_id.clone(),
                         AgentEvent::Error {
@@ -231,4 +229,25 @@ pub async fn send_chat_turn(
 pub fn cancel_chat_turn(cancel_state: State<'_, AgentCancel>) -> Result<(), String> {
     cancel_state.0.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// Engine load status + which local backend is currently effective, for the
+/// settings page (`engine:status` events carry the same data on change).
+#[tauri::command]
+pub fn get_engine_status() -> serde_json::Value {
+    use crate::agent::llm::effective_local_backend;
+    let cfg = crate::commands::llm::get_llm_config();
+    let backend = if cfg.is_local() {
+        match effective_local_backend() {
+            Some(crate::agent::llm::LocalBackend::Embedded) => "embedded",
+            Some(crate::agent::llm::LocalBackend::Ollama) => "ollama",
+            None => "unavailable",
+        }
+    } else {
+        "cloud"
+    };
+    serde_json::json!({
+        "engine": crate::agent::embedded_engine::engine().status(),
+        "effectiveBackend": backend,
+    })
 }

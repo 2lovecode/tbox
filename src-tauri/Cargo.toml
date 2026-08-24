@@ -95,6 +95,13 @@ once_cell = "1.19"
 jieba-rs = "0.6"
 genai = "0.6"
 
+# 嵌入式本地 LLM 推理（llama.cpp Rust 绑定，进程内推理）。
+# Apple Silicon 走 Metal GPU（target-specific）；其余平台默认 CPU。
+llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler"] }
+
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler", "metal"] }
+
 [dev-dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 

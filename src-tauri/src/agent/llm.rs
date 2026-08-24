@@ -435,3 +435,43 @@ mod tests {
         assert!(resolve_backend(&cfg, None).is_ok());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unified model factory
+// ---------------------------------------------------------------------------
+
+/// Which concrete backend a locally-resolved model will run on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalBackend {
+    Embedded,
+    Ollama,
+}
+
+/// Resolve the effective local backend WITHOUT building a model: embedded
+/// when a catalog GGUF is installed, else Ollama when its port answers with
+/// at least one model, else `None` (local LLM unavailable).
+pub fn effective_local_backend() -> Option<LocalBackend> {
+    if model_catalog::enabled_model_path().is_some() {
+        return Some(LocalBackend::Embedded);
+    }
+    if super::genai_model::ollama_available_with_model() {
+        return Some(LocalBackend::Ollama);
+    }
+    None
+}
+
+/// Build the chat model for the CURRENT config: embedded engine for `local`
+/// with an installed GGUF, genai (HTTP) for everything else (including the
+/// local→Ollama fallback inside genai's resolver).
+pub fn build_model_from_disk() -> Result<Box<dyn ChatModel>, AgentError> {
+    let cfg = get_llm_config();
+    if cfg.is_local() {
+        if let Some(path) = model_catalog::enabled_model_path() {
+            return Ok(Box::new(super::embedded_engine::EmbeddedChatModel::new(path)));
+        }
+        // No installed GGUF: fall through to genai (Ollama fallback) which
+        // errors with LlmUnavailable when nothing is reachable.
+    }
+    let model = super::genai_model::build_from_disk()?;
+    Ok(Box::new(model))
+}
