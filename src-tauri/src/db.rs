@@ -27,6 +27,7 @@ pub fn open_connection() -> Result<Connection, String> {
 
 /// Convenience wrapper that opens a connection, runs `f`, and propagates the
 /// error as a `String` so it can be returned directly from a Tauri command.
+#[allow(dead_code)]
 pub fn with_connection<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&Connection) -> Result<T, rusqlite::Error>,

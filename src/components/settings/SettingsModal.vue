@@ -22,6 +22,11 @@ interface ModelDownloadProgress {
   total: number;
 }
 
+interface ModelDownloadFailed {
+  id: string;
+  error: string;
+}
+
 const settingsStore = useSettingsStore();
 const llmStore = useLlmStore();
 const { confirm: confirmDialog } = useConfirm();
@@ -43,7 +48,9 @@ const {
 const panelRef = ref<HTMLDivElement | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
 const downloadProgress = ref<Record<string, ModelDownloadProgress>>({});
+const downloadError = ref<string | null>(null);
 let unlistenDownload: UnlistenFn | null = null;
+let unlistenDownloadFailed: UnlistenFn | null = null;
 
 async function refreshLocalModels() {
   try {
@@ -72,10 +79,19 @@ onMounted(async () => {
   }
   unlistenDownload = await listen<ModelDownloadProgress>('model-download-progress', (event) => {
     const p = event.payload;
+    downloadError.value = null;
     downloadProgress.value = { ...downloadProgress.value, [p.id]: p };
     if (p.total > 0 && p.received >= p.total) {
       void refreshLocalModels();
     }
+  });
+  unlistenDownloadFailed = await listen<ModelDownloadFailed>('model-download-failed', (event) => {
+    const { id, error } = event.payload;
+    const next = { ...downloadProgress.value };
+    delete next[id];
+    downloadProgress.value = next;
+    downloadError.value = error;
+    console.error('[settings] model download failed:', error);
   });
 });
 
@@ -83,6 +99,10 @@ onBeforeUnmount(() => {
   if (unlistenDownload) {
     unlistenDownload();
     unlistenDownload = null;
+  }
+  if (unlistenDownloadFailed) {
+    unlistenDownloadFailed();
+    unlistenDownloadFailed = null;
   }
 });
 
@@ -125,8 +145,10 @@ const llmStatusClass = computed(() => {
 
 async function startDownload(id: string) {
   try {
+    downloadError.value = null;
     await invoke('start_model_download', { id });
   } catch (error) {
+    downloadError.value = String(error);
     console.error('[settings] start_model_download failed:', error);
   }
 }
@@ -267,7 +289,8 @@ async function resetLlm() {
                       </div>
                     </li>
                   </ul>
-                  <span class="field-hint">模型保存到 ~/.toolbox/models；下载失败不会标记为已安装。</span>
+                  <p v-if="downloadError" class="state-line error">{{ downloadError }}</p>
+                  <span class="field-hint">模型保存到 ~/.toolbox/models；下载失败不会标记为已安装。直连 Hugging Face 失败时会自动尝试 hf-mirror.com。</span>
                 </div>
 
                 <label v-if="!isLocalProvider" class="field">
