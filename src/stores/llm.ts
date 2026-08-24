@@ -1,74 +1,78 @@
 import { defineStore } from 'pinia';
 import { invoke } from '@tauri-apps/api/core';
 import {
-  getProviderMeta,
-  LLM_PROVIDERS,
   type LlmConfig,
-  type LlmProviderId,
+  type LlmPresetMeta,
+  type LlmProtocolId,
   type LlmTestResult,
 } from '@/types/llm';
 
-/**
- * LLM configuration store.
- *
- * Owns the user's selected LLM provider / base URL / model / API key
- * presence. The actual key never leaves the Rust process — the backend
- * returns `hasApiKey` as a boolean only, and accepts the key as an
- * argument when saving.
- *
- * `apiKeyDraft` is intentionally local-to-the-form (not persisted): the
- * user types it in the modal, hits save, and it goes straight to the
- * backend. We keep the draft in store state so the password-style input
- * survives tab switches inside the modal.
- */
 export const useLlmStore = defineStore('llm', {
   state: () => ({
     config: {
-      provider: 'local' as LlmProviderId,
+      provider: 'local',
+      protocol: 'openai_chat' as LlmProtocolId,
       baseUrl: '',
       model: '',
       hasApiKey: false,
     } as LlmConfig,
-    /** In-progress API key typed by the user, never persisted. */
+    presets: [] as LlmPresetMeta[],
     apiKeyDraft: '',
-    /** Show the API key input as plain text instead of dots. */
     revealApiKey: false,
     isLoading: false,
     isSaving: false,
     isTesting: false,
     lastError: null as string | null,
-    /** Result of the most recent `testConnection` call. */
     testResult: null as LlmTestResult | null,
   }),
   getters: {
-    providerMeta: (state) => getProviderMeta(state.config?.provider),
+    currentPreset(state): LlmPresetMeta | undefined {
+      return state.presets.find((p) => p.id === state.config.provider);
+    },
+    isLocalProvider: (state) => state.config.provider === 'local',
+    isOllamaProvider: (state) => state.config.provider === 'ollama',
+    isOAuthPreset(): boolean {
+      return this.currentPreset?.requiresOauth ?? false;
+    },
     isConfigured: (state) => {
-      if (state.config?.provider === 'local') {
+      if (state.config.provider === 'local' || state.config.provider === 'ollama') {
         return true;
       }
-      const baseUrl = state.config?.baseUrl ?? '';
-      const model = state.config?.model ?? '';
+      const baseUrl = state.config.baseUrl ?? '';
+      const model = state.config.model ?? '';
       return baseUrl.trim().length > 0 && model.trim().length > 0;
     },
-    canSave: (state) => {
-      if (state.config?.provider === 'local') {
-        // Local models are selected via download UI (Task 5.2); saving
-        // provider=local alone is always valid.
-        return true;
+    canSave(state): boolean {
+      if (state.config.provider === 'local') return true;
+      if (this.isOAuthPreset) return false;
+      if (state.config.provider === 'ollama') {
+        return (state.config.model ?? '').trim().length > 0;
       }
-      const baseUrl = state.config?.baseUrl ?? '';
-      const model = state.config?.model ?? '';
+      const baseUrl = state.config.baseUrl ?? '';
+      const model = state.config.model ?? '';
       if (!baseUrl.trim() || !model.trim()) return false;
-      // Either the user is supplying a new key, or one is already on disk.
-      return state.apiKeyDraft.trim().length > 0 || !!state.config?.hasApiKey;
+      return state.apiKeyDraft.trim().length > 0 || !!state.config.hasApiKey;
     },
   },
   actions: {
+    async loadPresets() {
+      try {
+        this.presets = await invoke<LlmPresetMeta[]>('list_llm_presets');
+      } catch (error) {
+        console.error('[llm] list_llm_presets failed:', error);
+      }
+    },
+
     async loadConfig() {
       this.isLoading = true;
       this.lastError = null;
       try {
+        await this.loadPresets();
         this.config = await invoke<LlmConfig>('get_llm_config');
+        if (!this.config.protocol) {
+          const preset = this.presets.find((p) => p.id === this.config.provider);
+          this.config.protocol = preset?.defaultProtocol ?? 'openai_chat';
+        }
         this.apiKeyDraft = '';
       } catch (error) {
         console.error('[llm] failed to load config:', error);
@@ -78,39 +82,33 @@ export const useLlmStore = defineStore('llm', {
       }
     },
 
-    /** When the user changes the provider, pre-fill the base URL / model
-     * fields with the built-in defaults. Only fires when the current
-     * values are empty *or* already match one of the built-in providers,
-     * so we never clobber a custom value the user has typed. */
-    applyProviderDefaults(provider: LlmProviderId) {
-      this.config.provider = provider;
-      const meta = getProviderMeta(provider);
-      const otherDefaults = LLM_PROVIDERS
-        .filter((p) => p.id !== provider)
-        .flatMap((p) => [p.defaultBaseUrl, p.defaultModel])
-        .filter((v): v is string => Boolean(v));
-      const isBuiltIn =
-        otherDefaults.includes(this.config.baseUrl) || this.config.baseUrl === '';
-      if (isBuiltIn && meta.defaultBaseUrl) {
-        this.config.baseUrl = meta.defaultBaseUrl;
-      }
-      const modelIsBuiltIn =
-        otherDefaults.includes(this.config.model) || this.config.model === '';
-      if (modelIsBuiltIn && meta.defaultModel) {
-        this.config.model = meta.defaultModel;
-      }
+    applyPreset(presetId: string) {
+      const preset = this.presets.find((p) => p.id === presetId);
+      this.config.provider = presetId;
+      if (!preset) return;
+      if (preset.defaultBaseUrl) this.config.baseUrl = preset.defaultBaseUrl;
+      if (preset.defaultModel) this.config.model = preset.defaultModel;
+      this.config.protocol = preset.defaultProtocol;
+    },
+
+    setProtocol(protocol: LlmProtocolId) {
+      this.config.protocol = protocol;
     },
 
     async save() {
+      if (this.isOAuthPreset) {
+        this.lastError = '该提供商需要 OAuth，当前版本暂不支持';
+        return;
+      }
       this.isSaving = true;
       this.lastError = null;
       try {
         const trimmedKey = this.apiKeyDraft.trim();
         const payload = {
           provider: this.config.provider,
+          protocol: this.config.protocol ?? null,
           baseUrl: this.config.baseUrl.trim(),
           model: this.config.model.trim(),
-          // `null` (not empty string) tells the backend "leave existing key".
           apiKey: trimmedKey.length > 0 ? trimmedKey : null,
         };
         this.config = await invoke<LlmConfig>('save_llm_config', { input: payload });
@@ -146,6 +144,7 @@ export const useLlmStore = defineStore('llm', {
         await invoke('delete_llm_config');
         this.config = {
           provider: 'local',
+          protocol: 'openai_chat',
           baseUrl: '',
           model: '',
           hasApiKey: false,
@@ -165,7 +164,6 @@ export const useLlmStore = defineStore('llm', {
       this.lastError = null;
       this.testResult = null;
       try {
-        // Test reads the *saved* config, so flush the draft first if any.
         if (this.apiKeyDraft.trim().length > 0) {
           await this.save();
         }

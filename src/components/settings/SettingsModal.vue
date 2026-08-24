@@ -5,8 +5,9 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useSettingsStore } from '@/stores/settings';
 import { useLlmStore } from '@/stores/llm';
-import { LLM_PROVIDERS, type LlmProviderId } from '@/types/llm';
+import { LLM_PROTOCOLS, type LlmProtocolId } from '@/types/llm';
 import { useConfirm } from '@/composables/useConfirm';
+import ProgressBar from '@/components/ProgressBar.vue';
 
 interface LocalModelInfo {
   id: string;
@@ -22,9 +23,11 @@ interface ModelDownloadProgress {
   total: number;
 }
 
-interface ModelDownloadFailed {
-  id: string;
-  error: string;
+interface OllamaPullProgress {
+  name: string;
+  completed: number;
+  total: number;
+  status: string;
 }
 
 const settingsStore = useSettingsStore();
@@ -33,6 +36,7 @@ const { confirm: confirmDialog } = useConfirm();
 const { isOpen, activeTab } = storeToRefs(settingsStore);
 const {
   config: llmConfig,
+  presets,
   apiKeyDraft,
   revealApiKey,
   isLoading: isLoadingLlm,
@@ -42,15 +46,33 @@ const {
   testResult,
   canSave,
   isConfigured,
-  providerMeta,
+  currentPreset,
+  isLocalProvider,
+  isOllamaProvider,
+  isOAuthPreset,
 } = storeToRefs(llmStore);
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
 const downloadProgress = ref<Record<string, ModelDownloadProgress>>({});
-const downloadError = ref<string | null>(null);
+const downloadFeedback = ref<Record<string, string>>({});
+const presetFilter = ref('');
+const ollamaPullProgress = ref<OllamaPullProgress | null>(null);
+const ollamaPullFeedback = ref<string | null>(null);
 let unlistenDownload: UnlistenFn | null = null;
-let unlistenDownloadFailed: UnlistenFn | null = null;
+let unlistenDownloadOk: UnlistenFn | null = null;
+let unlistenDownloadFail: UnlistenFn | null = null;
+let unlistenOllamaProgress: UnlistenFn | null = null;
+let unlistenOllamaOk: UnlistenFn | null = null;
+let unlistenOllamaFail: UnlistenFn | null = null;
+
+const filteredPresets = computed(() => {
+  const q = presetFilter.value.trim().toLowerCase();
+  if (!q) return presets.value;
+  return presets.value.filter(
+    (p) => p.label.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
+  );
+});
 
 async function refreshLocalModels() {
   try {
@@ -79,30 +101,52 @@ onMounted(async () => {
   }
   unlistenDownload = await listen<ModelDownloadProgress>('model-download-progress', (event) => {
     const p = event.payload;
-    downloadError.value = null;
     downloadProgress.value = { ...downloadProgress.value, [p.id]: p };
-    if (p.total > 0 && p.received >= p.total) {
-      void refreshLocalModels();
-    }
   });
-  unlistenDownloadFailed = await listen<ModelDownloadFailed>('model-download-failed', (event) => {
-    const { id, error } = event.payload;
+  unlistenDownloadOk = await listen<{ id: string }>('model-download-succeeded', (event) => {
+    const { id } = event.payload;
+    downloadFeedback.value = { ...downloadFeedback.value, [id]: '下载成功' };
     const next = { ...downloadProgress.value };
     delete next[id];
     downloadProgress.value = next;
-    downloadError.value = error;
-    console.error('[settings] model download failed:', error);
+    void refreshLocalModels();
   });
+  unlistenDownloadFail = await listen<{ id: string; message: string }>(
+    'model-download-failed',
+    (event) => {
+      const { id, message } = event.payload;
+      downloadFeedback.value = { ...downloadFeedback.value, [id]: `下载失败：${message}` };
+      const next = { ...downloadProgress.value };
+      delete next[id];
+      downloadProgress.value = next;
+    },
+  );
+  unlistenOllamaProgress = await listen<OllamaPullProgress>('ollama-pull-progress', (event) => {
+    ollamaPullProgress.value = event.payload;
+  });
+  unlistenOllamaOk = await listen<{ name: string }>('ollama-pull-succeeded', (event) => {
+    ollamaPullFeedback.value = `模型 ${event.payload.name} 拉取成功`;
+    ollamaPullProgress.value = null;
+  });
+  unlistenOllamaFail = await listen<{ name: string; message: string }>(
+    'ollama-pull-failed',
+    (event) => {
+      ollamaPullFeedback.value = `拉取失败：${event.payload.message}`;
+      ollamaPullProgress.value = null;
+    },
+  );
 });
 
 onBeforeUnmount(() => {
-  if (unlistenDownload) {
-    unlistenDownload();
-    unlistenDownload = null;
-  }
-  if (unlistenDownloadFailed) {
-    unlistenDownloadFailed();
-    unlistenDownloadFailed = null;
+  for (const fn of [
+    unlistenDownload,
+    unlistenDownloadOk,
+    unlistenDownloadFail,
+    unlistenOllamaProgress,
+    unlistenOllamaOk,
+    unlistenOllamaFail,
+  ]) {
+    fn?.();
   }
 });
 
@@ -118,46 +162,89 @@ function close() {
 }
 
 function onProviderChange(event: Event) {
-  const value = (event.target as HTMLSelectElement).value as LlmProviderId;
-  llmStore.applyProviderDefaults(value);
+  const value = (event.target as HTMLSelectElement).value;
+  llmStore.applyPreset(value);
 }
 
-const isLocalProvider = computed(() => llmConfig.value?.provider === 'local');
+function onProtocolChange(event: Event) {
+  llmStore.setProtocol((event.target as HTMLSelectElement).value as LlmProtocolId);
+}
+
+function downloadPercent(id: string): number {
+  const p = downloadProgress.value[id];
+  if (!p?.total) return 0;
+  return Math.min(100, Math.round((p.received / p.total) * 100));
+}
+
+function ollamaPercent(): number {
+  const p = ollamaPullProgress.value;
+  if (!p?.total) return 0;
+  return Math.min(100, Math.round((p.completed / p.total) * 100));
+}
 
 const llmStatusLabel = computed(() => {
+  if (isOAuthPreset.value) return '需 OAuth（暂不支持）';
   if (isLocalProvider.value) {
     const installed = localModels.value.some((m) => m.installed);
     return installed ? '本地模型已就绪' : '需下载本地模型';
   }
+  if (isOllamaProvider.value) return llmConfig.value.model ? 'Ollama 已配置' : '需填写模型名';
   if (!isConfigured.value) return '未配置';
   if (!llmConfig.value.hasApiKey) return '缺少 API Key';
   return '已配置';
 });
 
 const llmStatusClass = computed(() => {
+  if (isOAuthPreset.value) return 'warn';
   if (isLocalProvider.value) {
     return localModels.value.some((m) => m.installed) ? 'ok' : 'warn';
   }
+  if (isOllamaProvider.value) return llmConfig.value.model ? 'ok' : 'warn';
   if (!isConfigured.value) return 'muted';
   if (!llmConfig.value.hasApiKey) return 'warn';
   return 'ok';
 });
 
+const showRemoteFields = computed(
+  () => !isLocalProvider.value && !isOllamaProvider.value && !isOAuthPreset.value,
+);
+
+const showApiKey = computed(() => showRemoteFields.value);
+
+function modelLabel(id: string): string {
+  return localModels.value.find((m) => m.id === id)?.label ?? id;
+}
+
 async function startDownload(id: string) {
+  downloadFeedback.value = { ...downloadFeedback.value, [id]: '' };
   try {
-    downloadError.value = null;
     await invoke('start_model_download', { id });
   } catch (error) {
-    downloadError.value = String(error);
-    console.error('[settings] start_model_download failed:', error);
+    downloadFeedback.value = {
+      ...downloadFeedback.value,
+      [id]: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
 async function cancelDownload(id: string) {
   try {
     await invoke('cancel_model_download', { id });
+    downloadFeedback.value = { ...downloadFeedback.value, [id]: '已取消' };
   } catch (error) {
     console.error('[settings] cancel_model_download failed:', error);
+  }
+}
+
+async function startOllamaPull() {
+  ollamaPullFeedback.value = null;
+  try {
+    await invoke('start_ollama_pull', {
+      name: llmConfig.value.model,
+      baseUrl: llmConfig.value.baseUrl || null,
+    });
+  } catch (error) {
+    ollamaPullFeedback.value = error instanceof Error ? error.message : String(error);
   }
 }
 
@@ -243,20 +330,48 @@ async function resetLlm() {
               <div class="form-grid">
                 <label class="field">
                   <span class="field-label">提供方</span>
+                  <input
+                    v-if="presets.length > 30"
+                    v-model.trim="presetFilter"
+                    class="field-input"
+                    type="search"
+                    placeholder="筛选提供商…"
+                    autocomplete="off"
+                  />
                   <select
                     class="field-input"
                     :value="llmConfig.provider"
                     @change="onProviderChange"
                   >
                     <option
-                      v-for="p in LLM_PROVIDERS"
+                      v-for="p in filteredPresets"
                       :key="p.id"
                       :value="p.id"
+                      :disabled="p.requiresOauth"
                     >
-                      {{ p.label }}
+                      {{ p.label }}{{ p.requiresOauth ? '（OAuth 暂不支持）' : '' }}
                     </option>
                   </select>
-                  <span class="field-hint">{{ providerMeta.description }}</span>
+                  <span v-if="isOAuthPreset" class="field-hint error">
+                    该提供商需要 OAuth 登录，当前版本仅展示预设，无法保存为可用后端。
+                  </span>
+                  <span v-else-if="currentPreset" class="field-hint">
+                    {{ currentPreset.defaultBaseUrl || '本地 / 自定义端点' }}
+                  </span>
+                </label>
+
+                <label v-if="!isOAuthPreset" class="field">
+                  <span class="field-label">协议</span>
+                  <select
+                    class="field-input"
+                    :value="llmConfig.protocol"
+                    @change="onProtocolChange"
+                  >
+                    <option v-for="proto in LLM_PROTOCOLS" :key="proto.id" :value="proto.id">
+                      {{ proto.label }}
+                    </option>
+                  </select>
+                  <span class="field-hint">可与提供商默认不同；中转站请按实际 API 选择。</span>
                 </label>
 
                 <div v-if="isLocalProvider" class="field local-models">
@@ -270,10 +385,13 @@ async function resetLlm() {
                       </div>
                       <div class="model-actions">
                         <template v-if="downloadProgress[m.id] && !m.installed">
-                          <span class="progress-text">
-                            {{ formatBytes(downloadProgress[m.id].received) }} /
-                            {{ formatBytes(downloadProgress[m.id].total || m.sizeBytes) }}
-                          </span>
+                          <div class="download-progress-wrap">
+                            <ProgressBar :progress="downloadPercent(m.id)" show-text />
+                            <span class="progress-text">
+                              {{ formatBytes(downloadProgress[m.id].received) }} /
+                              {{ formatBytes(downloadProgress[m.id].total || m.sizeBytes) }}
+                            </span>
+                          </div>
                           <button type="button" class="btn ghost" @click="cancelDownload(m.id)">
                             取消
                           </button>
@@ -289,11 +407,52 @@ async function resetLlm() {
                       </div>
                     </li>
                   </ul>
-                  <p v-if="downloadError" class="state-line error">{{ downloadError }}</p>
-                  <span class="field-hint">模型保存到 ~/.toolbox/models；下载失败不会标记为已安装。直连 Hugging Face 失败时会自动尝试 hf-mirror.com。</span>
+                  <p
+                    v-for="(msg, mid) in downloadFeedback"
+                    :key="mid"
+                    v-show="msg"
+                    :class="['state-line', msg.includes('成功') ? 'ok' : msg.includes('失败') || msg.includes('取消') ? 'error' : '']"
+                  >
+                    {{ modelLabel(String(mid)) }}：{{ msg }}
+                  </p>
+                  <span class="field-hint">模型保存到 ~/.toolbox/models；下载失败不会标记为已安装。</span>
                 </div>
 
-                <label v-if="!isLocalProvider" class="field">
+                <div v-if="isOllamaProvider && !isOAuthPreset" class="field local-models">
+                  <span class="field-label">Ollama 模型</span>
+                  <label class="field">
+                    <span class="field-label">Base URL</span>
+                    <input
+                      v-model.trim="llmConfig.baseUrl"
+                      class="field-input"
+                      type="text"
+                      placeholder="http://127.0.0.1:11434"
+                    />
+                  </label>
+                  <label class="field">
+                    <span class="field-label">模型名</span>
+                    <input
+                      v-model.trim="llmConfig.model"
+                      class="field-input"
+                      type="text"
+                      placeholder="llama3.2"
+                    />
+                  </label>
+                  <div class="model-actions">
+                    <button type="button" class="btn primary" @click="startOllamaPull">
+                      拉取模型
+                    </button>
+                  </div>
+                  <div v-if="ollamaPullProgress" class="download-progress-wrap">
+                    <ProgressBar :progress="ollamaPercent()" show-text />
+                    <span class="progress-text">{{ ollamaPullProgress.status }}</span>
+                  </div>
+                  <p v-if="ollamaPullFeedback" class="state-line" :class="ollamaPullFeedback.includes('成功') ? 'ok' : 'error'">
+                    {{ ollamaPullFeedback }}
+                  </p>
+                </div>
+
+                <label v-if="showRemoteFields" class="field">
                   <span class="field-label">Base URL</span>
                   <input
                     class="field-input"
@@ -302,12 +461,12 @@ async function resetLlm() {
                     autocomplete="off"
                     spellcheck="false"
                     v-model.trim="llmConfig.baseUrl"
-                    :placeholder="providerMeta.defaultBaseUrl ?? 'https://your-endpoint/v1'"
+                    :placeholder="currentPreset?.defaultBaseUrl || 'https://your-endpoint/v1'"
                   />
                   <span class="field-hint">OpenAI 兼容端点；自定义请填写完整 URL（不含尾部路径）。</span>
                 </label>
 
-                <label v-if="!isLocalProvider" class="field">
+                <label v-if="showRemoteFields" class="field">
                   <span class="field-label">模型</span>
                   <input
                     class="field-input"
@@ -315,12 +474,12 @@ async function resetLlm() {
                     autocomplete="off"
                     spellcheck="false"
                     v-model.trim="llmConfig.model"
-                    :placeholder="providerMeta.defaultModel ?? 'model-name'"
+                    :placeholder="currentPreset?.defaultModel || 'model-name'"
                   />
                   <span class="field-hint">填写该提供方下你想使用的模型标识。</span>
                 </label>
 
-                <div v-if="!isLocalProvider" class="field">
+                <div v-if="showApiKey" class="field">
                   <span class="field-label">
                     API Key
                     <span v-if="llmConfig.hasApiKey && !apiKeyDraft" class="status-pill ok inline">
@@ -362,8 +521,8 @@ async function resetLlm() {
                 <button
                   type="button"
                   class="btn btn-secondary"
-                  :disabled="!providerMeta.supportsConnectionTest || isTestingLlm || isSavingLlm"
-                  :title="providerMeta.supportsConnectionTest ? '使用当前保存的 Key 测试连通性' : '该提供方不支持连接测试'"
+                  :disabled="isOAuthPreset || isTestingLlm || isSavingLlm"
+                  title="使用当前保存的配置测试连通性"
                   @click="llmStore.testConnection()"
                 >
                   <i v-if="isTestingLlm" class="fas fa-spinner fa-spin" aria-hidden="true"></i>
@@ -731,6 +890,19 @@ select.field-input {
 .progress-text {
   font-size: 11px;
   color: #64748b;
+}
+
+.download-progress-wrap {
+  flex: 1;
+  min-width: 120px;
+}
+
+.state-line.ok {
+  color: #15803d;
+}
+
+.state-line.error {
+  color: #b91c1c;
 }
 
 .api-key-row {

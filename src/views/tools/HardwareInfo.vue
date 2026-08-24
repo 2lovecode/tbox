@@ -113,7 +113,7 @@ async function refresh() {
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     errorMsg.value = msg
-    toast(msg, 'error')
+    toast.error(msg)
   } finally {
     loading.value = false
   }

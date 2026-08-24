@@ -1,0 +1,610 @@
+[
+  {
+    "id": "claude-official",
+    "label": "Claude Official",
+    "base": "https://api.moonshot.cn/anthropic",
+    "model": "kimi-k2.7-code",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "kimi",
+    "label": "Kimi",
+    "base": "https://api.moonshot.cn/anthropic",
+    "model": "kimi-k2.7-code",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "kimi-for-coding",
+    "label": "Kimi For Coding",
+    "base": "https://api.kimi.com/coding/",
+    "model": "kimi-for-coding",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "packycode",
+    "label": "PackyCode",
+    "base": "https://www.packyapi.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "zetaapi",
+    "label": "ZetaAPI",
+    "base": "https://api.zetaapi.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "apinebula",
+    "label": "APINebula",
+    "base": "https://apinebula.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "aicodemirror",
+    "label": "AICodeMirror",
+    "base": "https://api.aicodemirror.ai/api/claudecode",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "patewayai",
+    "label": "PatewayAI",
+    "base": "https://api.pateway.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "fennoai",
+    "label": "FennoAI",
+    "base": "https://api.fenno.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "runapi",
+    "label": "RunAPI",
+    "base": "https://runapi.host",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "shengsuanyun",
+    "label": "Shengsuanyun",
+    "base": "https://router.shengsuanyun.com/api",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "aigocode",
+    "label": "AIGoCode",
+    "base": "https://api.aigocode.app",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "qiniu",
+    "label": "Qiniu",
+    "base": "https://api.qnaigc.com",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "aicoding",
+    "label": "AICoding",
+    "base": "https://api.aicoding.inc",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "subrouter",
+    "label": "SubRouter",
+    "base": "https://subrouter.ai",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "apikey-fun",
+    "label": "APIKEY.FUN",
+    "base": "https://api.apikey.fun",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "claudeapi",
+    "label": "ClaudeAPI",
+    "base": "https://gw.apito.ai",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "code0",
+    "label": "Code0",
+    "base": "https://code0.ai",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "teamorouter",
+    "label": "TeamoRouter",
+    "base": "https://api.teamorouter.com",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "ppio",
+    "label": "PPIO",
+    "base": "https://api.ppio.com/anthropic",
+    "model": "deepseek/deepseek-v4-flash-0731",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "claudecn",
+    "label": "ClaudeCN",
+    "base": "https://claudecn.top",
+    "model": "ark-code-latest",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "agent-plan",
+    "label": "火山 Agent Plan",
+    "base": "https://ark.cn-beijing.volces.com/api/plan",
+    "model": "ark-code-latest",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "coding-plan",
+    "label": "火山 Coding Plan",
+    "base": "https://ark.cn-beijing.volces.com/api/coding",
+    "model": "ark-code-latest",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "byteplus",
+    "label": "BytePlus",
+    "base": "https://ark.ap-southeast.bytepluses.com/api/coding",
+    "model": "ark-code-latest",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "doubaoseed",
+    "label": "DouBaoSeed",
+    "base": "https://ark.cn-beijing.volces.com/api/compatible",
+    "model": "doubao-seed-2-1-pro-260628",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "siliconflow",
+    "label": "SiliconFlow",
+    "base": "https://api.siliconflow.cn",
+    "model": "Pro/MiniMaxAI/MiniMax-M2.5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "siliconflow-en",
+    "label": "SiliconFlow en",
+    "base": "https://api.siliconflow.com",
+    "model": "MiniMaxAI/MiniMax-M3",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "a6api",
+    "label": "A6API",
+    "base": "https://api.a6api.com",
+    "model": "zai-org/glm-5.1",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "atlascloud",
+    "label": "AtlasCloud",
+    "base": "https://api.atlascloud.ai",
+    "model": "zai-org/glm-5.1",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "compshare",
+    "label": "Compshare",
+    "base": "https://api.modelverse.cn",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "compshare-coding-plan",
+    "label": "Compshare Coding Plan",
+    "base": "https://cp.compshare.cn",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "ccsub",
+    "label": "CCSub",
+    "base": "https://www.ccsub.net",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "sssaicode",
+    "label": "SSSAiCode",
+    "base": "https://node-hk.sssaicodeapi.com/api",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "micu",
+    "label": "Micu",
+    "base": "https://www.micuapi.ai",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "rightcode",
+    "label": "RightCode",
+    "base": "https://www.rightapi.ai/claude",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "etok-ai",
+    "label": "ETok.ai",
+    "base": "https://api.etok.ai",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "cubence",
+    "label": "Cubence",
+    "base": "https://api.cubence.com",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "crazyrouter",
+    "label": "CrazyRouter",
+    "base": "https://cn.crazyrouter.com",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "dmxapi",
+    "label": "DMXAPI",
+    "base": "https://www.dmxapi.cn",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "sudocode-chat",
+    "label": "SudoCode.chat",
+    "base": "https://api.sudocode.chat",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "sudocode-us",
+    "label": "SudoCode.us",
+    "base": "https://sudocode.us",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "xycai",
+    "label": "XycAi",
+    "base": "https://apicdn.xycai.us",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "amux",
+    "label": "Amux",
+    "base": "https://api.amux.ai",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "gemini-native",
+    "label": "Gemini Native",
+    "base": "https://generativelanguage.googleapis.com",
+    "model": "gemini-3.6-flash",
+    "api": "gemini_native",
+    "oauth": false
+  },
+  {
+    "id": "deepseek",
+    "label": "DeepSeek",
+    "base": "https://api.deepseek.com/anthropic",
+    "model": "deepseek-v4-pro",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "opencode-go",
+    "label": "OpenCode Go",
+    "base": "https://opencode.ai/zen/go",
+    "model": "deepseek-v4-flash",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "zhipu-glm",
+    "label": "Zhipu GLM",
+    "base": "https://open.bigmodel.cn/api/anthropic",
+    "model": "glm-5.1",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "zhipu-glm-en",
+    "label": "Zhipu GLM en",
+    "base": "https://api.z.ai/api/anthropic",
+    "model": "glm-5.1",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "baidu-qianfan-coding-plan",
+    "label": "Baidu Qianfan Coding Plan",
+    "base": "https://qianfan.baidubce.com/anthropic/coding",
+    "model": "qianfan-code-latest",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "bailian",
+    "label": "Bailian",
+    "base": "https://dashscope.aliyuncs.com/apps/anthropic",
+    "model": "step-3.5-flash-2603",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "bailian-for-coding",
+    "label": "Bailian For Coding",
+    "base": "https://coding.dashscope.aliyuncs.com/apps/anthropic",
+    "model": "step-3.5-flash-2603",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "stepfun",
+    "label": "StepFun",
+    "base": "https://api.stepfun.com/step_plan",
+    "model": "step-3.5-flash-2603",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "stepfun-en",
+    "label": "StepFun en",
+    "base": "https://api.stepfun.ai/step_plan",
+    "model": "step-3.5-flash-2603",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "modelscope",
+    "label": "ModelScope",
+    "base": "https://api-inference.modelscope.cn",
+    "model": "ZhipuAI/GLM-5.2",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "kat-coder",
+    "label": "KAT-Coder",
+    "base": "https://vanchin.streamlake.ai/api/gateway/v1/endpoints/${ENDPOINT_ID}/claude-code-proxy",
+    "model": "KAT-Coder-Pro V1",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "longcat",
+    "label": "Longcat",
+    "base": "https://api.longcat.chat/anthropic",
+    "model": "LongCat-2.0",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "minimax",
+    "label": "MiniMax",
+    "base": "https://api.minimaxi.com/anthropic",
+    "model": "MiniMax-M2.7",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "minimax-en",
+    "label": "MiniMax en",
+    "base": "https://api.minimax.io/anthropic",
+    "model": "MiniMax-M2.7",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "bailing",
+    "label": "BaiLing",
+    "base": "https://api.tbox.cn/api/anthropic",
+    "model": "Ling-2.5-1T",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "aihubmix",
+    "label": "AiHubMix",
+    "base": "https://aihubmix.com",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "cherryin",
+    "label": "CherryIN",
+    "base": "https://open.cherryin.net",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "relaxycode",
+    "label": "RelaxyCode",
+    "base": "https://www.relaxycode.com",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "e-flowcode",
+    "label": "E-FlowCode",
+    "base": "https://e-flowcode.cc",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "openrouter",
+    "label": "OpenRouter",
+    "base": "https://openrouter.ai/api",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "therouter",
+    "label": "TheRouter",
+    "base": "https://api.therouter.ai",
+    "model": "anthropic/claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "novita-ai",
+    "label": "Novita AI",
+    "base": "https://api.novita.ai/anthropic",
+    "model": "zai-org/glm-5.1",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "github-copilot",
+    "label": "GitHub Copilot",
+    "base": "https://api.githubcopilot.com",
+    "model": "claude-sonnet-5",
+    "api": "openai_chat",
+    "oauth": true
+  },
+  {
+    "id": "codex",
+    "label": "Codex",
+    "base": "https://chatgpt.com/backend-api/codex",
+    "model": "gpt-5.6-sol",
+    "api": "openai_responses",
+    "oauth": true
+  },
+  {
+    "id": "xai-grok",
+    "label": "xAI (Grok)",
+    "base": "https://api.x.ai/v1",
+    "model": "grok-4.5",
+    "api": "openai_responses",
+    "oauth": true
+  },
+  {
+    "id": "nvidia",
+    "label": "Nvidia",
+    "base": "https://integrate.api.nvidia.com",
+    "model": "moonshotai/kimi-k2.5",
+    "api": "openai_chat",
+    "oauth": false
+  },
+  {
+    "id": "pipellm",
+    "label": "PIPELLM",
+    "base": "https://cc-api.pipellm.ai",
+    "model": "claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "xiaomi-mimo",
+    "label": "Xiaomi MiMo",
+    "base": "https://api.xiaomimimo.com/anthropic",
+    "model": "mimo-v2.5-pro",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "xiaomi-mimo-token-plan-china",
+    "label": "Xiaomi MiMo Token Plan (China)",
+    "base": "https://token-plan-cn.xiaomimimo.com/anthropic",
+    "model": "mimo-v2.5-pro",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "aws-bedrock-aksk",
+    "label": "AWS Bedrock (AKSK)",
+    "base": "https://bedrock-runtime.${AWS_REGION}.amazonaws.com",
+    "model": "global.anthropic.claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "aws-bedrock-api-key",
+    "label": "AWS Bedrock (API Key)",
+    "base": "https://bedrock-runtime.${AWS_REGION}.amazonaws.com",
+    "model": "global.anthropic.claude-sonnet-5",
+    "api": "anthropic",
+    "oauth": false
+  },
+  {
+    "id": "jiekou-ai",
+    "label": "JieKou AI",
+    "base": "https://api.jiekou.ai/anthropic",
+    "model": "claude-fable-5",
+    "api": "anthropic",
+    "oauth": false
+  }
+]

@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, State};
 
 const MODELS_SUBDIR: &str = "models";
 pub const MODEL_DOWNLOAD_PROGRESS: &str = "model-download-progress";
+pub const MODEL_DOWNLOAD_SUCCEEDED: &str = "model-download-succeeded";
 pub const MODEL_DOWNLOAD_FAILED: &str = "model-download-failed";
 
 #[derive(Debug, Clone)]
@@ -69,7 +70,13 @@ pub struct ModelDownloadProgress {
 #[serde(rename_all = "camelCase")]
 pub struct ModelDownloadFailed {
     pub id: String,
-    pub error: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadSucceeded {
+    pub id: String,
 }
 
 fn toolbox_dir() -> Result<PathBuf, String> {
@@ -185,42 +192,6 @@ fn resolve_url(entry: &CatalogEntry) -> String {
         .unwrap_or_else(|| entry.url.to_string())
 }
 
-/// Candidate download URLs: env override → HF_ENDPOINT rewrite → official → hf-mirror.
-fn candidate_urls(entry: &CatalogEntry) -> Vec<String> {
-    let primary = resolve_url(entry);
-    let mut urls = Vec::new();
-
-    // Explicit override (tests / custom) — only one URL.
-    if url_overrides()
-        .lock()
-        .ok()
-        .map(|m| m.contains_key(entry.id))
-        .unwrap_or(false)
-    {
-        return vec![primary];
-    }
-
-    // HF_ENDPOINT (e.g. https://hf-mirror.com) — common for CN networks.
-    if let Ok(endpoint) = std::env::var("HF_ENDPOINT") {
-        let endpoint = endpoint.trim_end_matches('/');
-        if !endpoint.is_empty() && primary.contains("huggingface.co") {
-            urls.push(primary.replace("https://huggingface.co", endpoint));
-        }
-    }
-
-    urls.push(primary.clone());
-
-    // Built-in mirror fallback when talking to huggingface.co.
-    if primary.contains("huggingface.co") {
-        let mirror = primary.replace("https://huggingface.co", "https://hf-mirror.com");
-        if !urls.contains(&mirror) {
-            urls.push(mirror);
-        }
-    }
-
-    urls
-}
-
 fn sha256_hex(path: &Path) -> Result<String, String> {
     let mut file = File::open(path).map_err(|e| e.to_string())?;
     let mut hasher = Sha256::new();
@@ -251,30 +222,15 @@ pub fn download_model_to(
         return Ok(final_path);
     }
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(600))
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .user_agent("tbox/0.1")
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))?;
-
-    let mut last_err = String::new();
-    let mut resp = None;
-    for url in candidate_urls(entry) {
-        match client.get(&url).send() {
-            Ok(r) if r.status().is_success() => {
-                resp = Some(r);
-                break;
-            }
-            Ok(r) => {
-                last_err = format!("下载失败: HTTP {} ({url})", r.status());
-            }
-            Err(e) => {
-                last_err = format!("下载失败: {e} ({url})");
-            }
-        }
+    let url = resolve_url(entry);
+    let client = reqwest::blocking::Client::new();
+    let mut resp = client
+        .get(&url)
+        .send()
+        .map_err(|e| format!("下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(format!("下载失败: HTTP {}", resp.status()));
     }
-    let mut resp = resp.ok_or(last_err)?;
     let total = resp.content_length().unwrap_or(entry.size_bytes);
 
     let mut out = File::create(&partial).map_err(|e| e.to_string())?;
@@ -367,17 +323,24 @@ pub async fn start_model_download(
         });
         if let Err(e) = result {
             eprintln!("[tbox] model download failed: {e}");
-            let _ = app.emit(
+            let _ = app2.emit(
                 MODEL_DOWNLOAD_FAILED,
                 ModelDownloadFailed {
-                    id: entry_id.to_string(),
-                    error: e.clone(),
+                    id: id_for_progress.clone(),
+                    message: e.to_string(),
                 },
             );
             let _ = part_path(entry_id).and_then(|p| {
                 let _ = fs::remove_file(p);
                 Ok(())
             });
+        } else {
+            let _ = app2.emit(
+                MODEL_DOWNLOAD_SUCCEEDED,
+                ModelDownloadSucceeded {
+                    id: id_for_progress,
+                },
+            );
         }
     });
 
