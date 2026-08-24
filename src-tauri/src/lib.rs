@@ -57,6 +57,7 @@ pub fn run() {
         )
         .manage(commands::agent::AgentCancel::default())
         .manage(commands::model_catalog::DownloadCancels::default())
+        .manage(commands::ollama_pull::PullCancels::default())
         .setup(|app| {
             use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
@@ -97,6 +98,7 @@ pub fn run() {
             commands::llm::clear_llm_api_key,
             commands::llm::delete_llm_config,
             commands::llm::test_llm_connection,
+            commands::llm::list_llm_presets,
 
             // 文件操作
             commands::file::download_file,
@@ -165,6 +167,8 @@ pub fn run() {
             commands::model_catalog::list_local_models,
             commands::model_catalog::start_model_download,
             commands::model_catalog::cancel_model_download,
+            commands::ollama_pull::start_ollama_pull,
+            commands::ollama_pull::cancel_ollama_pull,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

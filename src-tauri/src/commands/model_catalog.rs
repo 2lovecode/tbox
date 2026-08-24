@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, State};
 
 const MODELS_SUBDIR: &str = "models";
 pub const MODEL_DOWNLOAD_PROGRESS: &str = "model-download-progress";
+pub const MODEL_DOWNLOAD_SUCCEEDED: &str = "model-download-succeeded";
+pub const MODEL_DOWNLOAD_FAILED: &str = "model-download-failed";
 
 #[derive(Debug, Clone)]
 pub struct CatalogEntry {
@@ -62,6 +64,19 @@ pub struct ModelDownloadProgress {
     pub id: String,
     pub received: u64,
     pub total: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadFailed {
+    pub id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadSucceeded {
+    pub id: String,
 }
 
 fn toolbox_dir() -> Result<PathBuf, String> {
@@ -308,10 +323,24 @@ pub async fn start_model_download(
         });
         if let Err(e) = result {
             eprintln!("[tbox] model download failed: {e}");
+            let _ = app2.emit(
+                MODEL_DOWNLOAD_FAILED,
+                ModelDownloadFailed {
+                    id: id_for_progress.clone(),
+                    message: e.to_string(),
+                },
+            );
             let _ = part_path(entry_id).and_then(|p| {
                 let _ = fs::remove_file(p);
                 Ok(())
             });
+        } else {
+            let _ = app2.emit(
+                MODEL_DOWNLOAD_SUCCEEDED,
+                ModelDownloadSucceeded {
+                    id: id_for_progress,
+                },
+            );
         }
     });
 

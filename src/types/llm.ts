@@ -1,78 +1,37 @@
 /**
- * LLM provider type definitions — mirror the Rust `LlmProvider` enum and
- * `LlmConfig` struct in `src-tauri/src/commands/llm.rs`. The Rust side is
- * authoritative; if you add a provider there, add it here too.
+ * LLM types — mirror Rust `commands/llm.rs` + `list_llm_presets`.
  */
 
-export type LlmProviderId = 'local' | 'openai' | 'deepseek' | 'anthropic' | 'custom';
+export type LlmProtocolId =
+  | 'openai_chat'
+  | 'openai_responses'
+  | 'anthropic_messages'
+  | 'gemini_native'
+  | 'ollama_native';
 
-export interface LlmProviderMeta {
-  id: LlmProviderId;
-  label: string;
-  description: string;
-  /** Built-in base URL shown as a placeholder / quick-fill. `null` = none. */
-  defaultBaseUrl: string | null;
-  /** Built-in model name shown as a placeholder / quick-fill. `null` = none. */
-  defaultModel: string | null;
-  /** Whether the provider exposes an OpenAI-compatible `/models` probe. */
-  supportsConnectionTest: boolean;
-  docsUrl?: string;
-}
-
-export const LLM_PROVIDERS: LlmProviderMeta[] = [
-  {
-    id: 'local',
-    label: '本地（需下载模型）',
-    description: '使用内置推理引擎；请在设置中下载推荐小模型后启用',
-    defaultBaseUrl: null,
-    defaultModel: null,
-    supportsConnectionTest: false,
-  },
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    description: '官方 OpenAI 接口，使用 Bearer Token 鉴权',
-    defaultBaseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4o-mini',
-    supportsConnectionTest: true,
-    docsUrl: 'https://platform.openai.com/docs',
-  },
-  {
-    id: 'deepseek',
-    label: 'DeepSeek',
-    description: '深度求索，OpenAI 兼容协议，价格亲民',
-    defaultBaseUrl: 'https://api.deepseek.com/v1',
-    defaultModel: 'deepseek-chat',
-    supportsConnectionTest: true,
-    docsUrl: 'https://api-docs.deepseek.com/',
-  },
-  {
-    id: 'anthropic',
-    label: 'Anthropic',
-    description: 'Claude 系列，自有鉴权头，连接测试受限',
-    defaultBaseUrl: 'https://api.anthropic.com',
-    defaultModel: 'claude-3-5-haiku-latest',
-    supportsConnectionTest: false,
-    docsUrl: 'https://docs.anthropic.com/',
-  },
-  {
-    id: 'custom',
-    label: '自定义（OpenAI 兼容）',
-    description: '任何兼容 OpenAI Chat Completions 协议的端点',
-    defaultBaseUrl: null,
-    defaultModel: null,
-    supportsConnectionTest: true,
-  },
+export const LLM_PROTOCOLS: { id: LlmProtocolId; label: string }[] = [
+  { id: 'openai_chat', label: 'OpenAI Chat Completions' },
+  { id: 'openai_responses', label: 'OpenAI Responses API' },
+  { id: 'anthropic_messages', label: 'Anthropic Messages API' },
+  { id: 'gemini_native', label: 'Gemini Native' },
+  { id: 'ollama_native', label: 'Ollama Native' },
 ];
 
-export function getProviderMeta(id: LlmProviderId): LlmProviderMeta {
-  return LLM_PROVIDERS.find((p) => p.id === id) ?? LLM_PROVIDERS[0];
+export interface LlmPresetMeta {
+  id: string;
+  label: string;
+  defaultBaseUrl: string;
+  defaultModel: string;
+  defaultProtocol: LlmProtocolId;
+  requiresOauth: boolean;
 }
 
-/** LLM configuration as returned by the backend. The API key is *never*
- * sent to the frontend — `hasApiKey` is the only signal. */
+/** @deprecated static list — use presets from `list_llm_presets` */
+export type LlmProviderId = string;
+
 export interface LlmConfig {
-  provider: LlmProviderId;
+  provider: string;
+  protocol?: LlmProtocolId;
   baseUrl: string;
   model: string;
   hasApiKey: boolean;
@@ -82,4 +41,8 @@ export interface LlmTestResult {
   success: boolean;
   message: string;
   elapsedMs: number;
+}
+
+export function protocolLabel(id: LlmProtocolId | undefined): string {
+  return LLM_PROTOCOLS.find((p) => p.id === id)?.label ?? id ?? '';
 }

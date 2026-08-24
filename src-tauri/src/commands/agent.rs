@@ -6,10 +6,8 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::agent::llm::{
-    resolve_from_disk, ChatModel, ModelMessage, ModelTurn, OpenAiCompatModel, ReadyLlm,
-    AgentError,
-};
+use crate::agent::genai_model::build_from_disk;
+use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn, AgentError};
 use crate::agent::r#loop::{run_agent, AgentEvent};
 
 pub const AGENT_EVENT: &str = "agent-event";
@@ -108,7 +106,7 @@ pub fn llm_is_ready() -> Result<(), String> {
     if mock_agent_enabled() {
         return Ok(());
     }
-    match resolve_from_disk() {
+    match build_from_disk() {
         Ok(_) => Ok(()),
         Err(AgentError::LlmUnavailable) => Err(LLM_UNAVAILABLE.to_string()),
         Err(AgentError::Other(e)) => Err(e),
@@ -198,21 +196,14 @@ pub async fn send_chat_turn(
                 emit,
             )
         } else {
-            match resolve_from_disk() {
-                Ok(ReadyLlm::OpenAiCompat {
-                    base_url,
-                    model,
-                    api_key,
-                }) => {
-                    let mut model = OpenAiCompatModel::new(base_url, model, api_key);
-                    run_agent(
-                        &mut model,
-                        &conv_id,
-                        &user_text,
-                        cancel_flag.as_ref(),
-                        emit,
-                    )
-                }
+            match build_from_disk() {
+                Ok(mut model) => run_agent(
+                    &mut model,
+                    &conv_id,
+                    &user_text,
+                    cancel_flag.as_ref(),
+                    emit,
+                ),
                 Err(AgentError::LlmUnavailable) => {
                     let payload = wire_event(
                         conv_id.clone(),

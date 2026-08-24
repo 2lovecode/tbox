@@ -1,6 +1,8 @@
 pub mod tool;
 pub mod file;
 pub mod llm;
+pub mod llm_presets;
+pub mod ollama_pull;
 pub mod image;
 pub mod pdf;
 pub mod code;

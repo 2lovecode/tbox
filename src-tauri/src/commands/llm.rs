@@ -31,17 +31,163 @@ use sha2::{Digest, Sha256};
 /// rotating credentials.
 const APP_SALT: &[u8] = b"tbox.llm.v1.do-not-rotate-without-migration";
 
+use crate::commands::llm_presets;
+
 const NONCE_LEN: usize = 12;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum LlmProtocol {
+    #[default]
+    #[serde(rename = "openai_chat")]
+    OpenaiChat,
+    #[serde(rename = "openai_responses")]
+    OpenaiResponses,
+    #[serde(rename = "anthropic_messages")]
+    AnthropicMessages,
+    #[serde(rename = "gemini_native")]
+    GeminiNative,
+    #[serde(rename = "ollama_native")]
+    OllamaNative,
+}
+
+impl LlmProtocol {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LlmProtocol::OpenaiChat => "openai_chat",
+            LlmProtocol::OpenaiResponses => "openai_responses",
+            LlmProtocol::AnthropicMessages => "anthropic_messages",
+            LlmProtocol::GeminiNative => "gemini_native",
+            LlmProtocol::OllamaNative => "ollama_native",
+        }
+    }
+}
+
+/// Legacy enum kept for tests and migration from old configs.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LlmProvider {
     #[default]
     Local,
+    Ollama,
     Openai,
     Deepseek,
     Anthropic,
     Custom,
+}
+
+impl LlmProvider {
+    pub fn as_id(self) -> &'static str {
+        match self {
+            LlmProvider::Local => "local",
+            LlmProvider::Ollama => "ollama",
+            LlmProvider::Openai => "openai",
+            LlmProvider::Deepseek => "deepseek",
+            LlmProvider::Anthropic => "anthropic",
+            LlmProvider::Custom => "custom",
+        }
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "local" => Some(LlmProvider::Local),
+            "ollama" => Some(LlmProvider::Ollama),
+            "openai" => Some(LlmProvider::Openai),
+            "deepseek" => Some(LlmProvider::Deepseek),
+            "anthropic" => Some(LlmProvider::Anthropic),
+            "custom" => Some(LlmProvider::Custom),
+            _ => None,
+        }
+    }
+}
+
+fn default_provider_id() -> String {
+    "local".into()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmPresetView {
+    pub id: String,
+    pub label: String,
+    pub default_base_url: String,
+    pub default_model: String,
+    pub default_protocol: String,
+    pub requires_oauth: bool,
+}
+
+impl LlmPresetView {
+    pub fn from_preset(p: &llm_presets::LlmPreset) -> Self {
+        Self {
+            id: p.id.to_string(),
+            label: p.label.to_string(),
+            default_base_url: p.default_base_url.to_string(),
+            default_model: p.default_model.to_string(),
+            default_protocol: p.default_protocol.as_str().to_string(),
+            requires_oauth: p.requires_oauth,
+        }
+    }
+}
+
+/// Disk + API shape. `provider` is a preset id (`local`, `ollama`, `openai`, … or CC Switch slug).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LlmConfig {
+    #[serde(default = "default_provider_id")]
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protocol: Option<LlmProtocol>,
+    pub base_url: String,
+    pub model: String,
+    pub has_api_key: bool,
+}
+
+impl Default for LlmConfig {
+    fn default() -> Self {
+        Self {
+            provider: default_provider_id(),
+            protocol: None,
+            base_url: String::new(),
+            model: String::new(),
+            has_api_key: false,
+        }
+    }
+}
+
+impl LlmConfig {
+    pub fn resolved_protocol(&self) -> LlmProtocol {
+        self.protocol
+            .unwrap_or_else(|| llm_presets::default_protocol_for_provider(&self.provider))
+    }
+
+    pub fn requires_oauth_preset(&self) -> bool {
+        llm_presets::find_preset(&self.provider)
+            .map(|p| p.requires_oauth)
+            .unwrap_or(false)
+    }
+
+    pub fn is_local(&self) -> bool {
+        self.provider == "local"
+    }
+
+    pub fn is_ollama(&self) -> bool {
+        self.provider == "ollama"
+    }
+}
+
+/// Legacy on-disk JSON may use `provider` as enum string only.
+#[derive(Debug, Deserialize)]
+struct LlmConfigLegacy {
+    #[serde(default = "default_provider_id")]
+    provider: String,
+    #[serde(default)]
+    base_url: String,
+    #[serde(default)]
+    model: String,
+    #[serde(default)]
+    has_api_key: bool,
+    #[serde(default)]
+    protocol: Option<LlmProtocol>,
 }
 
 impl LlmProvider {
@@ -50,6 +196,7 @@ impl LlmProvider {
     pub fn default_base_url(self) -> Option<&'static str> {
         match self {
             LlmProvider::Local => None,
+            LlmProvider::Ollama => Some("http://127.0.0.1:11434"),
             LlmProvider::Openai => Some("https://api.openai.com/v1"),
             LlmProvider::Deepseek => Some("https://api.deepseek.com/v1"),
             LlmProvider::Anthropic => Some("https://api.anthropic.com"),
@@ -62,6 +209,7 @@ impl LlmProvider {
     pub fn default_model(self) -> Option<&'static str> {
         match self {
             LlmProvider::Local => None,
+            LlmProvider::Ollama => Some("llama3.2"),
             LlmProvider::Openai => Some("gpt-4o-mini"),
             LlmProvider::Deepseek => Some("deepseek-chat"),
             LlmProvider::Anthropic => Some("claude-3-5-haiku-latest"),
@@ -70,24 +218,16 @@ impl LlmProvider {
     }
 }
 
-/// Plaintext-on-disk representation. `has_api_key` is *informational only*
-/// — the real secret lives in `llm_secret.bin` and is never returned to
-/// the frontend.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct LlmConfig {
-    pub provider: LlmProvider,
-    pub base_url: String,
-    pub model: String,
-    pub has_api_key: bool,
-}
-
 /// Frontend → backend payload for `save_llm_config`. `api_key` is optional
 /// so callers can update only the non-secret fields without re-sending
 /// the secret; pass an empty string to leave the existing key untouched,
 /// or pass a new value to replace it.
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LlmConfigInput {
-    pub provider: LlmProvider,
+    pub provider: String,
+    #[serde(default)]
+    pub protocol: Option<LlmProtocol>,
     pub base_url: String,
     pub model: String,
     #[serde(default)]
@@ -167,7 +307,20 @@ fn read_config() -> LlmConfig {
     let Ok(bytes) = fs::read(path) else {
         return LlmConfig::default();
     };
-    serde_json::from_slice(&bytes).unwrap_or_default()
+    let legacy: LlmConfigLegacy = serde_json::from_slice(&bytes).unwrap_or(LlmConfigLegacy {
+        provider: default_provider_id(),
+        base_url: String::new(),
+        model: String::new(),
+        has_api_key: false,
+        protocol: None,
+    });
+    LlmConfig {
+        provider: legacy.provider,
+        protocol: legacy.protocol,
+        base_url: legacy.base_url,
+        model: legacy.model,
+        has_api_key: legacy.has_api_key,
+    }
 }
 
 fn write_config(config: &LlmConfig) -> Result<(), String> {
@@ -233,6 +386,11 @@ fn delete_secret() {
 // -- Commands ------------------------------------------------------------
 
 #[tauri::command]
+pub fn list_llm_presets() -> Vec<LlmPresetView> {
+    llm_presets::all_presets()
+}
+
+#[tauri::command]
 pub fn get_llm_config() -> LlmConfig {
     // If the secret file is unreadable / undecryptable we still return the
     // plaintext config but flip `has_api_key` to false so the UI shows
@@ -249,13 +407,21 @@ pub fn get_llm_config() -> LlmConfig {
         Ok(None) => config.has_api_key = false,
         Err(_) => config.has_api_key = false,
     }
+    config.protocol = Some(config.resolved_protocol());
     config
 }
 
 #[tauri::command]
 pub fn save_llm_config(input: LlmConfigInput) -> Result<LlmConfig, String> {
+    if let Some(p) = llm_presets::find_preset(&input.provider) {
+        if p.requires_oauth {
+            return Err("该提供商需要 OAuth，当前版本暂不支持".into());
+        }
+    }
+
     let mut next = LlmConfig {
-        provider: input.provider,
+        provider: input.provider.trim().to_string(),
+        protocol: input.protocol,
         base_url: input.base_url.trim().to_string(),
         model: input.model.trim().to_string(),
         has_api_key: false, // overwritten below
@@ -316,6 +482,56 @@ pub fn read_api_key_for_agent() -> Result<Option<String>, String> {
 #[tauri::command]
 pub async fn test_llm_connection() -> Result<LlmTestResult, String> {
     let config = read_config();
+    let protocol = config.resolved_protocol();
+
+    if config.requires_oauth_preset() {
+        return Ok(LlmTestResult {
+            success: false,
+            message: "该提供商需要 OAuth，当前版本暂不支持".into(),
+            elapsed_ms: 0,
+        });
+    }
+
+    if config.is_local() {
+        return Ok(LlmTestResult {
+            success: true,
+            message: "本地提供方请下载并启用模型后使用".into(),
+            elapsed_ms: 0,
+        });
+    }
+
+    if config.is_ollama() {
+        let base = if config.base_url.trim().is_empty() {
+            "http://127.0.0.1:11434"
+        } else {
+            config.base_url.trim_end_matches('/')
+        };
+        let url = format!("{base}/api/tags");
+        let started = Instant::now();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("构造 HTTP 客户端失败: {}", e))?;
+        let resp = client.get(&url).send().await;
+        return match resp {
+            Ok(r) if r.status().is_success() => Ok(LlmTestResult {
+                success: true,
+                message: "Ollama 可达".into(),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+            Ok(r) => Ok(LlmTestResult {
+                success: false,
+                message: format!("Ollama HTTP {}", r.status()),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+            Err(e) => Ok(LlmTestResult {
+                success: false,
+                message: format!("无法连接 Ollama: {e}"),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+        };
+    }
+
     if config.base_url.trim().is_empty() {
         return Ok(LlmTestResult {
             success: false,
@@ -337,16 +553,51 @@ pub async fn test_llm_connection() -> Result<LlmTestResult, String> {
     let api_key = String::from_utf8(decrypt_secret(&bundle)?)
         .map_err(|_| "API Key 不是合法的 UTF-8 字符串".to_string())?;
 
-    if matches!(config.provider, LlmProvider::Anthropic) {
-        return Ok(LlmTestResult {
-            success: true,
-            message: "Anthropic 不暴露 /models 端点，已跳过连通性测试；请直接保存并使用。".to_string(),
-            elapsed_ms: 0,
+    if matches!(protocol, LlmProtocol::AnthropicMessages) {
+        let base = config.base_url.trim_end_matches('/');
+        let url = format!("{base}/v1/messages");
+        let started = Instant::now();
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| format!("构造 HTTP 客户端失败: {}", e))?;
+        let body = serde_json::json!({
+            "model": config.model,
+            "max_tokens": 1,
+            "messages": [{"role": "user", "content": "ping"}]
         });
+        let resp = client
+            .post(&url)
+            .header("x-api-key", &api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(&body)
+            .send()
+            .await;
+        return match resp {
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 400 => Ok(LlmTestResult {
+                success: true,
+                message: format!("Anthropic 可达 (HTTP {})", r.status().as_u16()),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+            Ok(r) => Ok(LlmTestResult {
+                success: false,
+                message: format!("Anthropic HTTP {}", r.status()),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+            Err(e) => Ok(LlmTestResult {
+                success: false,
+                message: format!("请求失败: {e}"),
+                elapsed_ms: started.elapsed().as_millis(),
+            }),
+        };
     }
 
     let base = config.base_url.trim_end_matches('/');
-    let url = format!("{}/models", base);
+    let url = if matches!(protocol, LlmProtocol::OpenaiResponses) {
+        format!("{base}/responses")
+    } else {
+        format!("{base}/models")
+    };
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -399,8 +650,22 @@ mod tests {
 
     #[test]
     fn missing_config_defaults_to_local() {
-        assert_eq!(LlmProvider::default(), LlmProvider::Local);
         let cfg = LlmConfig::default();
-        assert_eq!(cfg.provider, LlmProvider::Local);
+        assert_eq!(cfg.provider, "local");
+        assert_eq!(cfg.resolved_protocol(), LlmProtocol::OpenaiChat);
+    }
+
+    #[test]
+    fn legacy_openai_config_infers_openai_chat() {
+        let raw = r#"{"provider":"openai","base_url":"https://api.openai.com/v1","model":"gpt-4o-mini","has_api_key":true}"#;
+        let legacy: LlmConfigLegacy = serde_json::from_str(raw).unwrap();
+        let cfg = LlmConfig {
+            provider: legacy.provider,
+            protocol: legacy.protocol,
+            base_url: legacy.base_url,
+            model: legacy.model,
+            has_api_key: legacy.has_api_key,
+        };
+        assert_eq!(cfg.resolved_protocol(), LlmProtocol::OpenaiChat);
     }
 }
