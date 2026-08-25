@@ -40,6 +40,15 @@ pub struct AgentEventPayload {
 
 fn wire_event(conversation_id: String, ev: AgentEvent) -> AgentEventPayload {
     match ev {
+        AgentEvent::Reasoning { text } => AgentEventPayload {
+            conversation_id,
+            event_type: "reasoning".into(),
+            text: Some(text),
+            id: None,
+            args: None,
+            result: None,
+            message: None,
+        },
         AgentEvent::Token { text } => AgentEventPayload {
             conversation_id,
             event_type: "token".into(),
@@ -143,7 +152,7 @@ impl ChatModel for DevMockModel {
                 arguments: serde_json::json!({ "input": input }),
             }]));
         }
-        Ok(ModelTurn::Text(format!(
+        Ok(ModelTurn::text(format!(
             "（开发模式）已处理你的请求。配置云端 LLM 或下载本地模型后，将使用真实推理。\n原文：{}",
             self.user_text
         )))

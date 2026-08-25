@@ -20,6 +20,9 @@ pub struct ChatMessage {
     pub role: String,
     pub content: String,
     pub tool_calls_json: Option<String>,
+    /// 思考/推理内容（模型未提供则序列化时省略）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
     pub created_at: i64,
 }
 
@@ -35,6 +38,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   content TEXT NOT NULL,
   tool_calls_json TEXT,
+  reasoning TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
@@ -43,7 +47,22 @@ CREATE TABLE IF NOT EXISTS messages (
 pub fn ensure_conversation_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     conn.execute_batch(SCHEMA_SQL)?;
+    migrate_add_reasoning(conn)?;
     Ok(())
+}
+
+/// 向后兼容 migration：为旧库的 messages 表幂等补齐 `reasoning` 列
+/// （duplicate column 错误视为已存在，静默通过）。
+fn migrate_add_reasoning(conn: &Connection) -> Result<(), rusqlite::Error> {
+    // 幂等：列已存在时 SQLite 报 duplicate column，视为成功。
+    match conn.execute(
+        "ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''",
+        [],
+    ) {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().contains("duplicate column") => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 fn now_ts() -> i64 {
@@ -66,12 +85,18 @@ fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation
 }
 
 fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
+    let reasoning: String = row.get(6)?;
     Ok(ChatMessage {
         id: row.get(0)?,
         conversation_id: row.get(1)?,
         role: row.get(2)?,
         content: row.get(3)?,
         tool_calls_json: row.get(4)?,
+        reasoning: if reasoning.is_empty() {
+            None
+        } else {
+            Some(reasoning)
+        },
         created_at: row.get(5)?,
     })
 }
@@ -97,8 +122,8 @@ pub fn append_user_message_on(
             )
             .map_err(|e| e.to_string())?;
             tx.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
-                 VALUES (?1, ?2, 'user', ?3, NULL, ?4)",
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
+                 VALUES (?1, ?2, 'user', ?3, NULL, '', ?4)",
                 params![message_id, conv_id, content, ts],
             )
             .map_err(|e| e.to_string())?;
@@ -115,6 +140,7 @@ pub fn append_user_message_on(
                 role: "user".to_string(),
                 content: content.to_string(),
                 tool_calls_json: None,
+                reasoning: None,
                 created_at: ts,
             };
             Ok((conversation, message))
@@ -134,8 +160,8 @@ pub fn append_user_message_on(
             )
             .map_err(|e| e.to_string())?;
             tx.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
-                 VALUES (?1, ?2, 'user', ?3, NULL, ?4)",
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
+                 VALUES (?1, ?2, 'user', ?3, NULL, '', ?4)",
                 params![message_id, conv_id, content, ts],
             )
             .map_err(|e| e.to_string())?;
@@ -147,6 +173,7 @@ pub fn append_user_message_on(
                 role: "user".to_string(),
                 content: content.to_string(),
                 tool_calls_json: None,
+                reasoning: None,
                 created_at: ts,
             };
             let updated = Conversation {
@@ -163,6 +190,7 @@ pub fn append_assistant_message_on(
     conversation_id: &str,
     content: &str,
     tool_calls_json: Option<&str>,
+    reasoning: Option<&str>,
 ) -> Result<ChatMessage, String> {
     ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
 
@@ -182,9 +210,9 @@ pub fn append_assistant_message_on(
     )
     .map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, created_at)
-         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5)",
-        params![message_id, conversation_id, content, tool_calls_json, ts],
+        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
+         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5, ?6)",
+        params![message_id, conversation_id, content, tool_calls_json, reasoning.unwrap_or(""), ts],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -195,6 +223,7 @@ pub fn append_assistant_message_on(
         role: "assistant".to_string(),
         content: content.to_string(),
         tool_calls_json: tool_calls_json.map(|s| s.to_string()),
+        reasoning: reasoning.map(|s| s.to_string()).filter(|s| !s.is_empty()),
         created_at: ts,
     })
 }
@@ -218,7 +247,7 @@ pub fn get_messages_on(conn: &Connection, conversation_id: &str) -> Result<Vec<C
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, conversation_id, role, content, tool_calls_json, created_at
+            "SELECT id, conversation_id, role, content, tool_calls_json, created_at, reasoning
              FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -319,4 +348,32 @@ mod tests {
         let db = test_db();
         assert!(list_conversations_on(&db).unwrap().is_empty());
     }
+#[test]
+fn reasoning_roundtrip_and_migration() {
+    let db = test_db();
+    // 走 ensure 前，先模拟旧 schema（无 reasoning 列）
+    db.execute_batch(
+        "CREATE TABLE messages (
+           id TEXT PRIMARY KEY,
+           conversation_id TEXT NOT NULL,
+           role TEXT NOT NULL,
+           content TEXT NOT NULL,
+           tool_calls_json TEXT,
+           created_at INTEGER NOT NULL
+         );",
+    )
+    .unwrap();
+    ensure_conversation_schema(&db).unwrap();
+    // 幂等：再跑一次不报错
+    ensure_conversation_schema(&db).unwrap();
+
+    let (conv, _) = append_user_message_on(&db, None, "hi").unwrap();
+    let saved = append_assistant_message_on(&db, &conv.id, "answer", None, Some("思考中…")).unwrap();
+    assert_eq!(saved.reasoning.as_deref(), Some("思考中…"));
+
+    let msgs = get_messages_on(&db, &conv.id).unwrap();
+    assert_eq!(msgs.len(), 2);
+    assert_eq!(msgs[0].reasoning, None);
+    assert_eq!(msgs[1].reasoning.as_deref(), Some("思考中…"));
+}
 }

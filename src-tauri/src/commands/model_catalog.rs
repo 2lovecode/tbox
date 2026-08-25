@@ -188,7 +188,11 @@ fn resolve_url(entry: &CatalogEntry) -> String {
     url_overrides()
         .lock()
         .ok()
-        .and_then(|m| m.get(entry.id).cloned())
+        .and_then(|m| {
+            m.get(entry.id)
+                .cloned()
+                .filter(|u| !u.is_empty())
+        })
         .unwrap_or_else(|| entry.url.to_string())
 }
 
@@ -397,7 +401,25 @@ mod tests {
     use super::*;
     use std::io::Write;
     use std::net::TcpListener;
+    use std::sync::Mutex as StdMutex;
     use std::thread;
+
+    /// URL_OVERRIDES 是全局状态：三个下载测试并行覆写同一模型 id 会竞态
+    /// （成功测试可能拿到失败测试的 /fail.gguf URL），串行化它们。
+    static DOWNLOAD_TESTS_LOCK: StdMutex<()> = StdMutex::new(());
+    struct DownloadTestGuard(std::sync::MutexGuard<'static, ()>);
+    impl DownloadTestGuard {
+        fn lock() -> Self {
+            Self(DOWNLOAD_TESTS_LOCK.lock().unwrap_or_else(|e| e.into_inner()))
+        }
+    }
+    impl Drop for DownloadTestGuard {
+        fn drop(&mut self) {
+            // 恢复全局覆写，避免影响后续测试
+            test_set_download_url("qwen2.5-1.5b-instruct-q4_k_m", "");
+            test_set_download_url("qwen2.5-0.5b-instruct-q4_k_m", "");
+        }
+    }
 
     fn serve_bytes(data: &'static [u8]) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -419,6 +441,7 @@ mod tests {
 
     #[test]
     fn download_success_installs_file() {
+        let _guard = DownloadTestGuard::lock();
         let url = serve_bytes(b"gguf-bytes-for-test");
         test_set_download_url("qwen2.5-1.5b-instruct-q4_k_m", &url);
         test_set_skip_sha(true);
@@ -440,6 +463,7 @@ mod tests {
 
     #[test]
     fn cancel_removes_partial() {
+        let _guard = DownloadTestGuard::lock();
         // Slow-ish response: large body so cancel can win.
         let big: Vec<u8> = vec![7u8; 2_000_000];
         let big_leak: &'static [u8] = Box::leak(big.into_boxed_slice());
@@ -475,6 +499,7 @@ mod tests {
 
     #[test]
     fn failed_download_not_installed() {
+        let _guard = DownloadTestGuard::lock();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         thread::spawn(move || {

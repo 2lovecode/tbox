@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::context::LlamaContext;
+use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
@@ -410,6 +411,7 @@ fn generate(
     let mut sample_idx = last; // prompt batch: last index
     let max_new_tokens = 1024usize; // 与上文 MAX_NEW_TOKENS 保持一致
     let mut gen_batch = LlamaBatch::new(1, 1);
+    let mut gen_toks: Vec<LlamaToken> = Vec::with_capacity(max_new_tokens);
     for _ in 0..max_new_tokens {
         if cancel.load(Ordering::SeqCst) {
             break;
@@ -423,6 +425,12 @@ fn generate(
             .token_to_bytes(tok, Special::Tokenize)
             .map_err(|e| format!("detokenize failed: {e:?}"))?;
         out_bytes.extend_from_slice(&piece);
+        gen_toks.push(tok);
+        // 小模型退化复读保护：同一 n-gram 连续重复多次即停（如把工具
+        // 清单逐项无限复读），避免撞 max tokens 上限才截断。
+        if is_degenerate_repetition(&gen_toks) {
+            break;
+        }
         // feed generated token back at the next KV position
         gen_batch.clear();
         gen_batch
@@ -436,7 +444,66 @@ fn generate(
             break; // context exhausted
         }
     }
-    String::from_utf8(out_bytes).map_err(|e| format!("utf8: {e}"))
+    // 生成可能被取消 / 上下文耗尽 / max tokens 截断在多字节 UTF-8 字符
+    // 中间：丢弃尾部不完整的字节序列而不是整轮报错。
+    String::from_utf8(truncate_incomplete_utf8(out_bytes))
+        .map_err(|e| format!("utf8: {e}"))
+}
+
+/// 退化复读检测：对周期 2..=24 的 n-gram，若其在生成序列末尾连续
+/// 重复出现 ≥4 轮，判定为复读环。正常中文/代码很少出现如此规整的
+/// 短周期重复。
+fn is_degenerate_repetition(toks: &[LlamaToken]) -> bool {
+    const MIN_REPEATS: usize = 4;
+    const MAX_PERIOD: usize = 24;
+    let n = toks.len();
+    if n < MIN_REPEATS * 2 {
+        return false;
+    }
+    for period in 2..=MAX_PERIOD.min(n / MIN_REPEATS) {
+        if n < period * MIN_REPEATS {
+            continue;
+        }
+        let tail = &toks[n - period..];
+        let mut repeats = 1;
+        let mut start = n - period;
+        while start >= period && &toks[start - period..start] == tail {
+            repeats += 1;
+            start -= period;
+        }
+        if repeats >= MIN_REPEATS {
+            return true;
+        }
+    }
+    false
+}
+
+/// 去掉尾部不完整的 UTF-8 起始字节（截断时最后一个字符可能只生成了
+/// 前几个字节）。完整输入原样返回。
+fn truncate_incomplete_utf8(mut bytes: Vec<u8>) -> Vec<u8> {    let mut i = bytes.len();
+    // 向后找最后一个字符的起始字节（非 10xxxxxx 后续字节）
+    while i > 0 && (bytes[i - 1] & 0xC0) == 0x80 {
+        i -= 1;
+    }
+    if i == 0 {
+        // 没找到起始字节（全是后续字节）——无法判定，原样返回交给 from_utf8
+        return bytes;
+    }
+    let lead = bytes[i - 1];
+    let expected = if lead >= 0xF0 {
+        4
+    } else if lead >= 0xE0 {
+        3
+    } else if lead >= 0xC0 {
+        2
+    } else {
+        1
+    };
+    let have = bytes.len() - (i - 1);
+    if have < expected {
+        bytes.truncate(i - 1);
+    }
+    bytes
 }
 
 // ---------------------------------------------------------------------------
@@ -485,9 +552,11 @@ impl ChatModel for EmbeddedChatModel {
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
         engine().ensure_loaded(&self.model_path)?;
         self.cancel.store(false, Ordering::SeqCst);
+        // Qwen 文本协议：tool_calls / 工具结果序列化为文本
+        // （<tool_call> 块 / [tool result: name] 前缀）。
         let messages: Vec<(String, String)> = msgs
             .iter()
-            .map(|m| (m.role.clone(), m.content.clone()))
+            .map(|m| (m.role.clone(), m.flatten_content()))
             .collect();
         // 约束解码：策略默认对小模型档 disabled（design.md D3 + 任务 4.3
         // 实测：grammar 反让 0.5B 意图命中率从 ~63% 跌至 ~12%）。可通过
@@ -504,7 +573,9 @@ impl ChatModel for EmbeddedChatModel {
             engine().complete_chat(messages, None, grammar, self.cancel.clone())?;
         let (calls, rest) = crate::agent::harness::parse::parse_tool_calls(&text);
         if calls.is_empty() {
-            Ok(ModelTurn::Text(rest))
+            // 小模型无法分离思考 token：reasoning 留空（spec: 后端无思考
+            // 内容时为空不报错）。
+            Ok(ModelTurn::text(rest))
         } else {
             Ok(ModelTurn::ToolCalls(calls))
         }
@@ -531,9 +602,39 @@ pub fn parse_qwen_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
     crate::agent::harness::parse::parse_tool_calls(text)
 }
 
-#[cfg(test)]
+#[test]
+fn truncate_incomplete_utf8_drops_partial_char() {
+    // "你好" = E4 BD A0 E5 A5 BD；截掉最后一个字节 → 尾部不完整
+    let full = "你好".as_bytes().to_vec();
+    let mut partial = full.clone();
+    partial.pop();
+    let fixed = truncate_incomplete_utf8(partial);
+    assert_eq!(fixed, "你".as_bytes());
+    // 完整输入不受影响
+    assert_eq!(truncate_incomplete_utf8(full.clone()), full);
+    // ASCII 原样
+    assert_eq!(truncate_incomplete_utf8(b"abc".to_vec()), b"abc".to_vec());
+}
+
 mod tests {
     use super::*;
+
+    #[test]
+    fn degenerate_repetition_detected() {
+        // "YAML 转码、" 复读：周期 3，重复 6 轮
+        let cycle = [LlamaToken(101), LlamaToken(202), LlamaToken(303)];
+        let mut toks = vec![LlamaToken(9), LlamaToken(8), LlamaToken(7)];
+        for _ in 0..6 {
+            toks.extend_from_slice(&cycle);
+        }
+        assert!(is_degenerate_repetition(&toks));
+        // 正常序列不误杀
+        let normal: Vec<LlamaToken> = (1..=10).map(LlamaToken).collect();
+        assert!(!is_degenerate_repetition(&normal));
+        // 短序列不判定
+        let short = vec![LlamaToken(5); 4];
+        assert!(!is_degenerate_repetition(&short));
+    }
 
     #[test]
     fn parse_single_tool_call() {
@@ -547,10 +648,12 @@ mod tests {
 
     #[test]
     fn parse_malformed_json_is_text() {
+        // 旧期望：畸变保留为文本。新期望：隐藏 + 旁注（避免半截 JSON 直显）。
         let (calls, rest) =
             parse_qwen_tool_calls("<tool_call>{not json}</tool_call>以及后续");
         assert!(calls.is_empty());
-        assert!(rest.contains("not json"));
+        assert!(!rest.contains("{not json}"));
+        assert!(rest.contains("工具调用格式异常"));
     }
 
     #[test]

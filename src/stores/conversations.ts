@@ -15,6 +15,8 @@ export interface ChatMessage {
   role: string;
   content: string;
   tool_calls_json: string | null;
+  /** 思考/推理内容（模型未提供则无该字段） */
+  reasoning?: string;
   created_at: number;
 }
 

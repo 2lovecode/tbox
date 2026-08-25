@@ -213,12 +213,43 @@ fn tools_from_registry() -> Vec<Tool> {
 }
 
 fn to_genai_messages(msgs: &[ModelMessage]) -> Vec<ChatMessage> {
+    use genai::chat::{ContentPart, MessageContent, ToolResponse};
+    use genai::chat::ToolCall as GenaiToolCall;
+
     msgs.iter()
-        .map(|m| match m.role.as_str() {
-            "system" => ChatMessage::system(m.content.clone()),
-            "assistant" => ChatMessage::assistant(m.content.clone()),
-            "tool" => ChatMessage::user(format!("[tool result]\n{}", m.content)),
-            _ => ChatMessage::user(m.content.clone()),
+        .map(|m| {
+            // assistant 发起的工具调用：保留为真正的 tool_calls 消息，
+            // 与下方 role=tool 的 ToolResponse 配对（OpenAI 等协议要求）。
+            if m.role == "assistant" && !m.tool_calls.is_empty() {
+                let parts: Vec<ContentPart> = m
+                    .tool_calls
+                    .iter()
+                    .map(|c| {
+                        ContentPart::ToolCall(GenaiToolCall {
+                            call_id: c.id.clone(),
+                            fn_name: c.name.clone(),
+                            fn_arguments: c.arguments.clone(),
+                            thought_signatures: None,
+                        })
+                    })
+                    .collect();
+                return ChatMessage::assistant(MessageContent::from_parts(parts));
+            }
+            // 工具结果：结构化 ToolResponse（带 call_id 配对），而不是
+            // 降级为普通 user 文本。
+            if m.role == "tool" {
+                return ChatMessage::tool(ToolResponse {
+                    call_id: m.tool_call_id.clone().unwrap_or_default(),
+                    fn_name: m.tool_name.clone(),
+                    content: m.content.clone(),
+                });
+            }
+            match m.role.as_str() {
+                "system" => ChatMessage::system(m.content.clone()),
+                "assistant" => ChatMessage::assistant(m.content.clone()),
+                "tool" => ChatMessage::user(format!("[tool result]\n{}", m.content)),
+                _ => ChatMessage::user(m.content.clone()),
+            }
         })
         .collect()
 }
@@ -233,12 +264,15 @@ impl ChatModel for GenaiChatModel {
     }
 
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
+        use genai::chat::ChatOptions;
+
         let chat_req = ChatRequest::new(to_genai_messages(msgs)).with_tools(self.tools.clone());
         let client = self.client.clone();
         let model = self.model.clone();
+        let options = ChatOptions::default().with_capture_reasoning_content(true);
 
         let chat_res = tauri::async_runtime::block_on(async move {
-            client.exec_chat(&model, chat_req, None).await
+            client.exec_chat(&model, chat_req, Some(&options)).await
         })
         .map_err(|e| format!("LLM 请求失败: {e}"))?;
 
@@ -259,7 +293,11 @@ impl ChatModel for GenaiChatModel {
             .first_text()
             .unwrap_or("")
             .to_string();
-        Ok(ModelTurn::Text(text))
+        let reasoning = chat_res
+            .reasoning_content
+            .clone()
+            .filter(|s| !s.trim().is_empty());
+        Ok(ModelTurn::Text { text, reasoning })
     }
 }
 

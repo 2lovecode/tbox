@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Project-local pnpm store (created when the default global store is not
+# writable, e.g. sandboxed install — keep out of the repo).
+.pnpm-store/
+
 # Editor directories and files
 .vscode
 .vscode/*

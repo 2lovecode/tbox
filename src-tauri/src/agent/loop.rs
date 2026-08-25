@@ -18,6 +18,7 @@ pub const MAX_TOOL_ITERATIONS: usize = 8;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
     Token { text: String },
+    Reasoning { text: String },
     ToolStart { id: String, args: Value },
     ToolEnd { id: String, result: String },
     Error { message: String },
@@ -32,6 +33,7 @@ fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<Mod
         .map(|m| ModelMessage {
             role: m.role,
             content: m.content,
+            ..Default::default()
         })
         .collect())
 }
@@ -65,10 +67,14 @@ pub fn run_agent_on(
 
     let mut tool_iterations = 0usize;
     let mut repair_rounds = 0usize;
+    let mut last_call_signature: Option<String> = None;
+    let mut stuck_rounds: usize = 0;
+    /// 连续相同签名调用达到此上限即视为卡住，提前结束回合。
+    const STUCK_ROUNDS_LIMIT: usize = 2;
 
     loop {
         if cancel.load(Ordering::SeqCst) {
-            let _ = append_assistant_message_on(conn, conv_id, "", None);
+            let _ = append_assistant_message_on(conn, conv_id, "", None, None);
             emit(AgentEvent::Interrupted);
             return Ok(());
         }
@@ -84,29 +90,67 @@ pub fn run_agent_on(
         };
 
         match turn {
-            ModelTurn::Text(text) => {
+            ModelTurn::Text { text, reasoning } => {
+                if let Some(r) = reasoning.as_ref().filter(|r| !r.trim().is_empty()) {
+                    emit(AgentEvent::Reasoning { text: r.clone() });
+                }
                 emit(AgentEvent::Token {
                     text: text.clone(),
                 });
-                append_assistant_message_on(conn, conv_id, &text, None)?;
+                append_assistant_message_on(
+                    conn,
+                    conv_id,
+                    &text,
+                    None,
+                    reasoning.as_deref(),
+                )?;
                 emit(AgentEvent::Done);
                 return Ok(());
             }
             ModelTurn::ToolCalls(calls) => {
-                if tool_iterations >= MAX_TOOL_ITERATIONS {
-                    let msg = format!(
-                        "exceeded max tool iterations ({MAX_TOOL_ITERATIONS})"
+                // 重复调用守卫：连续 N 轮发起相同（按 name+args 签名）的调用
+                // 是小模型「卡住」的明确信号，提前结束比硬撞 8 轮上限更友好。
+                let signature = calls
+                    .iter()
+                    .map(|c| format!("{}:{}", c.name, c.arguments))
+                    .collect::<Vec<_>>()
+                    .join("|");
+                if Some(&signature) == last_call_signature.as_ref() {
+                    stuck_rounds += 1;
+                } else {
+                    stuck_rounds = 0;
+                }
+                last_call_signature = Some(signature);
+                if stuck_rounds >= STUCK_ROUNDS_LIMIT {
+                    return finish_with_explanation(
+                        conn,
+                        conv_id,
+                        &calls,
+                        "模型重复发起相同的工具调用，疑似陷入循环。已基于最近一次结果给出说明。",
+                        &mut emit,
                     );
-                    emit(AgentEvent::Error {
-                        message: msg.clone(),
-                    });
-                    emit(AgentEvent::Done);
-                    return Err(msg);
+                }
+
+                if tool_iterations >= MAX_TOOL_ITERATIONS {
+                    return finish_with_explanation(
+                        conn,
+                        conv_id,
+                        &calls,
+                        &format!(
+                            "已连续发起 {MAX_TOOL_ITERATIONS} 轮工具调用但模型未给出总结回复。基于最近一次结果给出说明。"
+                        ),
+                        &mut emit,
+                    );
                 }
                 tool_iterations += 1;
 
+                // 协议配对：先回放 assistant 的 tool_calls 消息，再逐个
+                // 回填 role=tool 结果（缺失配对会让模型重复发起调用）。
+                msgs.push(ModelMessage::assistant_tool_calls(calls.clone()));
+
                 let mut any_success = false;
-                for call in calls {
+                let mut last_results: Vec<(String, String)> = Vec::new();
+                for call in &calls {
                     let tool_id = call.name.clone();
                     emit(AgentEvent::ToolStart {
                         id: tool_id.clone(),
@@ -130,29 +174,60 @@ pub fn run_agent_on(
                         id: tool_id,
                         result: result.clone(),
                     });
-                    msgs.push(ModelMessage::tool(result));
+                    last_results.push((call.name.clone(), result.clone()));
+                    msgs.push(ModelMessage::tool_result(
+                        call.id.clone(),
+                        call.name.clone(),
+                        result,
+                    ));
                 }
 
                 if !any_success {
                     if repair_rounds >= repair_budget {
                         // 修复预算耗尽：按既有语义回填最终错误并生成文字
                         // 说明（spec: Repair-and-reask Loop），应用不崩溃。
-                        let explanation = format!(
-                            "工具调用连续失败，修复重试预算（{repair_budget} 次）已耗尽。请检查请求内容或换一种表述后重试。"
+                        return finish_with_explanation(
+                            conn,
+                            conv_id,
+                            &calls,
+                            &format!(
+                                "工具调用连续失败，修复重试预算（{repair_budget} 次）已耗尽。请检查请求内容或换一种表述后重试。"
+                            ),
+                            &mut emit,
                         );
-                        emit(AgentEvent::Error {
-                            message: explanation.clone(),
-                        });
-                        append_assistant_message_on(conn, conv_id, &explanation, None)?;
-                        emit(AgentEvent::Token { text: explanation });
-                        emit(AgentEvent::Done);
-                        return Err("repair budget exhausted".to_string());
                     }
                     repair_rounds += 1;
                 }
             }
         }
     }
+}
+
+/// 工具循环在以下情况被调用来「软退出」：超过最大轮次、修复预算耗尽、
+/// 或小模型陷入重复调用循环。把工具结果摘要成一段说明文本，作为
+/// assistant 最终回复持久化（不再只发 Error 事件被前端当 toast 处理）。
+fn finish_with_explanation(
+    conn: &Connection,
+    conv_id: &str,
+    calls: &[crate::agent::llm::ToolCall],
+    prefix: &str,
+    emit: &mut dyn FnMut(AgentEvent),
+) -> Result<(), String> {
+    let mut body = prefix.to_string();
+    if !calls.is_empty() {
+        body.push_str("\n\n最近一次工具调用：\n");
+        for c in calls {
+            body.push_str(&format!(
+                "- `{}` 参数 `{}`\n",
+                c.name,
+                c.arguments
+            ));
+        }
+    }
+    append_assistant_message_on(conn, conv_id, &body, None, None)?;
+    emit(AgentEvent::Token { text: body.clone() });
+    emit(AgentEvent::Done);
+    Ok(())
 }
 
 /// Agent loop using the application SQLite database.
@@ -230,7 +305,7 @@ mod tests {
         let db = test_db();
         let user_text = "hello";
         let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
-        let mut model = Scripted::new(vec![ModelTurn::Text("hi there".into())]);
+        let mut model = Scripted::new(vec![ModelTurn::text("hi there")]);
         let cancel = AtomicBool::new(false);
         let (mut emit, events) = collect_events();
 
@@ -254,6 +329,110 @@ mod tests {
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
     }
 
+    /// 回归：assistant tool_calls 消息必须与 role=tool 结果配对回填，
+    /// 否则模型看不到自己的调用而重复发起（exceeded max tool iterations）。
+    #[test]
+    /// 回归：超过 MAX_TOOL_ITERATIONS 时不再 emit Error 报错，而是把工具
+/// 结果摘要成 assistant 文本回复持久化，让对话有完整收尾。
+#[test]
+fn max_iterations_soft_exit_persists_assistant_message() {
+    let db = test_db();
+    let (conv, _) = append_user_message_on(&db, None, "loop cap").unwrap();
+    let mut model = Scripted::new((0..MAX_TOOL_ITERATIONS + 1).map(|i| {
+        ModelTurn::ToolCalls(vec![ToolCall {
+            id: format!("c{i}"),
+            name: "base64.encode".into(),
+            arguments: json!({"input": format!("x{i}")}),
+        }])
+    }).chain(std::iter::once(ModelTurn::text("never"))).collect());
+    let cancel = AtomicBool::new(false);
+    let (mut emit, events) = collect_events();
+    run_agent_on(&db, &mut model, &conv.id, "loop cap", &cancel, &mut emit).unwrap();
+
+    let msgs = get_messages_on(&db, &conv.id).unwrap();
+    let last = msgs.last().expect("assistant message persisted");
+    assert_eq!(last.role, "assistant");
+    assert!(last.content.contains("连续发起"));
+    let evs = events.lock().unwrap();
+    assert!(matches!(evs.last(), Some(AgentEvent::Done)));
+    assert!(!evs.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+}
+
+/// 回归：连续相同签名的 tool calls 在第二轮应触发 STUCK_ROUNDS_LIMIT，
+/// 不再硬撞 MAX_TOOL_ITERATIONS；结果以 assistant 文本回复持久化。
+#[test]
+fn stuck_round_signature_exits_early_with_explanation() {
+    let db = test_db();
+    let (conv, _) = append_user_message_on(&db, None, "loop test").unwrap();
+    let mut model = Scripted::new(vec![
+        // 3 轮相同签名：第 1 轮入库为基准，第 2 轮 stuck=1，
+        // 第 3 轮 stuck=2 触发 STUCK_ROUNDS_LIMIT 软退出。
+        ModelTurn::ToolCalls(vec![ToolCall {
+            id: "c1".into(),
+            name: "base64.encode".into(),
+            arguments: json!({"input": "x"}),
+        }]),
+        ModelTurn::ToolCalls(vec![ToolCall {
+            id: "c2".into(),
+            name: "base64.encode".into(),
+            arguments: json!({"input": "x"}),
+        }]),
+        ModelTurn::ToolCalls(vec![ToolCall {
+            id: "c3".into(),
+            name: "base64.encode".into(),
+            arguments: json!({"input": "x"}),
+        }]),
+        ModelTurn::text("never"),
+    ]);
+    let cancel = AtomicBool::new(false);
+    let (mut emit, events) = collect_events();
+    run_agent_on(&db, &mut model, &conv.id, "loop test", &cancel, &mut emit).unwrap();
+
+    let msgs = get_messages_on(&db, &conv.id).unwrap();
+    // 最后一条应是 finish_with_explanation 写入的 assistant 文本
+    let last = msgs.last().expect("assistant message persisted");
+    assert_eq!(last.role, "assistant");
+    assert!(last.content.contains("重复发起"));
+    assert!(last.content.contains("base64.encode"));
+    // 模型被叫了 3 次（基线 + 第 1 次重复 + 第 2 次重复时软退出）
+    assert_eq!(model.received.len(), 3);
+    let evs = events.lock().unwrap();
+    // 循环以 Token + Done 收尾（而非 Error）
+    assert!(matches!(evs.last(), Some(AgentEvent::Done)));
+    assert!(!evs.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+}
+
+fn tool_call_roundtrip_paired_in_context() {
+        let db = test_db();
+        let (conv, _) = append_user_message_on(&db, None, "encode hi").unwrap();
+        let mut model = Scripted::new(vec![
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "call_1".into(),
+                name: "base64.encode".into(),
+                arguments: json!({"input": "hi"}),
+            }]),
+            ModelTurn::text("done"),
+        ]);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, _) = collect_events();
+        run_agent_on(&db, &mut model, &conv.id, "encode hi", &cancel, &mut emit).unwrap();
+
+        let second = &model.received[1];
+        // 倒数第二条是 assistant tool_calls 消息
+        let assistant_call = second
+            .iter()
+            .rev()
+            .find(|m| !m.tool_calls.is_empty())
+            .expect("assistant tool_calls message must be replayed");
+        assert_eq!(assistant_call.tool_calls[0].id, "call_1");
+        assert_eq!(assistant_call.tool_calls[0].name, "base64.encode");
+        // 最后一条是带 call_id 配对的 tool 结果
+        let last = second.last().unwrap();
+        assert_eq!(last.role, "tool");
+        assert_eq!(last.tool_call_id.as_deref(), Some("call_1"));
+        assert_eq!(last.tool_name.as_deref(), Some("base64.encode"));
+    }
+
     #[test]
     fn one_tool_call_then_text() {
         let db = test_db();
@@ -265,7 +444,7 @@ mod tests {
                 name: "base64.encode".into(),
                 arguments: json!({"input": "hi"}),
             }]),
-            ModelTurn::Text("encoded".into()),
+            ModelTurn::text("encoded"),
         ]);
         let cancel = AtomicBool::new(false);
         let (mut emit, events) = collect_events();
@@ -312,7 +491,7 @@ mod tests {
                 name: "hash.digest".into(),
                 arguments: json!({"input": "aGk=", "algorithm": "md5"}),
             }]),
-            ModelTurn::Text("both done".into()),
+            ModelTurn::text("both done"),
         ]);
         let cancel = AtomicBool::new(false);
         let (mut emit, _) = collect_events();
@@ -343,7 +522,7 @@ mod tests {
                 name: "http.request".into(),
                 arguments: json!({}),
             }]),
-            ModelTurn::Text("tool unavailable".into()),
+            ModelTurn::text("tool unavailable"),
         ]);
         let cancel = AtomicBool::new(false);
         let (mut emit, _) = collect_events();
@@ -379,7 +558,7 @@ mod tests {
         let db = test_db();
         let user_text = "will cancel";
         let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
-        let mut model = Scripted::new(vec![ModelTurn::Text("should not appear".into())]);
+        let mut model = Scripted::new(vec![ModelTurn::text("should not appear")]);
         let cancel = AtomicBool::new(true);
         let (mut emit, events) = collect_events();
 
@@ -427,7 +606,7 @@ mod tests {
                 name: "hash.digest".into(),
                 arguments: json!({"input": "hi", "algorithm": "md5"}),
             }]),
-            ModelTurn::Text("digest ready".into()),
+            ModelTurn::text("digest ready"),
         ]);
         let cancel = AtomicBool::new(false);
         let (mut emit, events) = collect_events();
@@ -469,10 +648,11 @@ mod tests {
 
         let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
 
-        assert!(res.is_err());
+        // 软退出：以 Ok 返回（不再抛 Err），但仍写入解释性助手消息
+        assert!(res.is_ok());
         assert_eq!(model.received.len(), 2, "model must not be called past the repair budget");
         let ev = events.lock().unwrap();
-        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+        assert!(!ev.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
         // 会话保留且有一条解释性助手消息
         let msgs = get_messages_on(&db, &conv.id).unwrap();
@@ -496,17 +676,20 @@ mod tests {
                 arguments: json!({}),
             }]));
         }
-        turns.push(ModelTurn::Text("done".into()));
+        turns.push(ModelTurn::text("done"));
         let mut model = Scripted::new(turns);
         let cancel = AtomicBool::new(false);
         let (mut emit, _) = collect_events();
 
         let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
 
-        assert!(res.is_err());
+        assert!(res.is_ok(), "软退出：不应再返回 Err");
+        // STUCK 守卫会在 3 次相同签名后早退；这里全是不同 args，但全部
+        // 成功 → 任意一轮都可能撞到重复（连续 2 次相同 hash 难触发），实际
+        // 上限是 MAX_TOOL_ITERATIONS（8）。模型被叫 8 次后软退出保存说明。
         assert!(
             model.received.len() <= 9,
-            "8 tool rounds max + the final errored round; got {}",
+            "8 tool rounds max; got {}",
             model.received.len()
         );
     }
@@ -539,14 +722,14 @@ mod tests {
                 name: "hash.digest".into(),
                 arguments: json!({"input": "x"}), // 再次失败 → 收尾
             }]),
-            ModelTurn::Text("never".into()),
+            ModelTurn::text("never"),
         ]);
         let cancel = AtomicBool::new(false);
         let (mut emit, _) = collect_events();
 
         let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
 
-        assert!(res.is_err());
+        assert!(res.is_ok(), "软退出：不应再返回 Err");
         assert_eq!(model.received.len(), 4);
     }
 

@@ -31,6 +31,43 @@ pub fn normalize_payload(s: &str) -> String {
         .replace('｝', "}")
 }
 
+
+/// 从一段文本里取出首个花括号深度匹配的 JSON 对象子串（含两侧大括号）。
+fn extract_balanced_json_object(input: &str) -> Option<&str> {
+    let bytes = input.as_bytes();
+    let mut start = None;
+    let mut depth: i32 = 0;
+    let mut in_string = false;
+    let mut escape = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if escape { escape = false; continue; }
+        if in_string {
+            if b == b'\\' { escape = true; continue; }
+            if b == b'"' { in_string = false; }
+            continue;
+        }
+        match b {
+            b'\"' => in_string = true,
+            b'{' => {
+                if depth == 0 { start = Some(i); }
+                depth += 1;
+            }
+            b'}' => {
+                if depth > 0 {
+                    depth -= 1;
+                    if depth == 0 {
+                        if let Some(s) = start {
+                            return Some(&input[s..=i]);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
 /// 尝试把 payload 解析为 (name, arguments)；arguments 为字符串化 JSON 时二次解析。
 fn parse_payload(payload: &str) -> Option<(String, serde_json::Value)> {
     for candidate in [payload, &normalize_payload(payload)] {
@@ -73,9 +110,32 @@ pub fn parse_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
                         remainder = &after_start[end + "</tool_call>".len()..];
                     }
                     None => {
-                        // 畸变 payload：保留原文为纯文本
-                        rest.push_str(&remainder[..start + "<tool_call>".len()]);
-                        remainder = after_start;
+                        // 兜底：payload 大括号未匹配 / 多余转义时，按花括号深度
+                        // 切出最内层完整 JSON 对象再试一次（实测 0.5B 偶发
+                        // 嵌套引号导致最外层解析失败，但内层仍然合法）。
+                        let mut recovered = None;
+                        if let Some(slice) = extract_balanced_json_object(payload) {
+                            if let Some((n, a)) = parse_payload(slice) {
+                                if !a.is_null() {
+                                    recovered = Some((n, a));
+                                }
+                            }
+                        }
+                        if let Some((name, args)) = recovered {
+                            calls.push(ToolCall {
+                                id: format!("call_{}", calls.len()),
+                                name,
+                                arguments: args,
+                            });
+                            rest.push_str(&remainder[..start]);
+                            remainder = &after_start[end + "</tool_call>".len()..];
+                        } else {
+                            // 彻底失败：把畸变块隐藏进 `rest` 旁注，避免把
+                            // 半个 `<tool_call>{...}` 直接展示给用户。
+                            rest.push_str(&remainder[..start]);
+                            rest.push_str("[工具调用格式异常，已忽略]\n");
+                            remainder = &after_start[end + "</tool_call>".len()..];
+                        }
                     }
                 }
             }
@@ -84,7 +144,13 @@ pub fn parse_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
                 // 不输出 </tool_call>。若剩余 payload 能解析为合法调用则接受，
                 // 否则按原设计保留为纯文本。
                 let payload = after_start.trim();
-                match parse_payload(payload).filter(|(_, args)| !args.is_null()) {
+                let mut recovered = parse_payload(payload).filter(|(_, args)| !args.is_null());
+                if recovered.is_none() {
+                    if let Some(slice) = extract_balanced_json_object(payload) {
+                        recovered = parse_payload(slice).filter(|(_, args)| !args.is_null());
+                    }
+                }
+                match recovered {
                     Some((name, args)) => {
                         calls.push(ToolCall {
                             id: format!("call_{}", calls.len()),
@@ -94,7 +160,10 @@ pub fn parse_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
                         rest.push_str(&remainder[..start]);
                     }
                     None => {
-                        rest.push_str(remainder);
+                        // 隐藏畸变块，旁注说明
+                        rest.push_str(&remainder[..start]);
+                        rest.push_str("[工具调用格式异常，已忽略]\n");
+                        rest.push_str(payload);
                     }
                 }
                 remainder = "";
@@ -103,6 +172,30 @@ pub fn parse_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
         }
     }
     rest.push_str(remainder);
+    // 兜底：0.5B 有时直接输出裸 JSON（{"name": …, "arguments": …}）
+    // 不带 <tool_call> 包裹（实测见 DB 记录）。仅当输出以 { 开头且能解析
+    // 为合法调用时接受，避免误吞正常 JSON 内容回答。
+    if calls.is_empty() {
+        let trimmed = rest.trim();
+        // 模型常在裸 JSON 后面追加 `</tool_call>` 或换行；允许尾巴是它们。
+        let core = trimmed
+            .trim_end_matches("</tool_call>")
+            .trim_end();
+        if core.starts_with('{') && core.ends_with('}') {
+            if let Some((name, args)) = parse_payload(core) {
+                if !args.is_null() {
+                    return (
+                        vec![ToolCall {
+                            id: "call_0".to_string(),
+                            name,
+                            arguments: args,
+                        }],
+                        String::new(),
+                    );
+                }
+            }
+        }
+    }
     (calls, rest.trim().to_string())
 }
 
@@ -164,6 +257,44 @@ pub fn validate_call(name: &str, args: &serde_json::Value) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+/// 回归：用户 DB 实测模型输出 `<tool_call>{"name": "json.to_query",
+/// "arguments": {"input":"[\"{\"aa\":\"bb\"}\""]}</tool_call>`（括号
+/// 嵌套/转义混乱），原 parser 解析失败导致整段 raw 文本直显给用户。
+/// 修复后应能从首个平衡 JSON 对象恢复出 name + arguments。
+#[test]
+fn unbalanced_payload_recovered_by_brace_depth() {
+    let raw = "<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\":\"[\\\"{\\\"aa\\\":\\\"bb\\\"}\\\"]\"}}</tool_call>";
+    let (calls, rest) = parse_tool_calls(raw);
+    assert_eq!(calls.len(), 1, "balanced object must be recovered");
+    assert_eq!(calls[0].name, "json.to_query");
+    assert!(calls[0].arguments.get("input").is_some());
+    assert!(rest.is_empty(), "raw block hidden, no rest leak");
+}
+
+/// 回归：未闭合的 `<tool_call>` 后即便 JSON 也不完整（缺 args），仍应
+/// 隐藏而不是把半截块漏给用户。
+#[test]
+fn unterminated_block_with_no_args_is_hidden() {
+    let raw = "<tool_call>{\"name\": \"x\"}";
+    let (calls, rest) = parse_tool_calls(raw);
+    assert!(calls.is_empty());
+    assert!(rest.contains("工具调用格式异常"));
+}
+
+#[test]
+fn bare_json_tool_call_recovered() {
+    let (calls, rest) = parse_tool_calls(
+        "{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"aa\\\":\\\"bb\\\"}\"}}",
+    );
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].name, "json.to_query");
+    assert!(rest.is_empty());
+    // 正常 JSON 内容回答不被误吞：与注册工具无关
+    let (calls, rest) = parse_tool_calls("配置文件内容是 {\"port\": 8080}");
+    assert!(calls.is_empty());
+    assert!(rest.contains("8080"));
+}
     use serde_json::json;
 
     #[test]
@@ -215,10 +346,13 @@ mod tests {
     }
 
     #[test]
-    fn malformed_block_is_text() {
+    fn malformed_block_hidden_with_hint() {
+        // 畸变 <tool_call> 不应再把半截 JSON 展示给用户，改为隐藏 + 旁注。
         let (calls, rest) = parse_tool_calls("<tool_call>{not json}</tool_call>以及后续");
         assert!(calls.is_empty());
-        assert!(rest.contains("not json"));
+        assert!(!rest.contains("{not json}"));
+        assert!(rest.contains("工具调用格式异常"));
+        assert!(rest.contains("以及后续"));
     }
 
     #[test]

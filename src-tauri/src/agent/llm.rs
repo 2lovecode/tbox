@@ -7,10 +7,20 @@ use crate::commands::llm::{get_llm_config, LlmConfig, LlmProtocol};
 use crate::commands::model_catalog;
 
 /// One message sent to the model (system / user / assistant / tool).
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// 工具协议要求「assistant 发起 tool_calls → role=tool 回填结果」成对出现：
+/// `tool_calls` 仅 assistant 角色使用；`tool_call_id`/`tool_name` 仅 tool
+/// 角色使用。缺失 assistant tool_calls 消息会让模型看不到自己的调用而
+/// 重复发起（exceeded max tool iterations）。
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct ModelMessage {
     pub role: String,
     pub content: String,
+    /// assistant 角色：模型请求的工具调用（普通文本回复为空）。
+    pub tool_calls: Vec<ToolCall>,
+    /// tool 角色：对应的调用 id 与工具名（回填结果时携带）。
+    pub tool_call_id: Option<String>,
+    pub tool_name: Option<String>,
 }
 
 impl ModelMessage {
@@ -18,6 +28,7 @@ impl ModelMessage {
         Self {
             role: "system".to_string(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -25,6 +36,7 @@ impl ModelMessage {
         Self {
             role: "user".to_string(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
@@ -32,14 +44,65 @@ impl ModelMessage {
         Self {
             role: "assistant".to_string(),
             content: content.into(),
+            ..Default::default()
         }
     }
 
+    /// assistant 发起工具调用的消息（content 可为空）。
+    pub fn assistant_tool_calls(calls: Vec<ToolCall>) -> Self {
+        Self {
+            role: "assistant".to_string(),
+            content: String::new(),
+            tool_calls: calls,
+            ..Default::default()
+        }
+    }
+
+    /// 兼容旧测试：不带 id 的 tool 结果。
     pub fn tool(content: impl Into<String>) -> Self {
         Self {
             role: "tool".to_string(),
             content: content.into(),
+            ..Default::default()
         }
+    }
+
+    /// 回填工具结果：携带调用 id 与工具名，后端按协议正确配对。
+    pub fn tool_result(id: impl Into<String>, name: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".to_string(),
+            content: content.into(),
+            tool_call_id: Some(id.into()),
+            tool_name: Some(name.into()),
+            ..Default::default()
+        }
+    }
+
+    /// 纯文本视图：把 tool_calls / tool 结果序列化为文本（embedded 引擎
+    /// 的 Qwen 文本协议用）。
+    pub fn flatten_content(&self) -> String {
+        if !self.tool_calls.is_empty() {
+            let calls: Vec<String> = self
+                .tool_calls
+                .iter()
+                .map(|c| {
+                    format!(
+                        "<tool_call>{{\"name\": \"{}\", \"arguments\": {}}}</tool_call>",
+                        c.name, c.arguments
+                    )
+                })
+                .collect();
+            let head = if self.content.is_empty() {
+                String::new()
+            } else {
+                format!("{}\n", self.content)
+            };
+            return format!("{head}{}", calls.join(""));
+        }
+        if let Some(name) = &self.tool_name {
+            return format!("[tool result: {name}]\n{}", self.content);
+        }
+        self.content.clone()
     }
 }
 
@@ -51,11 +114,25 @@ pub struct ToolCall {
     pub arguments: Value,
 }
 
-/// Single model turn: plain text or tool calls.
+/// Single model turn: plain text (with optional reasoning) or tool calls.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ModelTurn {
-    Text(String),
+    Text {
+        text: String,
+        /// 思考/推理内容（模型未提供则为 None）。
+        reasoning: Option<String>,
+    },
     ToolCalls(Vec<ToolCall>),
+}
+
+impl ModelTurn {
+    /// 无思考内容的纯文本回复（测试与不回 reasoning 的后端使用）。
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::Text {
+            text: text.into(),
+            reasoning: None,
+        }
+    }
 }
 
 /// 模型后端描述：harness 策略选档依据（backend 如 "embedded" / "genai"）。
@@ -227,6 +304,36 @@ impl ChatModel for OpenAiCompatModel {
         let messages: Vec<Value> = msgs
             .iter()
             .map(|m| {
+                // assistant 工具调用：带 tool_calls 结构（与 role=tool 配对）
+                if m.role == "assistant" && !m.tool_calls.is_empty() {
+                    let calls: Vec<Value> = m
+                        .tool_calls
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "id": c.id,
+                                "type": "function",
+                                "function": {
+                                    "name": c.name,
+                                    "arguments": c.arguments.to_string(),
+                                }
+                            })
+                        })
+                        .collect();
+                    return serde_json::json!({
+                        "role": "assistant",
+                        "content": if m.content.is_empty() { Value::Null } else { Value::String(m.content.clone()) },
+                        "tool_calls": calls,
+                    });
+                }
+                // 工具结果：role=tool + tool_call_id 配对
+                if m.role == "tool" {
+                    return serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": m.tool_call_id.clone().unwrap_or_default(),
+                        "content": m.content,
+                    });
+                }
                 serde_json::json!({
                     "role": m.role,
                     "content": m.content,
@@ -291,12 +398,17 @@ fn parse_openai_turn(json: &Value) -> Result<ModelTurn, String> {
             return Ok(ModelTurn::ToolCalls(out));
         }
     }
+    let reasoning = choice
+        .get("reasoning_content")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
     let text = choice
         .get("content")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    Ok(ModelTurn::Text(text))
+    Ok(ModelTurn::Text { text, reasoning })
 }
 
 /// Anthropic Messages API client (tool use).
@@ -349,8 +461,38 @@ impl ChatModel for AnthropicMessagesModel {
             .iter()
             .filter(|m| m.role != "system")
             .map(|m| {
+                // assistant 工具调用 → tool_use 块（与 tool_result 配对）
+                if m.role == "assistant" && !m.tool_calls.is_empty() {
+                    let blocks: Vec<Value> = m
+                        .tool_calls
+                        .iter()
+                        .map(|c| {
+                            serde_json::json!({
+                                "type": "tool_use",
+                                "id": c.id,
+                                "name": c.name,
+                                "input": c.arguments,
+                            })
+                        })
+                        .collect();
+                    return serde_json::json!({
+                        "role": "assistant",
+                        "content": blocks,
+                    });
+                }
+                // 工具结果 → user 侧 tool_result 块（Anthropic 协议要求）
+                if m.role == "tool" {
+                    return serde_json::json!({
+                        "role": "user",
+                        "content": [serde_json::json!({
+                            "type": "tool_result",
+                            "tool_use_id": m.tool_call_id.clone().unwrap_or_default(),
+                            "content": m.content,
+                        })],
+                    });
+                }
                 serde_json::json!({
-                    "role": if m.role == "tool" { "user" } else { m.role.as_str() },
+                    "role": m.role,
                     "content": m.content,
                 })
             })
@@ -392,9 +534,15 @@ fn parse_anthropic_turn(json: &Value) -> Result<ModelTurn, String> {
         .and_then(|v| v.as_array())
         .ok_or_else(|| "Anthropic 响应缺少 content".to_string())?;
     let mut text_parts = Vec::new();
+    let mut thinking_parts = Vec::new();
     let mut tool_calls = Vec::new();
     for block in content {
         match block.get("type").and_then(|v| v.as_str()) {
+            Some("thinking") => {
+                if let Some(t) = block.get("thinking").and_then(|v| v.as_str()) {
+                    thinking_parts.push(t.to_string());
+                }
+            }
             Some("text") => {
                 if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
                     text_parts.push(t.to_string());
@@ -424,7 +572,15 @@ fn parse_anthropic_turn(json: &Value) -> Result<ModelTurn, String> {
     if !tool_calls.is_empty() {
         return Ok(ModelTurn::ToolCalls(tool_calls));
     }
-    Ok(ModelTurn::Text(text_parts.join("")))
+    let reasoning = if thinking_parts.is_empty() {
+        None
+    } else {
+        Some(thinking_parts.join("\n"))
+    };
+    Ok(ModelTurn::Text {
+        text: text_parts.join(""),
+        reasoning,
+    })
 }
 
 #[cfg(test)]
