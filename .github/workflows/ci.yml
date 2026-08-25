@@ -1,0 +1,76 @@
+name: CI
+
+# Compile-only check on every push/PR to main. We deliberately mirror
+# the matrix in release.yml so a green CI means the next release push
+# will not be the first time we learn about a platform break.
+# On tag pushes the `Release` workflow takes over instead.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - 'macos-latest'
+          - 'ubuntu-22.04'
+          - 'windows-latest'
+
+    runs-on: ${{ matrix.platform }}
+
+    # Skip duplicated runs: pushes to main fire the `push` event AND
+    # open a PR (if any), so we don't want to count the same commit
+    # twice through this matrix.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install pnpm
+        run: npm install -g pnpm@9
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Tauri app
+        run: pnpm tauri build --no-bundle
+        # `--no-bundle` skips the slow installer / .dmg / .msi packaging
+        # step; on CI we only need to validate that the Rust + JS
+        # toolchain produces a runnable binary. The `Release` workflow
+        # is the one that produces actual installers.

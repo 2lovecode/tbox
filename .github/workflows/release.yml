@@ -1,12 +1,27 @@
 name: Release
 
+# Build on every push of a `v*` tag, across macOS / Ubuntu / Windows,
+# then publish all platform bundles to a single draft GitHub Release
+# via `tauri-apps/tauri-action`. The release stays `draft` so the
+# maintainer can review notes / assets before publishing.
+
 on:
   push:
     tags:
       - 'v*'
 
+# One release per tag; cancel in-flight replays if you push the same
+# tag twice in quick succession.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+  # `id-token: write` is reserved for future macOS notarization via
+  # `tauri-action`. The current job does not reference it; granting
+  # ahead of time avoids re-running the workflow once secrets land.
+  id-token: write
 
 jobs:
   release:
@@ -22,14 +37,16 @@ jobs:
             args: ''
 
     runs-on: ${{ matrix.platform }}
+
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: 'pnpm'
 
       - name: Install pnpm
         run: npm install -g pnpm@9
@@ -38,7 +55,9 @@ jobs:
         if: matrix.platform == 'ubuntu-22.04'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
+            librsvg2-dev patchelf
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -49,13 +68,17 @@ jobs:
           workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # `tauri-action` already runs `pnpm tauri build` on its own;
+          # we pin the CLI by relying on the project-locked
+          # `@tauri-apps/cli` (see package.json devDependencies) which
+          # `pnpm install --frozen-lockfile` just materialised.
           tagName: ${{ github.ref_name }}
           releaseName: 'tbox v__VERSION__'
           releaseBody: 'See the assets to download and install this app.'
@@ -63,12 +86,8 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
 
-  # Optional: Validate signing
-  # signing:
-  #   needs: release
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - name: Validate signature
-  #       run: |
-  #         # Add your signature validation logic here
-  #         echo "Validating signature..."
+  # Signing skipped intentionally — there are no macOS / Windows code
+  # signing secrets in this repo yet. The `id-token: write`
+  # permission above is reserved for notarization once the secrets
+  # are added; until then, the bundles are unsigned and the first
+  # launch will be blocked by Gatekeeper / SmartScreen.
