@@ -175,8 +175,28 @@ pub fn run() {
             commands::ollama_pull::start_ollama_pull,
             commands::ollama_pull::cancel_ollama_pull,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // Graceful shutdown hook. The embedded LLM engine owns a background
+        // thread holding a `LlamaBackend` and, once a chat has run, a
+        // `LlamaModel` + `LlamaContext` whose weights live in Metal buffers.
+        // Those buffers are registered in ggml's per-device residency-set
+        // collection, and ggml frees that collection from a C++ static
+        // destructor at process exit. If the model has not been freed by
+        // then, the destructor trips
+        // `GGML_ASSERT([rsets->data count] == 0)` and `abort()`s the app —
+        // the `Abort trap: 6` (SIGABRT via `__cxa_finalize_ranges`) seen in
+        // the crash dumps under `~/Library/Logs/DiagnosticReports/tbox-*.ips`.
+        //
+        // So we ask the engine to free its native resources on its own
+        // thread and join it here, before Tauri returns and the static
+        // destructors run. `RunEvent::Exit` fires once the event loop
+        // unwinds — including Cmd+Q and Quit-from-Dock on macOS.
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                agent::embedded_engine::engine().shutdown_blocking();
+            }
+        });
 }
 
 #[cfg(test)]

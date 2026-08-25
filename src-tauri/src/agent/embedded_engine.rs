@@ -62,15 +62,64 @@ enum EngineCmd {
         cancel: Arc<AtomicBool>,
         reply: Sender<Result<String, String>>,
     },
+    /// Tell the inference thread to free the loaded model and the backend
+    /// (in that order) and exit its `recv` loop.
+    ///
+    /// This is what keeps app exit clean: freeing the model runs
+    /// `llama_free_model`, which releases its Metal buffers and removes them
+    /// from ggml's per-device residency-set collection. If they are still
+    /// registered at process exit, ggml's static device destructor trips
+    /// `GGML_ASSERT([rsets->data count] == 0)` in `ggml_metal_rsets_free`
+    /// (`ggml-metal-device.m`) and `abort()`s — the `Abort trap: 6` /
+    /// `EXC_CRASH (SIGABRT)` reported via `__cxa_finalize_ranges` in the
+    /// `tbox-*.ips` captures under `~/Library/Logs/DiagnosticReports/`.
+    Shutdown,
 }
 
-/// Request handled on the inference thread after a model is loaded.
-/// The model is leaked to `'static` because `LlamaContext` borrows it and
-/// both live for the process lifetime anyway (engine is a global).
+/// Owned llama.cpp resources for one loaded GGUF, held on the inference
+/// thread.
+///
+/// `LlamaContext` borrows its `LlamaModel`, so the pair is inherently
+/// self-referential. The model therefore lives in a heap allocation we
+/// still own (through [`ModelBox`]) instead of being `Box::leak`ed: a
+/// leaked model means `llama_free_model` never runs, so the model's Metal
+/// buffers stay registered in ggml's per-device residency-set collection.
+/// At process exit ggml's static device destructor then trips
+/// `GGML_ASSERT([rsets->data count] == 0)` inside `ggml_metal_rsets_free`
+/// and `abort()`s the app — the `Abort trap: 6` seen in the crash reports
+/// under `~/Library/Logs/DiagnosticReports/tbox-*.ips`.
+///
+/// Field order is load-bearing: Rust drops fields in declaration order,
+/// so `ctx` (`llama_free`) is released before `model`
+/// (`llama_free_model`) — the order llama.cpp requires.
 struct LoadedModel {
-    model: &'static LlamaModel,
     ctx: LlamaContext<'static>,
+    model: ModelBox,
     n_ctx: u32,
+}
+
+/// Owning handle for the heap-allocated [`LlamaModel`] borrowed by a
+/// [`LoadedModel`]'s context. Dropping it runs `llama_free_model`, which
+/// releases the model's Metal buffers and unregisters them from the
+/// device residency sets.
+struct ModelBox(*mut LlamaModel);
+
+impl ModelBox {
+    /// Borrow the model. The reference is tied to `&self`, so it cannot
+    /// outlive the allocation.
+    fn as_ref(&self) -> &LlamaModel {
+        // SAFETY: the pointer comes from `Box::into_raw` in `load_model`
+        // and is only freed in `Drop`, so it stays valid for `&self`.
+        unsafe { &*self.0 }
+    }
+}
+
+impl Drop for ModelBox {
+    fn drop(&mut self) {
+        // SAFETY: reconstitutes the `Box` produced by `Box::into_raw`.
+        // Runs exactly once — `ModelBox` is neither `Copy` nor `Clone`.
+        unsafe { drop(Box::from_raw(self.0)) };
+    }
 }
 
 /// Global app handle for event emission, set during Tauri setup.
@@ -92,6 +141,10 @@ fn emit_status(s: &EngineStatus) {
 pub struct EmbeddedEngine {
     status: Mutex<EngineStatus>,
     tx: Mutex<Option<Sender<EngineCmd>>>,
+    /// Handle for the inference thread; populated on `spawn_thread`,
+    /// taken out by `shutdown_blocking` so the OS join happens on the
+    /// Tauri main thread at app exit.
+    join: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// The model path currently loaded / loading (guards redundant loads).
     loaded_path: Mutex<Option<PathBuf>>,
 }
@@ -103,6 +156,7 @@ pub fn engine() -> &'static EmbeddedEngine {
         let engine = EmbeddedEngine {
             status: Mutex::new(EngineStatus::NotLoaded),
             tx: Mutex::new(None),
+            join: Mutex::new(None),
             loaded_path: Mutex::new(None),
         };
         engine.spawn_thread();
@@ -114,24 +168,79 @@ impl EmbeddedEngine {
     fn spawn_thread(&self) {
         let (tx, rx) = channel::<EngineCmd>();
         *self.tx.lock().unwrap() = Some(tx);
-        std::thread::Builder::new()
+        let handle = std::thread::Builder::new()
             .name("tbox-llm-engine".into())
             .spawn(move || {
-                let backend = LlamaBackend::init().ok();
+                let mut backend: Option<LlamaBackend> = LlamaBackend::init().ok();
                 let mut loaded: Option<LoadedModel> = None;
                 while let Ok(cmd) = rx.recv() {
+                    if matches!(cmd, EngineCmd::Shutdown) {
+                        handle_cmd(&mut backend, &mut loaded, cmd);
+                        break;
+                    }
                     // Engine panics (native llama.cpp asserts included) must
                     // not kill the thread nor the app: catch and surface.
                     let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-                        || handle_cmd(&backend, &mut loaded, cmd),
+                        || handle_cmd(&mut backend, &mut loaded, cmd),
                     ));
                     if res.is_err() {
                         // The channel is gone; nothing else to do. Status was
                         // set inside if possible.
                     }
                 }
+                // Either the loop ran the `Shutdown` arm (which already
+                // dropped `loaded` and `backend` inside `handle_cmd`) or
+                // the channel closed without a Shutdown (engine dropped on
+                // shutdown). Either way, at this point local `loaded` and
+                // `backend` are `None` and will fall out of scope here.
             })
             .expect("spawn llm engine thread");
+        *self.join.lock().unwrap() = Some(handle);
+    }
+
+    /// Drain the inference thread and free its llama.cpp resources on it.
+    ///
+    /// Called from `RunEvent::Exit` in the Tauri app hook. Idempotent; safe
+    /// to call from any state (engine may or may not have been touched, may
+    /// or may not have a model loaded).
+    pub fn shutdown_blocking(&self) {
+        // Take the JoinHandle out so a second call is a no-op.
+        let join = {
+            let mut slot = self.join.lock().unwrap();
+            slot.take()
+        };
+        let Some(join) = join else { return };
+
+        // Send Shutdown; the inference thread receives it, drops the model
+        // and backend on its own stack inside `handle_cmd`, then exits its
+        // loop. The closure then returns; its local `backend` and `loaded`
+        // are already `None` after the Shutdown arm so no further cleanup
+        // is needed. Sender-side error is fine — it just means the channel
+        // already closed; the thread is on its way out.
+        let _ = self.send(EngineCmd::Shutdown);
+
+        // Drop the engine's owned sender so that, after the thread finishes
+        // its Shutdown command, there are no senders left and any external
+        // check on `tx.lock()` reflecting "channel gone" is consistent.
+        *self.tx.lock().unwrap() = None;
+
+        // Bounded join: a stuck inference shouldn't hang the GUI on quit.
+        // 5 s is well above the few milliseconds this typically takes.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if join.is_finished() {
+                let _ = join.join();
+                return;
+            }
+            if std::time::Instant::now() >= deadline {
+                eprintln!(
+                    "[tbox] engine thread did not exit within 5s; \
+                     abandoning it (will be detached on process exit)"
+                );
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     pub fn status(&self) -> EngineStatus {
@@ -220,7 +329,7 @@ impl EmbeddedEngine {
     }
 }
 
-fn handle_cmd(backend: &Option<LlamaBackend>, loaded: &mut Option<LoadedModel>, cmd: EngineCmd) {
+fn handle_cmd(backend: &mut Option<LlamaBackend>, loaded: &mut Option<LoadedModel>, cmd: EngineCmd) {
     match cmd {
         EngineCmd::Load { path, reply } => {
             let _ = reply.send(load_model(backend, path, loaded));
@@ -244,6 +353,20 @@ fn handle_cmd(backend: &Option<LlamaBackend>, loaded: &mut Option<LoadedModel>, 
             };
             let _ = reply.send(res);
         }
+        EngineCmd::Shutdown => {
+            // Drop order matters: context (`llama_free`) → model
+            // (`llama_free_model`) → backend (`llama_backend_free`).
+            // `*loaded = None` drops the `LoadedModel`, whose field order
+            // enforces context-before-model; freeing the model is what
+            // unregisters its Metal buffers from ggml's residency sets and
+            // keeps the ggml static destructor's
+            // `GGML_ASSERT([rsets->data count] == 0)` from aborting the
+            // process at exit. Doing this on the inference thread (rather
+            // than at process exit) gives llama.cpp a clean teardown
+            // before C++ statics start unwinding.
+            *loaded = None;
+            *backend = None;
+        }
     }
 }
 
@@ -263,9 +386,16 @@ fn load_model(
 
     let model = LlamaModel::load_from_file(backend, &path, &params)
         .map_err(|e| format!("load gguf failed: {e:?}"))?;
-    // The engine keeps the model for the process lifetime; leak it so the
-    // context can hold a 'static borrow.
-    let model: &'static LlamaModel = Box::leak(Box::new(model));
+    // The context borrows the model, so the model needs a stable address.
+    // We keep ownership (see `ModelBox`) instead of `Box::leak`ing: the
+    // model MUST be freed on shutdown, otherwise its Metal buffers stay in
+    // ggml's residency-set collection and the ggml static destructor
+    // aborts the process at exit.
+    let model = ModelBox(Box::into_raw(Box::new(model)));
+    // SAFETY: `ctx` is stored next to `model` in the same `LoadedModel`,
+    // whose drop order frees the context first, so this `'static` borrow
+    // never outlives the allocation.
+    let model_ref: &'static LlamaModel = unsafe { &*(model.as_ref() as *const LlamaModel) };
     let n_threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(1).max(1) as i32)
         .unwrap_or(4);
@@ -273,11 +403,16 @@ fn load_model(
         .with_n_ctx(std::num::NonZeroU32::new(4096))
         .with_n_batch(4096) // 与 n_ctx 一致：系统提示（含 Skill）可超过 2048 token
         .with_n_threads(n_threads);
-    let ctx = model
+    let ctx = model_ref
         .new_context(backend, ctx_params)
         .map_err(|e| format!("create context failed: {e:?}"))?;
     let n_ctx = ctx.n_ctx();
-    *loaded = Some(LoadedModel { model, ctx, n_ctx });
+    // Free any previously loaded model BEFORE installing the new one, so a
+    // model switch never holds two sets of weights in memory at once.
+    // (Not needed for a clean exit — the assignment below would drop the old
+    // value anyway — but it halves peak memory when switching models.)
+    *loaded = None;
+    *loaded = Some(LoadedModel { ctx, model, n_ctx });
     Ok(())
 }
 
@@ -312,7 +447,8 @@ fn generate(
     grammar: Option<&str>,
     cancel: &AtomicBool,
 ) -> Result<String, String> {
-    let LoadedModel { model, ctx, n_ctx } = lm;
+    let LoadedModel { ctx, model, n_ctx } = lm;
+    let model = model.as_ref();
 
     // Render the prompt with the model's own baked-in chat template
     // (ChatML for Qwen). Fall back to "chatml" when the GGUF has none.
