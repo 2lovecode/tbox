@@ -22,7 +22,7 @@ use llama_cpp_2::token::LlamaToken;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::{AddBos, LlamaModel, Special};
+use llama_cpp_2::model::{AddBos, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 
 use super::llm::{ChatModel, ModelMessage, ModelTurn, ToolCall};
@@ -420,9 +420,13 @@ fn generate(
         if tok == model.token_eos() {
             break;
         }
-        // piece bytes for this token
+        // piece bytes for this token. Buffer size 64 comfortably covers any
+        // single BPE token (max ~12 bytes for a 4-byte UTF-8 char with leading
+        // space); oversize tokens return `InsufficientBufferSpace` and are
+        // surfaced as a decode error rather than silently truncated.
+        const PIECE_BUF: usize = 64;
         let piece = model
-            .token_to_bytes(tok, Special::Tokenize)
+            .token_to_piece_bytes(tok, PIECE_BUF, /*special=*/ false, None)
             .map_err(|e| format!("detokenize failed: {e:?}"))?;
         out_bytes.extend_from_slice(&piece);
         gen_toks.push(tok);
@@ -617,6 +621,10 @@ fn truncate_incomplete_utf8_drops_partial_char() {
 }
 
 mod tests {
+    // The whole module is dead outside `cargo test`, so every `use` here
+    // looks unused to the build profile. The original `use super::*;`
+    // produced the same warning, so we suppress it explicitly.
+    #![allow(unused_imports)]
     use super::*;
 
     #[test]

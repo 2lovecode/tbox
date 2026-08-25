@@ -68,7 +68,11 @@ pub fn build_from_disk() -> Result<GenaiChatModel, AgentError> {
 
 fn resolve_target(
     cfg: &LlmConfig,
-    local_model: Option<PathBuf>,
+    // Reserved for the embedded-engine fallback path. Today the local
+    // branch only probes the Ollama daemon; the embedded path lives in
+    // `build_model_from_disk`. Keep the parameter so we can route the
+    // installed-GGUF case here later without churning call sites.
+    _local_model: Option<PathBuf>,
     protocol: LlmProtocol,
 ) -> Result<(AdapterKind, String, String, Option<String>), AgentError> {
     if cfg.is_local() {
