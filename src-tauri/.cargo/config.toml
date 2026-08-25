@@ -6,3 +6,19 @@
 # on GNU so the DLL can still be produced without overflowing ordinals.
 [target.x86_64-pc-windows-gnu]
 rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
+
+# Force the macOS deployment target high enough that `<filesystem>`
+# symbols are available. Tauri 2 defaults to 10.13, which the latest
+# Xcode 26 SDK marks unavailable, so llama.cpp's
+# `ggml-backend-{dl,reg}.cpp` fail to compile with:
+#   error: 'path' is unavailable: introduced in macOS 10.15
+# Bumping to 10.15 here is exported into every subprocess cargo
+# launches, including `cmake` invoked by `llama-cpp-sys-2`'s build
+# script. Linux and Windows runners ignore the variable, so this
+# entry is macOS-only in practice but harmless to declare globally.
+#
+# Override locally with `MACOSX_DEPLOYMENT_TARGET=10.13 cargo build …`
+# if you ever need to reproduce the old failure (e.g. for verifying
+# an upstream patch).
+[env]
+MACOSX_DEPLOYMENT_TARGET = "10.15"
