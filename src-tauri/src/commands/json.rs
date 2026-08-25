@@ -226,7 +226,9 @@ pub fn json_to_query_params(json_str: String) -> Result<JsonToQueryResult, Strin
     })
 }
 
-fn flatten_json_value(value: &Value, prefix: String, pairs: &mut Vec<(String, String)>) {
+/// 把 JSON 值递归铺平为 `(path, value_str)` 对。路径风格：`a[b][0][c]`，
+/// 与既有 `json_to_query_params` 共享，可作为平铺查询参数的内部表示。
+pub(crate) fn flatten_json_value(value: &Value, prefix: String, pairs: &mut Vec<(String, String)>) {
     match value {
         Value::Object(map) => {
             for (k, v) in map {
@@ -408,5 +410,161 @@ fn compare_values(
                 });
             }
         }
+    }
+}
+
+// ==================== Agent dispatch 包装层（register-app-layer-tools） ====================
+//
+// 这些函数不是 Tauri command，只供 `src-tauri/src/agent/registry.rs` 的 dispatch
+// 调用；返回值统一为 `Result<String, String>` 与既有 dispatch 协议一致。
+// 前端 JsonToQuery.vue 仍走 `json_to_query_params`（双字段 JsonToQueryResult）
+// 保持契约不变。
+
+/// Agent dispatch: JSON 对象 → URL-encoded query string。
+/// 内部复用 `json_to_query_params` 的 `encoded` 字段；空对象返回空字符串。
+pub fn json_to_query_dispatch(input: &str) -> Result<String, String> {
+    let result = json_to_query_params(input.to_string())?;
+    Ok(result.encoded)
+}
+
+/// Agent dispatch: 嵌套 JSON 展平为 `{path: value}` 对象。数组下标走 `[i]`、
+/// 嵌套对象走 `[key]`，与 `json.to_query_dispatch` 同一路径风格。
+pub fn json_flatten_dispatch(input: &str) -> Result<String, String> {
+    let value: Value =
+        serde_json::from_str(input).map_err(|e| format!("JSON 解析错误: {e}"))?;
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    flatten_json_value(&value, String::new(), &mut pairs);
+    let mut obj = serde_json::Map::new();
+    for (k, v) in pairs {
+        obj.insert(k, Value::String(v));
+    }
+    serde_json::to_string(&Value::Object(obj)).map_err(|e| format!("序列化失败: {e}"))
+}
+
+/// Agent dispatch: URL 字符串 → 结构化 JSON。path 拆为段数组；
+/// query 重复键合并为 JSON 数组；空组件（如无 port）省略。
+pub fn url_parse_dispatch(input: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(input.trim())
+        .map_err(|e| format!("URL 解析失败: {e}"))?;
+
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| "URL 缺少 host".to_string())?
+        .to_string();
+
+    let mut out = serde_json::Map::new();
+    out.insert("scheme".into(), Value::String(parsed.scheme().to_string()));
+    out.insert("host".into(), Value::String(host));
+    if let Some(port) = parsed.port() {
+        out.insert("port".into(), Value::Number(port.into()));
+    }
+    let path_segments: Vec<Value> = parsed
+        .path_segments()
+        .map(|it| it.filter(|s| !s.is_empty()).map(|s| Value::String(s.to_string())).collect())
+        .unwrap_or_default();
+    out.insert("path".into(), Value::Array(path_segments));
+
+    let mut query_map = serde_json::Map::new();
+    for (k, v) in parsed.query_pairs() {
+        let key = k.into_owned();
+        let val = Value::String(v.into_owned());
+        match query_map.remove(&key) {
+            Some(Value::Array(mut arr)) => {
+                arr.push(val);
+                query_map.insert(key, Value::Array(arr));
+            }
+            Some(prev) => {
+                query_map.insert(key, Value::Array(vec![prev, val]));
+            }
+            None => {
+                query_map.insert(key, val);
+            }
+        }
+    }
+    out.insert("query".into(), Value::Object(query_map));
+
+    if let Some(frag) = parsed.fragment() {
+        out.insert("fragment".into(), Value::String(frag.to_string()));
+    }
+
+    serde_json::to_string(&Value::Object(out)).map_err(|e| format!("序列化失败: {e}"))
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn json_to_query_simple() {
+        assert_eq!(json_to_query_dispatch(r#"{"aa":"bb"}"#).unwrap(), "aa=bb");
+    }
+
+    #[test]
+    fn json_to_query_nested_and_array() {
+        let out = json_to_query_dispatch(r#"{"a":{"b":"c"},"x":["1","2"]}"#).unwrap();
+        // 嵌套对象走 [b]，数组走 [0]/[1]，key/value 均 URL 编码
+        assert!(out.contains("a%5Bb%5D=c"), "got: {out}");
+        assert!(out.contains("x%5B0%5D=1"), "got: {out}");
+        assert!(out.contains("x%5B1%5D=2"), "got: {out}");
+    }
+
+    #[test]
+    fn json_to_query_invalid_json() {
+        assert!(json_to_query_dispatch("not json").is_err());
+    }
+
+    #[test]
+    fn json_flatten_simple() {
+        let out = json_flatten_dispatch(r#"{"a":1}"#).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["a"], "1");
+    }
+
+    #[test]
+    fn json_flatten_nested_and_array() {
+        let out = json_flatten_dispatch(r#"{"a":{"b":1},"c":[10,20]}"#).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["a[b]"], "1");
+        assert_eq!(v["c[0]"], "10");
+        assert_eq!(v["c[1]"], "20");
+    }
+
+    #[test]
+    fn json_flatten_empty_object() {
+        let out = json_flatten_dispatch("{}").unwrap();
+        assert_eq!(out, "{}");
+    }
+
+    #[test]
+    fn url_parse_full() {
+        let out = url_parse_dispatch("https://api.x.com:8080/v1/x?k=v&k=w#frag").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["scheme"], "https");
+        assert_eq!(v["host"], "api.x.com");
+        assert_eq!(v["port"], 8080);
+        assert_eq!(v["path"], serde_json::json!(["v1", "x"]));
+        // 重复键合并为数组
+        assert_eq!(v["query"]["k"], serde_json::json!(["v", "w"]));
+        assert_eq!(v["fragment"], "frag");
+    }
+
+    #[test]
+    fn url_parse_no_port_no_fragment() {
+        let out = url_parse_dispatch("https://x.com/path").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert!(v.get("port").is_none());
+        assert!(v.get("fragment").is_none());
+    }
+
+    #[test]
+    fn url_parse_invalid() {
+        assert!(url_parse_dispatch("not a url").is_err());
+    }
+
+    #[test]
+    fn url_parse_decodes_query() {
+        let out = url_parse_dispatch("https://x.com/?k=hi%20world").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["query"]["k"], "hi world");
     }
 }

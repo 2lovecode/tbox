@@ -52,10 +52,12 @@ enum EngineCmd {
         reply: Sender<Result<(), String>>,
     },
     /// Run one completion over (role, content) messages plus an optional
-    /// tools system prompt. Reply carries the generated text.
+    /// tools system prompt and an optional GBNF grammar for constrained
+    /// decoding. Reply carries the generated text.
     Complete {
         messages: Vec<(String, String)>,
         tools_prompt: Option<String>,
+        grammar: Option<String>,
         cancel: Arc<AtomicBool>,
         reply: Sender<Result<String, String>>,
     },
@@ -183,16 +185,20 @@ impl EmbeddedEngine {
     }
 
     /// Generate a completion over chat messages via the engine thread.
+    /// `grammar`（GBNF）非空时启用约束解码；初始化失败自动降级为普通采样。
+    #[allow(clippy::too_many_arguments)]
     pub fn complete_chat(
         &self,
         messages: Vec<(String, String)>,
         tools_prompt: Option<String>,
+        grammar: Option<String>,
         cancel: Arc<AtomicBool>,
     ) -> Result<String, String> {
         let (reply_tx, reply_rx) = channel();
         self.send(EngineCmd::Complete {
             messages,
             tools_prompt,
+            grammar,
             cancel,
             reply: reply_tx,
         })?;
@@ -221,12 +227,19 @@ fn handle_cmd(backend: &Option<LlamaBackend>, loaded: &mut Option<LoadedModel>, 
         EngineCmd::Complete {
             messages,
             tools_prompt,
+            grammar,
             cancel,
             reply,
         } => {
             let res = match loaded.as_mut() {
                 None => Err("engine has no loaded model".into()),
-                Some(lm) => generate(lm, &messages, tools_prompt.as_deref(), cancel.as_ref()),
+                Some(lm) => generate(
+                    lm,
+                    &messages,
+                    tools_prompt.as_deref(),
+                    grammar.as_deref(),
+                    cancel.as_ref(),
+                ),
             };
             let _ = reply.send(res);
         }
@@ -257,6 +270,7 @@ fn load_model(
         .unwrap_or(4);
     let ctx_params = LlamaContextParams::default()
         .with_n_ctx(std::num::NonZeroU32::new(4096))
+        .with_n_batch(4096) // 与 n_ctx 一致：系统提示（含 Skill）可超过 2048 token
         .with_n_threads(n_threads);
     let ctx = model
         .new_context(backend, ctx_params)
@@ -266,10 +280,35 @@ fn load_model(
     Ok(())
 }
 
+/// 采样链：默认 top-k/top-p/temp；grammar 非空时插入 grammar 过滤器
+/// （仍以 dist 结尾）；grammar 初始化失败降级为默认链（spec：约束解码
+/// 是增强项，可降级，功能不因此不可用）。
+fn build_sampler(model: &LlamaModel, grammar: Option<&str>) -> LlamaSampler {
+    let base = |g: Option<LlamaSampler>| -> LlamaSampler {
+        let mut chain = Vec::new();
+        if let Some(g) = g {
+            chain.push(g);
+        }
+        chain.push(LlamaSampler::top_k(40));
+        chain.push(LlamaSampler::top_p(0.9, 1));
+        chain.push(LlamaSampler::temp(0.7));
+        chain.push(LlamaSampler::dist(41));
+        LlamaSampler::chain(chain, true)
+    };
+    match grammar {
+        Some(g) => match LlamaSampler::grammar(model, g, "root") {
+            Ok(gs) => base(Some(gs)),
+            Err(_) => base(None),
+        },
+        None => base(None),
+    }
+}
+
 fn generate(
     lm: &mut LoadedModel,
     messages: &[(String, String)],
     tools_prompt: Option<&str>,
+    grammar: Option<&str>,
     cancel: &AtomicBool,
 ) -> Result<String, String> {
     let LoadedModel { model, ctx, n_ctx } = lm;
@@ -318,24 +357,30 @@ fn generate(
     if tokens.is_empty() {
         return Err("empty prompt".into());
     }
-    if tokens.len() >= *n_ctx as usize {
-        // Keep the tail (recent context).
-        let overflow = tokens.len() - *n_ctx as usize + 1;
+    // prompt 上限：留出生成空间（max_new_tokens=1024）；同时不能超过
+    // llama.cpp 单次 decode 的 n_batch（load_model 设置为 2048），否则
+    // GGML_ASSERT(n_tokens_all <= cparams.n_batch) failed。
+    // 使用保守的 1024 上限，避免与未来 n_batch 调整失配。
+    const PROMPT_TOKEN_CAP: usize = 3072;
+    const MAX_NEW_TOKENS: usize = 1024;
+    if tokens.len() > PROMPT_TOKEN_CAP {
+        // 保留尾部（动态对话与工具结果），丢弃开头过长的系统提示。
+        let overflow = tokens.len() - PROMPT_TOKEN_CAP;
         tokens.drain(..overflow);
+    }
+    if tokens.len() + MAX_NEW_TOKENS >= *n_ctx as usize {
+        // 防止单回合总长超 ctx（罕见：ctx 配得极小）
+        let overflow = tokens.len() + MAX_NEW_TOKENS - *n_ctx as usize + 1;
+        if overflow < tokens.len() {
+            tokens.drain(..overflow);
+        }
     }
 
     // A sampler chain MUST end with a distribution sampler (dist) —
     // top_k/temp only reshape the candidate set; without dist nothing is
     // ever selected and llama_sampler_sample asserts (cur_p.selected).
-    let mut sampler = LlamaSampler::chain(
-        [
-            LlamaSampler::top_k(40),
-            LlamaSampler::top_p(0.9, 1),
-            LlamaSampler::temp(0.7),
-            LlamaSampler::dist(41),
-        ],
-        true,
-    );
+    // With a grammar the chain becomes [grammar, top_k, top_p, temp, dist].
+    let mut sampler = build_sampler(model, grammar);
 
     // The context (and its KV cache) is reused across turns — reset both so
     // the previous conversation's state cannot leak into this completion.
@@ -363,7 +408,7 @@ fn generate(
     // a single-token decode uses batch index 0.
     let mut pos = tokens.len() as i32;
     let mut sample_idx = last; // prompt batch: last index
-    let max_new_tokens = 1024usize;
+    let max_new_tokens = 1024usize; // 与上文 MAX_NEW_TOKENS 保持一致
     let mut gen_batch = LlamaBatch::new(1, 1);
     for _ in 0..max_new_tokens {
         if cancel.load(Ordering::SeqCst) {
@@ -400,7 +445,10 @@ fn generate(
 
 /// `ChatModel` implementation backed by the embedded engine. Loads the GGUF
 /// lazily on first `complete`. Tool calls use the Qwen `<tool_call>` text
-/// protocol; malformed output degrades to plain text.
+/// protocol parsed by the harness tolerant parser; malformed output degrades
+/// to plain text. System prompts (including tool instructions) are built by
+/// the harness strategy in the agent loop; the engine only adds constrained
+/// decoding (GBNF generated from the registry) for tool-call structure.
 pub struct EmbeddedChatModel {
     model_path: PathBuf,
     cancel: Arc<AtomicBool>,
@@ -417,9 +465,23 @@ impl EmbeddedChatModel {
     pub fn cancel_handle(&self) -> Arc<AtomicBool> {
         self.cancel.clone()
     }
+
+    fn model_name(&self) -> String {
+        self.model_path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    }
 }
 
 impl ChatModel for EmbeddedChatModel {
+    fn backend_desc(&self) -> super::llm::BackendDesc {
+        super::llm::BackendDesc {
+            backend: "embedded".into(),
+            model: self.model_name(),
+        }
+    }
+
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
         engine().ensure_loaded(&self.model_path)?;
         self.cancel.store(false, Ordering::SeqCst);
@@ -427,10 +489,20 @@ impl ChatModel for EmbeddedChatModel {
             .iter()
             .map(|m| (m.role.clone(), m.content.clone()))
             .collect();
-        let tools = crate::agent::registry::tools_as_openai_json();
-        let tools_prompt = render_tools_prompt(&tools);
-        let text = engine().complete_chat(messages, tools_prompt, self.cancel.clone())?;
-        let (calls, rest) = parse_qwen_tool_calls(&text);
+        // 约束解码：策略默认对小模型档 disabled（design.md D3 + 任务 4.3
+        // 实测：grammar 反让 0.5B 意图命中率从 ~63% 跌至 ~12%）。可通过
+        // 切换 strategy.constrained()=true 或环境变量 `TBOX_DISABLE_TOOL_GRAMMAR=1`
+        // 反向（强制开启）再次评估；解析容错与 reask 仍提供结构保证。
+        let grammar = crate::agent::harness::strategy_for(
+            &self.backend_desc().backend,
+            &self.backend_desc().model,
+        )
+        .constrained()
+        .then(|| grammar_if_enabled())
+        .flatten();
+        let text =
+            engine().complete_chat(messages, None, grammar, self.cancel.clone())?;
+        let (calls, rest) = crate::agent::harness::parse::parse_tool_calls(&text);
         if calls.is_empty() {
             Ok(ModelTurn::Text(rest))
         } else {
@@ -443,76 +515,20 @@ impl ChatModel for EmbeddedChatModel {
 // Qwen tool-call text protocol parsing (public for unit tests)
 // ---------------------------------------------------------------------------
 
-/// Parse Qwen-style `<tool_call>{"name": .., "arguments": {..}}</tool_call>`
-/// blocks out of a completion. Returns tool calls plus the remaining text
-/// with the tool_call blocks stripped.
-pub fn parse_qwen_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
-    let mut calls = Vec::new();
-    let mut rest = String::new();
-    let mut remainder = text;
-    while let Some(start) = remainder.find("<tool_call>") {
-        let after_start = &remainder[start + "<tool_call>".len()..];
-        match after_start.find("</tool_call>") {
-            Some(end) => {
-                let payload = after_start[..end].trim();
-                let parsed = serde_json::from_str::<serde_json::Value>(payload).ok().and_then(|v| {
-                    match (v.get("name").and_then(|n| n.as_str()), v.get("arguments")) {
-                        (Some(name), Some(args)) => Some(ToolCall {
-                            id: format!("call_{}", calls.len()),
-                            name: name.to_string(),
-                            arguments: args.clone(),
-                        }),
-                        _ => None,
-                    }
-                });
-                match parsed {
-                    Some(call) => {
-                        calls.push(call);
-                        // strip the consumed block from output text
-                        rest.push_str(&remainder[..start]);
-                        remainder = &after_start[end + "</tool_call>".len()..];
-                    }
-                    // malformed payload: keep verbatim as plain text
-                    None => {
-                        rest.push_str(&remainder[..start + "<tool_call>".len()]);
-                        remainder = after_start;
-                    }
-                }
-            }
-            None => {
-                rest.push_str(remainder);
-                remainder = "";
-                break;
-            }
-        }
+/// 约束解码开关：默认关闭；`TBOX_ENABLE_TOOL_GRAMMAR=1` 时强制开启
+/// （4.3 实测 grammar 反让 0.5B 意图率下降，默认保持关闭）。
+fn grammar_if_enabled() -> Option<String> {
+    if std::env::var_os("TBOX_ENABLE_TOOL_GRAMMAR").is_some() {
+        Some(crate::agent::harness::grammar::tool_call_grammar())
+    } else {
+        None
     }
-    rest.push_str(remainder);
-    (calls, rest.trim().to_string())
 }
 
-/// Render tool definitions into a Qwen-friendly system instruction.
-pub fn render_tools_prompt(tools_json: &serde_json::Value) -> Option<String> {
-    let arr = tools_json.as_array()?;
-    if arr.is_empty() {
-        return None;
-    }
-    let mut s = String::from(
-        "你可以调用以下工具。需要调用时，输出 <tool_call>{\"name\": \"...\", \"arguments\": {...}}</tool_call>，不要输出其他内容：\n",
-    );
-    for t in arr {
-        if let Some(name) = t.pointer("/function/name").and_then(|v| v.as_str()) {
-            let desc = t
-                .pointer("/function/description")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let params = t
-                .pointer("/function/parameters")
-                .cloned()
-                .unwrap_or_else(|| serde_json::json!({}));
-            s.push_str(&format!("- {name}: {desc} 参数: {params}\n"));
-        }
-    }
-    Some(s)
+/// Parse Qwen-style `<tool_call>` blocks — delegates to the harness tolerant
+/// parser (fence stripping, fullwidth normalization, stringified arguments).
+pub fn parse_qwen_tool_calls(text: &str) -> (Vec<ToolCall>, String) {
+    crate::agent::harness::parse::parse_tool_calls(text)
 }
 
 #[cfg(test)]
@@ -553,17 +569,6 @@ mod tests {
     #[test]
     fn status_default_not_loaded() {
         assert_eq!(EmbeddedEngine::default_status_for_test(), EngineStatus::NotLoaded);
-    }
-
-    #[test]
-    fn tools_prompt_renders() {
-        let tools = serde_json::json!([
-            {"type": "function", "function": {"name": "ping", "description": "ping 工具", "parameters": {}}}
-        ]);
-        let s = render_tools_prompt(&tools).unwrap();
-        assert!(s.contains("ping"));
-        assert!(s.contains("<tool_call>"));
-        assert!(render_tools_prompt(&serde_json::json!([])).is_none());
     }
 }
 

@@ -168,6 +168,26 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
                 ("charset", "字符集标签，例如 UTF-8"),
             ]),
         ),
+        tool(
+            "json.to_query",
+            "JSON 转 URL Query",
+            required_string_props(&[("input", "JSON 字符串（通常为对象）")]),
+        ),
+        tool(
+            "json.flatten",
+            "嵌套 JSON 平铺",
+            required_string_props(&[("input", "JSON 字符串")]),
+        ),
+        tool(
+            "url.parse",
+            "URL 拆解为结构化组件",
+            required_string_props(&[("input", "URL 字符串")]),
+        ),
+        tool(
+            "form.parse",
+            "表单字符串解析为 JSON 对象",
+            required_string_props(&[("input", "application/x-www-form-urlencoded 字符串")]),
+        ),
     ]
 });
 
@@ -182,6 +202,11 @@ static BY_ID: Lazy<HashMap<&'static str, usize>> = Lazy::new(|| {
 /// 按稳定字符串 id 查找工具规格。
 pub fn lookup(tool_id: &str) -> Option<&'static ToolSpec> {
     BY_ID.get(tool_id).map(|&i| &TOOLS[i])
+}
+
+/// 全部注册工具（harness 提示摘要 / GBNF 生成与 tools_as_openai_json 同源）。
+pub fn all_tools() -> &'static [ToolSpec] {
+    &TOOLS
 }
 
 /// OpenAI Chat Completions `tools` array for the registered allowlist.
@@ -203,7 +228,8 @@ pub fn tools_as_openai_json() -> Value {
 }
 
 /// 校验 args 是否满足工具 schema 的必填字段与基本类型（手写，无 jsonschema 依赖）。
-fn validate_args(spec: &ToolSpec, args: &Value) -> Result<(), String> {
+/// 公开给 harness 在 dispatch 前做 reask 判定。
+pub fn validate_args(spec: &ToolSpec, args: &Value) -> Result<(), String> {
     let obj = args.as_object().ok_or_else(|| {
         "参数不符合 schema：期望 JSON object".to_string()
     })?;
@@ -307,6 +333,22 @@ pub fn dispatch(tool_id: &str, args: &Value) -> Result<String, String> {
         "cron.explain" => dispatch_cron_explain(args),
         "number.convert" => dispatch_number_convert(args),
         "charset.convert" => dispatch_charset_convert(args),
+        "json.to_query" => {
+            let input = require_str(args, "input")?;
+            crate::commands::json::json_to_query_dispatch(input)
+        }
+        "json.flatten" => {
+            let input = require_str(args, "input")?;
+            crate::commands::json::json_flatten_dispatch(input)
+        }
+        "url.parse" => {
+            let input = require_str(args, "input")?;
+            crate::commands::json::url_parse_dispatch(input)
+        }
+        "form.parse" => {
+            let input = require_str(args, "input")?;
+            crate::commands::encoding::form_parse_dispatch(input)
+        }
         _ => Err(format!("未注册的工具: {tool_id}（unknown tool）")),
     }
 }
@@ -550,6 +592,28 @@ mod tests {
     }
 
     #[test]
+    fn app_layer_tools_dispatch_smoke() {
+        assert_eq!(
+            dispatch("json.to_query", &json!({"input": r#"{"aa":"bb"}"#})).unwrap(),
+            "aa=bb"
+        );
+        let flat = dispatch("json.flatten", &json!({"input": r#"{"a":{"b":1}}"#})).unwrap();
+        assert!(flat.contains(r#""a[b]":"1""#), "got: {flat}");
+
+        let parsed =
+            dispatch("url.parse", &json!({"input": "https://x.com/v1?k=v&k=w#frag"})).unwrap();
+        let v: Value = serde_json::from_str(&parsed).unwrap();
+        assert_eq!(v["scheme"], "https");
+        assert_eq!(v["host"], "x.com");
+        assert_eq!(v["path"], serde_json::json!(["v1"]));
+        assert_eq!(v["query"]["k"], serde_json::json!(["v", "w"]));
+        assert_eq!(v["fragment"], "frag");
+
+        let form = dispatch("form.parse", &json!({"input": "a=1&a=2"})).unwrap();
+        assert!(form.contains(r#""a":["1","2"]"#), "got: {form}");
+    }
+
+    #[test]
     fn all_allowlisted_tools_lookupable() {
         let ids = [
             "json.format",
@@ -565,6 +629,10 @@ mod tests {
             "cron.explain",
             "number.convert",
             "charset.convert",
+            "json.to_query",
+            "json.flatten",
+            "url.parse",
+            "form.parse",
         ];
         for id in ids {
             let spec = lookup(id).unwrap_or_else(|| panic!("missing {id}"));

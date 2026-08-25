@@ -1,13 +1,30 @@
 ---
-tool_id: base64.encode,base64.decode
+tool_id: base64.encode, base64.decode
 keywords: base64, Base64, 编码, 解码, encode, decode
 ---
 
 # Base64 编解码
 
-- `base64.encode`：将明文编码为 Base64。
-- `base64.decode`：将 Base64 字符串解码为 UTF-8 文本。
+`base64.encode` 将字符串做标准 Base64 编码；`base64.decode` 反向解码（结果须为 UTF-8）。
+参数：`input` — 待编码/解码的字符串。
 
-参数：`input` — 待处理字符串。
+## 典型应用场景
 
-常见场景：HTTP Basic、数据 URI、JWT 片段外的独立编解码需求。
+- 接口调试、Token / Cookie 字段可视化
+- 二进制摘要的可读化（一般先 `hash.digest` 再 `base64.encode`）
+
+## 用户问法 → 工具调用样本
+
+**用户**：把 `hi` 编成 Base64
+**工具调用**：`<tool_call>{"name": "base64.encode", "arguments": {"input": "hi"}}</tool_call>`
+**预期输出**：`aGk=`
+
+**用户**：解码 `aGk=`
+**工具调用**：`<tool_call>{"name": "base64.decode", "arguments": {"input": "aGk="}}</tool_call>`
+**预期输出**：`hi`
+
+**用户**：base64 encode `hello world`
+**工具调用**：`<tool_call>{"name": "base64.encode", "arguments": {"input": "hello world"}}</tool_call>`
+**预期输出**：`aGVsbG8gd29ybGQ=`
+
+边界：解码结果非 UTF-8 时报错。

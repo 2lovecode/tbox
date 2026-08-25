@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use genai::adapter::AdapterKind;
-use genai::chat::{ChatMessage, ChatRequest, Tool, ToolCall as GenaiToolCall};
+use genai::chat::{ChatMessage, ChatRequest, Tool};
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{Client, ModelIden, ServiceTarget};
 use serde_json::Value;
@@ -225,6 +225,13 @@ fn to_genai_messages(msgs: &[ModelMessage]) -> Vec<ChatMessage> {
 
 
 impl ChatModel for GenaiChatModel {
+    fn backend_desc(&self) -> super::llm::BackendDesc {
+        super::llm::BackendDesc {
+            backend: "genai".into(),
+            model: self.model.clone(),
+        }
+    }
+
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
         let chat_req = ChatRequest::new(to_genai_messages(msgs)).with_tools(self.tools.clone());
         let client = self.client.clone();

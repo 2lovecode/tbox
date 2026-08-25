@@ -48,6 +48,18 @@ static SKILLS: &[EmbeddedSkill] = &[
     EmbeddedSkill {
         source: include_str!("../../skills/charset.convert.md"),
     },
+    EmbeddedSkill {
+        source: include_str!("../../skills/json.to_query.md"),
+    },
+    EmbeddedSkill {
+        source: include_str!("../../skills/json.flatten.md"),
+    },
+    EmbeddedSkill {
+        source: include_str!("../../skills/url.parse.md"),
+    },
+    EmbeddedSkill {
+        source: include_str!("../../skills/form.parse.md"),
+    },
 ];
 
 struct ParsedSkill {

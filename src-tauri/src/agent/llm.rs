@@ -58,9 +58,30 @@ pub enum ModelTurn {
     ToolCalls(Vec<ToolCall>),
 }
 
+/// 模型后端描述：harness 策略选档依据（backend 如 "embedded" / "genai"）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackendDesc {
+    pub backend: String,
+    pub model: String,
+}
+
+impl Default for BackendDesc {
+    fn default() -> Self {
+        Self {
+            backend: "default".to_string(),
+            model: String::new(),
+        }
+    }
+}
+
 /// Swappable chat model backend (real LLM or Scripted mock).
 pub trait ChatModel {
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String>;
+
+    /// 后端/模型描述，供 harness 选择策略档位；默认非 embedded 档。
+    fn backend_desc(&self) -> BackendDesc {
+        BackendDesc::default()
+    }
 }
 
 #[derive(Debug)]

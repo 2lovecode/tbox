@@ -1,14 +1,27 @@
 ---
 tool_id: jwt.parse
-keywords: jwt, JWT, token, 令牌, 解析, payload, header, 验签
+keywords: jwt, JWT, token, 令牌, 解码, decode, header, payload, 解析
 ---
 
 # JWT 解析（不验签）
 
-使用 `jwt.parse` 解析 JWT 的 header 与 payload JSON。
+`jwt.parse` 把 JWT 字符串的 header 和 payload 部分做 Base64URL 解码并以 JSON
+形式输出。**不校验签名**——只解析。参数：`input` — JWT 字符串（`header.payload.signature`）。
 
-**重要：只解析结构，不验证签名。** 输出中 `verified` 恒为 `false`；不可用于鉴权决策。
+## 典型应用场景
 
-参数：`input` — 完整 JWT 字符串（`header.payload[.signature]`）。
+- 调试接口时查看 Token 实际字段（exp / uid / scope 等）
+- 排查 401：确认 Token 是否过期、签发方是否对
+- 安全审计：检查 JWT 中是否泄露了敏感字段
 
-适用：调试 token 内容、查看 claims、检查过期字段等只读场景。
+## 用户问法 → 工具调用样本
+
+**用户**：帮我解析这段 JWT `eyJhbGciOiJIUzI1NiJ9.e30.abc`
+**工具调用**：`<tool_call>{"name": "jwt.parse", "arguments": {"input": "eyJhbGciOiJIUzI1NiJ9.e30.abc"}}</tool_call>`
+**预期输出**：`{"header":{"alg":"HS256"},"payload":{},"verified":false}`
+
+**用户**：decode this jwt: `eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig`
+**工具调用**：`<tool_call>{"name": "jwt.parse", "arguments": {"input": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig"}}</tool_call>`
+**预期输出**：`{"header":{"alg":"HS256"},"payload":{"sub":"1"},"verified":false}`
+
+边界：缺 segment 报错；segment 非 Base64URL 或非 JSON 报错；签名段不参与校验。

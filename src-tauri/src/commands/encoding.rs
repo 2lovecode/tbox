@@ -487,3 +487,83 @@ pub fn hex_to_binary(hex: String) -> Result<String, String> {
 
     Ok(result)
 }
+
+// ==================== Agent dispatch: form-urlencoded → JSON ====================
+
+/// Agent dispatch: `application/x-www-form-urlencoded` 字符串解析为 JSON 对象。
+/// 重复键合并为 JSON 数组；值经 percent-decode；空字符串返回空对象。
+pub fn form_parse_dispatch(input: &str) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok("{}".to_string());
+    }
+
+    let mut out = serde_json::Map::new();
+    for pair in trimmed.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        let (raw_k, raw_v) = match pair.split_once('=') {
+            Some((k, v)) => (k, v),
+            None => (pair, ""),
+        };
+        let key = urlencoding::decode(raw_k)
+            .map_err(|e| format!("键 URL 解码失败: {e}"))?
+            .into_owned();
+        let val = urlencoding::decode(raw_v)
+            .map_err(|e| format!("值 URL 解码失败: {e}"))?
+            .into_owned();
+
+        match out.remove(&key) {
+            Some(serde_json::Value::Array(mut arr)) => {
+                arr.push(serde_json::Value::String(val));
+                out.insert(key, serde_json::Value::Array(arr));
+            }
+            Some(prev) => {
+                out.insert(
+                    key,
+                    serde_json::Value::Array(vec![prev, serde_json::Value::String(val)]),
+                );
+            }
+            None => {
+                out.insert(key, serde_json::Value::String(val));
+            }
+        }
+    }
+
+    serde_json::to_string(&serde_json::Value::Object(out))
+        .map_err(|e| format!("序列化失败: {e}"))
+}
+
+#[cfg(test)]
+mod form_parse_tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn simple_form() {
+        let out = form_parse_dispatch("aa=bb&x=hi%20world").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["aa"], "bb");
+        assert_eq!(v["x"], "hi world");
+    }
+
+    #[test]
+    fn duplicate_key_becomes_array() {
+        let out = form_parse_dispatch("a=1&a=2").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["a"], serde_json::json!(["1", "2"]));
+    }
+
+    #[test]
+    fn empty_input() {
+        assert_eq!(form_parse_dispatch("").unwrap(), "{}");
+    }
+
+    #[test]
+    fn value_without_equals() {
+        let out = form_parse_dispatch("flag").unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["flag"], "");
+    }
+}

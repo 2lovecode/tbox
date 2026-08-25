@@ -1,0 +1,616 @@
+{
+  "cases": [
+    {
+      "id": "b64-enc-1",
+      "user_input": "帮我把 hi 编成 Base64",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "b64-enc-2",
+      "user_input": "base64 encode: hello world",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hello world"
+      },
+      "model_output": "我来帮你编码\n<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"hello world\"}}</tool_call>"
+    },
+    {
+      "id": "b64-enc-3-fenced",
+      "user_input": "把 tbox 编成 base64",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "tbox"
+      },
+      "model_output": "```json\n<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"tbox\"}}</tool_call>\n```"
+    },
+    {
+      "id": "b64-dec-1",
+      "user_input": "解码这个 Base64：aGk=",
+      "expect_tool": "base64.decode",
+      "expect_args": {
+        "input": "aGk="
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.decode\", \"arguments\": {\"input\": \"aGk=\"}}</tool_call>"
+    },
+    {
+      "id": "b64-dec-2",
+      "user_input": "what is dHBoxDEyMw== decoded?",
+      "expect_tool": "base64.decode",
+      "expect_args": {
+        "input": "dHBoxDEyMw=="
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.decode\", \"arguments\": {\"input\": \"dHBoxDEyMw==\"}}</tool_call>"
+    },
+    {
+      "id": "hash-1",
+      "user_input": "算一下 hi 的 md5",
+      "expect_tool": "hash.digest",
+      "expect_args": {
+        "input": "hi",
+        "algorithm": "md5"
+      },
+      "model_output": "<tool_call>{\"name\": \"hash.digest\", \"arguments\": {\"input\": \"hi\", \"algorithm\": \"md5\"}}</tool_call>"
+    },
+    {
+      "id": "hash-2",
+      "user_input": "sha256 digest of abc",
+      "expect_tool": "hash.digest",
+      "expect_args": {
+        "input": "abc",
+        "algorithm": "sha256"
+      },
+      "model_output": "<tool_call>{\"name\": \"hash.digest\", \"arguments\": {\"input\": \"abc\", \"algorithm\": \"sha256\"}}</tool_call>"
+    },
+    {
+      "id": "hash-3-fullwidth",
+      "user_input": "帮我算 secret 的 md5 摘要",
+      "expect_tool": "hash.digest",
+      "expect_args": {
+        "input": "secret",
+        "algorithm": "md5"
+      },
+      "model_output": "<tool_call>{“name”： “hash.digest”, “arguments”： {“input”： “secret”, “algorithm”： “md5”}}</tool_call>"
+    },
+    {
+      "id": "hash-4-strargs",
+      "user_input": "md5 of hello",
+      "expect_tool": "hash.digest",
+      "expect_args": {
+        "input": "hello",
+        "algorithm": "md5"
+      },
+      "model_output": "<tool_call>{\"name\": \"hash.digest\", \"arguments\": \"{\\\"input\\\": \\\"hello\\\", \\\"algorithm\\\": \\\"md5\\\"}\"}</tool_call>"
+    },
+    {
+      "id": "json-1",
+      "user_input": "格式化这段 JSON {\"a\":1}",
+      "expect_tool": "json.format",
+      "expect_args": {
+        "input": "{\"a\":1}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>"
+    },
+    {
+      "id": "json-2",
+      "user_input": "pretty print this json for me: [1,2,3]",
+      "expect_tool": "json.format",
+      "expect_args": {
+        "input": "[1,2,3]"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"[1,2,3]\"}}</tool_call>"
+    },
+    {
+      "id": "jwt-1",
+      "user_input": "帮我解析这段 JWT eyJhbGciOiJIUzI1NiJ9.e30.abc",
+      "expect_tool": "jwt.parse",
+      "expect_args": {
+        "input": "eyJhbGciOiJIUzI1NiJ9.e30.abc"
+      },
+      "model_output": "<tool_call>{\"name\": \"jwt.parse\", \"arguments\": {\"input\": \"eyJhbGciOiJIUzI1NiJ9.e30.abc\"}}</tool_call>"
+    },
+    {
+      "id": "jwt-2",
+      "user_input": "decode this jwt token: aa.bb.cc",
+      "expect_tool": "jwt.parse",
+      "expect_args": {
+        "input": "aa.bb.cc"
+      },
+      "model_output": "<tool_call>{\"name\": \"jwt.parse\", \"arguments\": {\"input\": \"aa.bb.cc\"}}</tool_call>"
+    },
+    {
+      "id": "ts-1",
+      "user_input": "1700000000 是什么时间",
+      "expect_tool": "timestamp.convert",
+      "expect_args": {
+        "input": "1700000000"
+      },
+      "model_output": "<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"1700000000\"}}</tool_call>"
+    },
+    {
+      "id": "ts-2",
+      "user_input": "convert 2023-11-14T22:13:20Z to unix timestamp",
+      "expect_tool": "timestamp.convert",
+      "expect_args": {
+        "input": "2023-11-14T22:13:20Z",
+        "unit": "iso"
+      },
+      "model_output": "<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"2023-11-14T22:13:20Z\", \"unit\": \"iso\"}}</tool_call>"
+    },
+    {
+      "id": "enc-1",
+      "user_input": "URL 编码 a b&c",
+      "expect_tool": "encoding.convert",
+      "expect_args": {
+        "input": "a b&c"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.convert\", \"arguments\": {\"input\": \"a b&c\"}}</tool_call>"
+    },
+    {
+      "id": "enc-2",
+      "user_input": "urlencode: 你好",
+      "expect_tool": "encoding.convert",
+      "expect_args": {
+        "input": "你好"
+      },
+      "model_output": "好的\n<tool_call>{\"name\": \"encoding.convert\", \"arguments\": {\"input\": \"你好\"}}</tool_call>"
+    },
+    {
+      "id": "xml-1",
+      "user_input": "格式化 XML <a><b/></a>",
+      "expect_tool": "xml.format",
+      "expect_args": {
+        "input": "<a><b/></a>"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.format\", \"arguments\": {\"input\": \"<a><b/></a>\"}}</tool_call>"
+    },
+    {
+      "id": "xml-2",
+      "user_input": "pretty print xml <root><x>1</x></root>",
+      "expect_tool": "xml.format",
+      "expect_args": {
+        "input": "<root><x>1</x></root>"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.format\", \"arguments\": {\"input\": \"<root><x>1</x></root>\"}}</tool_call>"
+    },
+    {
+      "id": "yaml-1",
+      "user_input": "格式化 YAML a: 1",
+      "expect_tool": "yaml.format",
+      "expect_args": {
+        "input": "a: 1"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.format\", \"arguments\": {\"input\": \"a: 1\"}}</tool_call>"
+    },
+    {
+      "id": "yaml-2",
+      "user_input": "format this yaml: name: tbox",
+      "expect_tool": "yaml.format",
+      "expect_args": {
+        "input": "name: tbox"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.format\", \"arguments\": {\"input\": \"name: tbox\"}}</tool_call>"
+    },
+    {
+      "id": "uuid-1",
+      "user_input": "生成一个 UUID",
+      "expect_tool": "uuid.generate",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.generate\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "uuid-2",
+      "user_input": "give me a uuid v4 please",
+      "expect_tool": "uuid.generate",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.generate\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "cron-1",
+      "user_input": "解释一下 cron 表达式 */5 * * * *",
+      "expect_tool": "cron.explain",
+      "expect_args": {
+        "input": "*/5 * * * *"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.explain\", \"arguments\": {\"input\": \"*/5 * * * *\"}}</tool_call>"
+    },
+    {
+      "id": "cron-2",
+      "user_input": "what does 0 2 * * * mean in cron",
+      "expect_tool": "cron.explain",
+      "expect_args": {
+        "input": "0 2 * * *"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.explain\", \"arguments\": {\"input\": \"0 2 * * *\"}}</tool_call>"
+    },
+    {
+      "id": "num-1",
+      "user_input": "把 255 从十进制转成十六进制",
+      "expect_tool": "number.convert",
+      "expect_args": {
+        "input": "255",
+        "from_base": 10,
+        "to_base": 16
+      },
+      "model_output": "<tool_call>{\"name\": \"number.convert\", \"arguments\": {\"input\": \"255\", \"from_base\": 10, \"to_base\": 16}}</tool_call>"
+    },
+    {
+      "id": "num-2",
+      "user_input": "convert 1010 from base 2 to base 10",
+      "expect_tool": "number.convert",
+      "expect_args": {
+        "input": "1010",
+        "from_base": 2,
+        "to_base": 10
+      },
+      "model_output": "<tool_call>{\"name\": \"number.convert\", \"arguments\": {\"input\": \"1010\", \"from_base\": 2, \"to_base\": 10}}</tool_call>"
+    },
+    {
+      "id": "charset-1",
+      "user_input": "校验这段文本是不是 UTF-8：你好",
+      "expect_tool": "charset.convert",
+      "expect_args": {
+        "input": "你好",
+        "charset": "UTF-8"
+      },
+      "model_output": "<tool_call>{\"name\": \"charset.convert\", \"arguments\": {\"input\": \"你好\", \"charset\": \"UTF-8\"}}</tool_call>"
+    },
+    {
+      "id": "charset-2",
+      "user_input": "check charset of hello with utf-8",
+      "expect_tool": "charset.convert",
+      "expect_args": {
+        "input": "hello",
+        "charset": "utf-8"
+      },
+      "model_output": "<tool_call>{\"name\": \"charset.convert\", \"arguments\": {\"input\": \"hello\", \"charset\": \"utf-8\"}}</tool_call>"
+    },
+    {
+      "id": "chat-1",
+      "user_input": "你好",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "你好！我是 TBox 工具助手，可以帮你做编码、哈希、格式化等计算任务。"
+    },
+    {
+      "id": "chat-2",
+      "user_input": "你会做什么？",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "我可以调用内置工具帮你完成 Base64 编解码、哈希、JSON/XML/YAML 格式化、时间戳转换、UUID 生成等任务。"
+    },
+    {
+      "id": "chat-3",
+      "user_input": "今天天气怎么样",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "抱歉，我没有联网工具，无法查询天气。我可以帮你做编码、哈希、格式化等离线计算任务。"
+    },
+    {
+      "id": "chat-4",
+      "user_input": "thanks!",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "不客气！有其他需要随时找我。"
+    },
+    {
+      "id": "q-1",
+      "user_input": "把 {\"aa\":\"bb\"} 转成 URL query string",
+      "expect_tool": "json.to_query",
+      "expect_args": {
+        "input": "{\"aa\":\"bb\"}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"aa\\\":\\\"bb\\\"}\"}}</tool_call>"
+    },
+    {
+      "id": "q-2",
+      "user_input": "convert JSON to query string: {\"name\":\"alice\",\"age\":30}",
+      "expect_tool": "json.to_query",
+      "expect_args": {
+        "input": "{\"name\":\"alice\",\"age\":30}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"name\\\":\\\"alice\\\",\\\"age\\\":30}\"}}</tool_call>"
+    },
+    {
+      "id": "q-3",
+      "user_input": "把这个嵌套 JSON 转成 query：{\"a\":{\"b\":\"c\"}}",
+      "expect_tool": "json.to_query",
+      "expect_args": {
+        "input": "{\"a\":{\"b\":\"c\"}}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"a\\\":{\\\"b\\\":\\\"c\\\"}}\"}}</tool_call>"
+    },
+    {
+      "id": "flat-1",
+      "user_input": "把嵌套 JSON {\"a\":{\"b\":1}} 平铺",
+      "expect_tool": "json.flatten",
+      "expect_args": {
+        "input": "{\"a\":{\"b\":1}}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.flatten\", \"arguments\": {\"input\": \"{\\\"a\\\":{\\\"b\\\":1}}\"}}</tool_call>"
+    },
+    {
+      "id": "flat-2",
+      "user_input": "flatten this JSON: {\"c\":[10,20]}",
+      "expect_tool": "json.flatten",
+      "expect_args": {
+        "input": "{\"c\":[10,20]}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.flatten\", \"arguments\": {\"input\": \"{\\\"c\\\":[10,20]}\"}}</tool_call>"
+    },
+    {
+      "id": "flat-3",
+      "user_input": "帮我把 API 返回的嵌套 JSON 转成点路径键值对 {\"user\":{\"id\":1,\"name\":\"a\"}}",
+      "expect_tool": "json.flatten",
+      "expect_args": {
+        "input": "{\"user\":{\"id\":1,\"name\":\"a\"}}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.flatten\", \"arguments\": {\"input\": \"{\\\"user\\\":{\\\"id\\\":1,\\\"name\\\":\\\"a\\\"}}\"}}</tool_call>"
+    },
+    {
+      "id": "urlp-1",
+      "user_input": "拆解这个 URL：https://api.x.com:8080/v1/x?k=v&k=w#frag",
+      "expect_tool": "url.parse",
+      "expect_args": {
+        "input": "https://api.x.com:8080/v1/x?k=v&k=w#frag"
+      },
+      "model_output": "<tool_call>{\"name\": \"url.parse\", \"arguments\": {\"input\": \"https://api.x.com:8080/v1/x?k=v&k=w#frag\"}}</tool_call>"
+    },
+    {
+      "id": "urlp-2",
+      "user_input": "parse URL https://x.com/path",
+      "expect_tool": "url.parse",
+      "expect_args": {
+        "input": "https://x.com/path"
+      },
+      "model_output": "<tool_call>{\"name\": \"url.parse\", \"arguments\": {\"input\": \"https://x.com/path\"}}</tool_call>"
+    },
+    {
+      "id": "urlp-3",
+      "user_input": "这个 URL 的 host 是什么 http://example.com/foo",
+      "expect_tool": "url.parse",
+      "expect_args": {
+        "input": "http://example.com/foo"
+      },
+      "model_output": "<tool_call>{\"name\": \"url.parse\", \"arguments\": {\"input\": \"http://example.com/foo\"}}</tool_call>"
+    },
+    {
+      "id": "form-1",
+      "user_input": "解析这个表单 aa=bb&x=hi%20world",
+      "expect_tool": "form.parse",
+      "expect_args": {
+        "input": "aa=bb&x=hi%20world"
+      },
+      "model_output": "<tool_call>{\"name\": \"form.parse\", \"arguments\": {\"input\": \"aa=bb&x=hi%20world\"}}</tool_call>"
+    },
+    {
+      "id": "form-2",
+      "user_input": "把 query string 转成对象 a=1&a=2&b=3",
+      "expect_tool": "form.parse",
+      "expect_args": {
+        "input": "a=1&a=2&b=3"
+      },
+      "model_output": "<tool_call>{\"name\": \"form.parse\", \"arguments\": {\"input\": \"a=1&a=2&b=3\"}}</tool_call>"
+    },
+    {
+      "id": "form-3",
+      "user_input": "parse this form string: flag",
+      "expect_tool": "form.parse",
+      "expect_args": {
+        "input": "flag"
+      },
+      "model_output": "<tool_call>{\"name\": \"form.parse\", \"arguments\": {\"input\": \"flag\"}}</tool_call>"
+    },
+    {
+      "id": "ms-1",
+      "user_input": "先 base64 解码 aGk= 再算 md5",
+      "expect_chain": [
+        "base64.decode",
+        "hash.digest"
+      ],
+      "expect_args": {
+        "input": "aGk="
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.decode\", \"arguments\": {\"input\": \"aGk=\"}}</tool_call>\n<tool_call>{\"name\": \"hash.digest\", \"arguments\": {\"input\": \"hi\", \"algorithm\": \"md5\"}}</tool_call>"
+    },
+    {
+      "id": "ms-2",
+      "user_input": "decode base64 aGVsbG8= then sha256 it",
+      "expect_chain": [
+        "base64.decode",
+        "hash.digest"
+      ],
+      "expect_args": {
+        "input": "aGVsbG8="
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.decode\", \"arguments\": {\"input\": \"aGVsbG8=\"}}</tool_call>\n<tool_call>{\"name\": \"hash.digest\", \"arguments\": {\"input\": \"hello\", \"algorithm\": \"sha256\"}}</tool_call>"
+    },
+    {
+      "id": "ms-3",
+      "user_input": "把 {\"x\":\"y\"} 转成 query 然后 URL 编码",
+      "expect_chain": [
+        "json.to_query",
+        "encoding.convert"
+      ],
+      "expect_args": {
+        "input": "{\"x\":\"y\"}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"x\\\":\\\"y\\\"}\"}}</tool_call>\n<tool_call>{\"name\": \"encoding.convert\", \"arguments\": {\"input\": \"x=y\"}}</tool_call>"
+    },
+    {
+      "id": "ms-4",
+      "user_input": "generate uuid and use it as base64",
+      "expect_chain": [
+        "uuid.generate",
+        "base64.encode"
+      ],
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.generate\", \"arguments\": {}}</tool_call>\n<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"f47ac10b-58cc-4372-a567-0e02b2c3d479\"}}</tool_call>"
+    },
+    {
+      "id": "ms-5",
+      "user_input": "把这个 URL 拆解再 URL 编码 query",
+      "expect_chain": [
+        "url.parse",
+        "encoding.convert"
+      ],
+      "expect_args": {
+        "input": "https://x.com/?q=hi%20world"
+      },
+      "model_output": "<tool_call>{\"name\": \"url.parse\", \"arguments\": {\"input\": \"https://x.com/?q=hi%20world\"}}</tool_call>\n<tool_call>{\"name\": \"encoding.convert\", \"arguments\": {\"input\": \"q=hi%20world\"}}</tool_call>"
+    },
+    {
+      "id": "ms-6",
+      "user_input": "first json.format this then json.to_query",
+      "expect_chain": [
+        "json.format",
+        "json.to_query"
+      ],
+      "expect_args": {
+        "input": "{\"a\":1}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>\n<tool_call>{\"name\": \"json.to_query\", \"arguments\": {\"input\": \"{\\\"a\\\": 1}\"}}</tool_call>"
+    },
+    {
+      "id": "chat-5",
+      "user_input": "用 Python 写一个快排",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "抱歉，我没有代码生成 / 执行工具，无法帮你写快排。"
+    },
+    {
+      "id": "chat-6",
+      "user_input": "搜索最近的 GitHub trending",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "抱歉，我无法联网搜索。你可以试试浏览器。"
+    },
+    {
+      "id": "chat-7",
+      "user_input": "计算 12345 + 67890 的值",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "12345 + 67890 = 80235。"
+    },
+    {
+      "id": "chat-8",
+      "user_input": "北京现在几点",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "抱歉，我没有联网工具，无法获取当前时间。"
+    },
+    {
+      "id": "b64-enc-3-alt",
+      "user_input": "base64 编码 tbox",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "tbox"
+      },
+      "model_output": "<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"tbox\"}}</tool_call>"
+    },
+    {
+      "id": "hash-5",
+      "user_input": "hash this with sha256: data",
+      "expect_tool": "hash.digest",
+      "expect_args": {
+        "input": "data",
+        "algorithm": "sha256"
+      },
+      "model_output": "<tool_call>{\"name\": \"hash.digest\", \"arguments\": {\"input\": \"data\", \"algorithm\": \"sha256\"}}</tool_call>"
+    },
+    {
+      "id": "jwt-3",
+      "user_input": "parse jwt header.payload.signature",
+      "expect_tool": "jwt.parse",
+      "expect_args": {
+        "input": "aa.bb.cc"
+      },
+      "model_output": "<tool_call>{\"name\": \"jwt.parse\", \"arguments\": {\"input\": \"aa.bb.cc\"}}</tool_call>"
+    },
+    {
+      "id": "ts-3",
+      "user_input": "把 0 转成 ISO",
+      "expect_tool": "timestamp.convert",
+      "expect_args": {
+        "input": "0"
+      },
+      "model_output": "<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"0\"}}</tool_call>"
+    },
+    {
+      "id": "enc-3",
+      "user_input": "url encode =?&",
+      "expect_tool": "encoding.convert",
+      "expect_args": {
+        "input": "=?&"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.convert\", \"arguments\": {\"input\": \"=?&\"}}</tool_call>"
+    },
+    {
+      "id": "xml-3",
+      "user_input": "XML 美化 <a><b/><c/></a>",
+      "expect_tool": "xml.format",
+      "expect_args": {
+        "input": "<a><b/><c/></a>"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.format\", \"arguments\": {\"input\": \"<a><b/><c/></a>\"}}</tool_call>"
+    },
+    {
+      "id": "yaml-3",
+      "user_input": "format this yaml foo: bar",
+      "expect_tool": "yaml.format",
+      "expect_args": {
+        "input": "foo: bar"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.format\", \"arguments\": {\"input\": \"foo: bar\"}}</tool_call>"
+    },
+    {
+      "id": "uuid-3",
+      "user_input": "给我一个 uuid",
+      "expect_tool": "uuid.generate",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.generate\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "cron-3",
+      "user_input": "解释 cron */10 * * * *",
+      "expect_tool": "cron.explain",
+      "expect_args": {
+        "input": "*/10 * * * *"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.explain\", \"arguments\": {\"input\": \"*/10 * * * *\"}}</tool_call>"
+    },
+    {
+      "id": "num-3",
+      "user_input": "十进制 100 转二进制",
+      "expect_tool": "number.convert",
+      "expect_args": {
+        "input": "100",
+        "from_base": 10,
+        "to_base": 2
+      },
+      "model_output": "<tool_call>{\"name\": \"number.convert\", \"arguments\": {\"input\": \"100\", \"from_base\": 10, \"to_base\": 2}}</tool_call>"
+    },
+    {
+      "id": "charset-3",
+      "user_input": "这段 GBK 文本解码 test：hello",
+      "expect_tool": "charset.convert",
+      "expect_args": {
+        "input": "hello",
+        "charset": "GBK"
+      },
+      "model_output": "<tool_call>{\"name\": \"charset.convert\", \"arguments\": {\"input\": \"hello\", \"charset\": \"GBK\"}}</tool_call>"
+    },
+    {
+      "id": "json-fmt-3",
+      "user_input": "美化下 {\"k\":[1,2]}",
+      "expect_tool": "json.format",
+      "expect_args": {
+        "input": "{\"k\":[1,2]}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"k\\\":[1,2]}\"}}</tool_call>"
+    }
+  ]
+}

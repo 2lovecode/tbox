@@ -1,8 +1,9 @@
-//! Agent tool loop: retrieve skills -> model -> dispatch -> feed results; max 8 tool iterations.
+//! Agent tool loop: harness strategy → model → dispatch → feed results;
+//! max 8 tool iterations with a bounded repair-and-reask budget.
 
+use super::harness;
 use super::llm::{ChatModel, ModelMessage, ModelTurn};
 use super::registry;
-use super::skills::retrieve_skills;
 use crate::commands::conversation::{append_assistant_message_on, get_messages_on};
 use crate::db::open_connection;
 use rusqlite::Connection;
@@ -24,20 +25,6 @@ pub enum AgentEvent {
     Done,
 }
 
-fn build_system_prompt(user_text: &str) -> String {
-    let skills = retrieve_skills(user_text, 3);
-    let mut prompt = String::from(
-        "You are the TBox local agent. Prefer registered pure-compute tools when helpful.\n",
-    );
-    if !skills.is_empty() {
-        prompt.push_str("\nRelevant skills:\n");
-        for sk in &skills {
-            prompt.push_str(&format!("### {}\n{}\n\n", sk.tool_id, sk.body));
-        }
-    }
-    prompt
-}
-
 fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<ModelMessage>, String> {
     let history = get_messages_on(conn, conv_id)?;
     Ok(history
@@ -50,6 +37,11 @@ fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<Mod
 }
 
 /// Connection-injected agent loop (unit tests + shared DB handle).
+///
+/// 系统提示由 harness 策略构建（embedded 小模型走强化四段式，其余走
+/// 等价于旧版的默认提示）；参数在 dispatch 前经 schema 校验，失败在
+/// 修复预算（repair_budget）内回填重试（reask），预算与工具回合上限
+/// MAX_TOOL_ITERATIONS 合并核算，不叠加放大。
 pub fn run_agent_on(
     conn: &Connection,
     model: &mut dyn ChatModel,
@@ -63,11 +55,16 @@ pub fn run_agent_on(
         return Ok(());
     }
 
+    let desc = model.backend_desc();
+    let strategy = harness::strategy_for(&desc.backend, &desc.model);
+    let repair_budget = strategy.repair_budget();
+
     let mut msgs = Vec::new();
-    msgs.push(ModelMessage::system(build_system_prompt(user_text)));
+    msgs.push(ModelMessage::system(strategy.build_system_prompt(user_text)));
     msgs.extend(history_to_model_messages(conn, conv_id)?);
 
     let mut tool_iterations = 0usize;
+    let mut repair_rounds = 0usize;
 
     loop {
         if cancel.load(Ordering::SeqCst) {
@@ -108,14 +105,25 @@ pub fn run_agent_on(
                 }
                 tool_iterations += 1;
 
+                let mut any_success = false;
                 for call in calls {
                     let tool_id = call.name.clone();
                     emit(AgentEvent::ToolStart {
                         id: tool_id.clone(),
                         args: call.arguments.clone(),
                     });
-                    let result = match registry::dispatch(&call.name, &call.arguments) {
-                        Ok(s) => s,
+                    // dispatch 前校验：未注册给出相近工具名建议；参数不合
+                    // schema 不触发底层 command，错误回填进 reask 循环。
+                    let result = match harness::parse::validate_call(
+                        &call.name,
+                        &call.arguments,
+                    )
+                    .and_then(|()| registry::dispatch(&call.name, &call.arguments))
+                    {
+                        Ok(s) => {
+                            any_success = true;
+                            s
+                        }
                         Err(e) => e,
                     };
                     emit(AgentEvent::ToolEnd {
@@ -123,6 +131,24 @@ pub fn run_agent_on(
                         result: result.clone(),
                     });
                     msgs.push(ModelMessage::tool(result));
+                }
+
+                if !any_success {
+                    if repair_rounds >= repair_budget {
+                        // 修复预算耗尽：按既有语义回填最终错误并生成文字
+                        // 说明（spec: Repair-and-reask Loop），应用不崩溃。
+                        let explanation = format!(
+                            "工具调用连续失败，修复重试预算（{repair_budget} 次）已耗尽。请检查请求内容或换一种表述后重试。"
+                        );
+                        emit(AgentEvent::Error {
+                            message: explanation.clone(),
+                        });
+                        append_assistant_message_on(conn, conv_id, &explanation, None)?;
+                        emit(AgentEvent::Token { text: explanation });
+                        emit(AgentEvent::Done);
+                        return Err("repair budget exhausted".to_string());
+                    }
+                    repair_rounds += 1;
                 }
             }
         }
@@ -382,6 +408,146 @@ mod tests {
                 || ev.iter().any(|e| matches!(e, AgentEvent::Interrupted))
                 || ev.iter().any(|e| matches!(e, AgentEvent::Error { .. }))
         );
+    }
+
+    #[test]
+    fn invalid_args_repaired_via_reask() {
+        let db = test_db();
+        let user_text = "算一下 hi 的 md5";
+        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
+        // 第一回合缺 algorithm（校验失败回填），第二回合修复
+        let mut model = Scripted::new(vec![
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c1".into(),
+                name: "hash.digest".into(),
+                arguments: json!({"input": "hi"}),
+            }]),
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c2".into(),
+                name: "hash.digest".into(),
+                arguments: json!({"input": "hi", "algorithm": "md5"}),
+            }]),
+            ModelTurn::Text("digest ready".into()),
+        ]);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, events) = collect_events();
+
+        run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit).unwrap();
+
+        // 修复成功：两次 ToolStart（第二次带合法参数）+ 最终文本
+        let ev = events.lock().unwrap();
+        let digest_starts = ev
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::ToolStart { id, .. } if id == "hash.digest"))
+            .count();
+        assert_eq!(digest_starts, 2);
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
+        // 回填的校验错误可见于 ToolEnd
+        assert!(ev.iter().any(|e| matches!(
+            e,
+            AgentEvent::ToolEnd { result, .. } if result.contains("algorithm")
+        )));
+        assert_eq!(model.received.len(), 3);
+    }
+
+    #[test]
+    fn repair_budget_exhausted_degrades_to_explanation() {
+        let db = test_db();
+        let user_text = "一直调用坏工具";
+        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
+        let bad_call = || {
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c1".into(),
+                name: "hash.digest".into(),
+                arguments: json!({"input": "hi"}), // 永远缺 algorithm
+            }])
+        };
+        // 默认策略预算 1：两轮失败后必须收尾，第三回合永远不会到达
+        let mut model = Scripted::new(vec![bad_call(), bad_call(), bad_call()]);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, events) = collect_events();
+
+        let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
+
+        assert!(res.is_err());
+        assert_eq!(model.received.len(), 2, "model must not be called past the repair budget");
+        let ev = events.lock().unwrap();
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
+        assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
+        // 会话保留且有一条解释性助手消息
+        let msgs = get_messages_on(&db, &conv.id).unwrap();
+        assert!(msgs
+            .iter()
+            .any(|m| m.role == "assistant" && m.content.contains("修复重试预算")));
+    }
+
+    #[test]
+    fn repair_never_amplifies_iteration_cap() {
+        let db = test_db();
+        let user_text = "连续成功调用";
+        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
+        // 全部成功回合：不消耗 reask 预算，但工具回合总数仍受
+        // MAX_TOOL_ITERATIONS 封顶（给满 10 个回合也不得超过 8+1 次调用）。
+        let mut turns = Vec::new();
+        for i in 0..10 {
+            turns.push(ModelTurn::ToolCalls(vec![ToolCall {
+                id: format!("c{i}"),
+                name: "uuid.generate".into(),
+                arguments: json!({}),
+            }]));
+        }
+        turns.push(ModelTurn::Text("done".into()));
+        let mut model = Scripted::new(turns);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, _) = collect_events();
+
+        let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
+
+        assert!(res.is_err());
+        assert!(
+            model.received.len() <= 9,
+            "8 tool rounds max + the final errored round; got {}",
+            model.received.len()
+        );
+    }
+
+    #[test]
+    fn repair_budget_counts_failed_rounds_only() {
+        let db = test_db();
+        let user_text = "交替成功失败";
+        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
+        // 默认策略预算 1：第 1 次失败回填重试（round 3 修复成功），
+        // 第 2 次失败即收尾——模型只被调用 4 次。
+        let mut model = Scripted::new(vec![
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c0".into(),
+                name: "uuid.generate".into(),
+                arguments: json!({}),
+            }]),
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c1".into(),
+                name: "hash.digest".into(),
+                arguments: json!({"input": "x"}), // 缺 algorithm
+            }]),
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c2".into(),
+                name: "uuid.generate".into(),
+                arguments: json!({}),
+            }]),
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c3".into(),
+                name: "hash.digest".into(),
+                arguments: json!({"input": "x"}), // 再次失败 → 收尾
+            }]),
+            ModelTurn::Text("never".into()),
+        ]);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, _) = collect_events();
+
+        let res = run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit);
+
+        assert!(res.is_err());
+        assert_eq!(model.received.len(), 4);
     }
 
     #[allow(dead_code)]
