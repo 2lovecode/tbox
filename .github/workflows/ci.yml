@@ -25,11 +25,13 @@ jobs:
       fail-fast: false
       matrix:
         platform:
+          - 'macos-13'
           - 'macos-latest'
           - 'ubuntu-22.04'
           - 'windows-latest'
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 30
 
     # Skip duplicated runs: pushes to main fire the `push` event AND
     # open a PR (if any), so we don't want to count the same commit
@@ -40,14 +42,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Version comes from the `packageManager` field in package.json.
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: 'pnpm'
-
-      - name: Install pnpm
-        run: npm install -g pnpm@9
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -58,7 +61,8 @@ jobs:
             librsvg2-dev patchelf
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        # Toolchain pinned by rust-toolchain.toml.
 
       - name: Setup Rust cache
         uses: swatinem/rust-cache@v2

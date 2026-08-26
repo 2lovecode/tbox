@@ -10,6 +10,7 @@ pub fn generate_qrcode(text: String, size: u32) -> Result<String, String> {
 
 /// 解析二维码（简化实现）
 #[tauri::command]
+#[allow(unused_variables)] // 参数名即 invoke 契约（前端传 imageData），简化实现暂未使用
 pub fn parse_qrcode(image_data: String) -> Result<String, String> {
     // 简化实现：返回提示信息
     // 实际项目中应该使用bardecoder或rqrr crate

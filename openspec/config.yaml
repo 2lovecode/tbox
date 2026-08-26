@@ -25,7 +25,6 @@ context: |
   - 新增工具通常包含: Rust command + Vue 页面 + 路由 + 工具注册(id)
 
   产品 backlog 参考（非 OpenSpec living spec）: ROADMAP.md
-  已迁移自 BMAD 的行为规格见 openspec/specs/
 
   协作约定:
   - 小改动 / bugfix: 可直接改代码，不必开 OpenSpec change

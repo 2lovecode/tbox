@@ -174,6 +174,171 @@ pub fn run() {
             commands::model_catalog::cancel_model_download,
             commands::ollama_pull::start_ollama_pull,
             commands::ollama_pull::cancel_ollama_pull,
+
+            // 硬件信息
+            commands::hardware_info::get_hardware_info,
+
+            // JSON → 实体类
+            commands::data_convert::json_to_java,
+            commands::data_convert::json_to_csharp,
+            commands::data_convert::json_to_go,
+            commands::data_convert::json_to_python,
+            commands::data_convert::json_to_typescript,
+
+            // 加密与安全（AES / RSA / HMAC / JWT / 哈希）
+            commands::crypto::aes_encrypt,
+            commands::crypto::aes_decrypt,
+            commands::crypto::generate_rsa_keypair,
+            commands::crypto::hmac_sha256_sign,
+            commands::crypto::hmac_sha512_sign,
+            commands::crypto::parse_jwt,
+            commands::crypto::generate_jwt,
+            commands::crypto::sha256_hash,
+            commands::crypto::sha512_hash,
+            commands::crypto::md5_hash,
+            commands::crypto::sha1_hash,
+
+            // 文本工具集
+            commands::text_utils::regex_test,
+            commands::text_utils::regex_replace,
+            commands::text_utils::text_compare,
+            commands::text_utils::text_deduplicate,
+            commands::text_utils::text_sort,
+            commands::text_utils::text_reverse,
+            commands::text_utils::text_statistics,
+            commands::text_utils::convert_naming,
+            commands::text_utils::convert_case,
+
+            // 网络工具
+            commands::network::http_request,
+            commands::network::dns_lookup,
+            commands::network::check_port_open,
+            commands::network::get_public_ip,
+            commands::network::ping_test,
+            commands::network::get_ssl_cert,
+
+            // XML
+            commands::xml_utils::format_xml,
+            commands::xml_utils::minify_xml,
+            commands::xml_utils::xml_to_json,
+            commands::xml_utils::json_to_xml,
+            commands::xml_utils::xml_to_yaml,
+            commands::xml_utils::yaml_to_xml,
+            commands::xml_utils::xpath_query,
+
+            // YAML
+            commands::yaml_utils::format_yaml,
+            commands::yaml_utils::yaml_to_json,
+            commands::yaml_utils::json_to_yaml,
+            commands::yaml_utils::validate_yaml,
+            commands::yaml_utils::merge_yaml,
+
+            // 国密 SM2/SM3/SM4
+            commands::gm_crypto::sm3_hash,
+            commands::gm_crypto::sm4_encrypt,
+            commands::gm_crypto::sm4_decrypt,
+            commands::gm_crypto::generate_sm4_key,
+            commands::gm_crypto::generate_sm2_keypair,
+            commands::gm_crypto::sm2_sign,
+            commands::gm_crypto::sm2_verify,
+            commands::gm_crypto::hmac_sm3,
+
+            // SQL 格式化
+            commands::sql_utils::format_sql,
+            commands::sql_utils::minify_sql,
+            commands::sql_utils::escape_sql,
+            commands::sql_utils::unescape_sql,
+
+            // 数据库工具
+            commands::db_tools::test_mysql_connection,
+            commands::db_tools::test_postgres_connection,
+            commands::db_tools::test_sqlite_connection,
+            commands::db_tools::execute_mysql_query,
+            commands::db_tools::execute_postgres_query,
+            commands::db_tools::execute_sqlite_query,
+
+            // 图片工具集
+            commands::image_utils::convert_image_format,
+            commands::image_utils::resize_image,
+            commands::image_utils::crop_image,
+            commands::image_utils::rotate_image,
+            commands::image_utils::flip_image,
+            commands::image_utils::compress_image_quality,
+            commands::image_utils::get_detailed_image_info,
+            commands::image_utils::add_watermark,
+            commands::image_utils::image_to_base64,
+            commands::image_utils::base64_to_image,
+
+            // CSV
+            commands::csv_utils::csv_to_json,
+            commands::csv_utils::json_to_csv,
+            commands::csv_utils::format_csv,
+            commands::csv_utils::csv_to_excel,
+            commands::csv_utils::csv_stats,
+
+            // 日志分析
+            commands::log_analyzer::analyze_logs,
+            commands::log_analyzer::extract_log_levels,
+            commands::log_analyzer::filter_logs,
+            commands::log_analyzer::count_errors,
+            commands::log_analyzer::extract_logs_by_time,
+            commands::log_analyzer::highlight_logs,
+            commands::log_analyzer::find_duplicate_logs,
+            commands::log_analyzer::generate_log_report,
+
+            // 颜色转换
+            commands::color_tools::rgb_to_hex,
+            commands::color_tools::hex_to_rgb,
+            commands::color_tools::rgb_to_hsl,
+            commands::color_tools::hsl_to_rgb,
+            commands::color_tools::rgb_to_hsv,
+            commands::color_tools::hsv_to_rgb,
+            commands::color_tools::parse_color,
+            commands::color_tools::random_color,
+            commands::color_tools::adjust_brightness,
+
+            // 二维码 / 条形码
+            commands::qrcode_tools::generate_qrcode,
+            commands::qrcode_tools::parse_qrcode,
+            commands::qrcode_tools::generate_barcode,
+
+            // UUID
+            commands::uuid_tools::generate_uuid_v4,
+            commands::uuid_tools::generate_uuid_v7,
+            commands::uuid_tools::generate_uuid_v5,
+            commands::uuid_tools::generate_uuid_batch,
+            commands::uuid_tools::validate_uuid,
+            commands::uuid_tools::uuid_to_base64,
+            commands::uuid_tools::base64_to_uuid,
+            commands::uuid_tools::get_uuid_version,
+            commands::uuid_tools::nil_uuid,
+
+            // Cron 表达式
+            commands::cron_tools::generate_cron,
+            commands::cron_tools::get_next_cron_time,
+            commands::cron_tools::cron_to_natural_language,
+            commands::cron_tools::validate_cron,
+
+            // 数字 / 进制
+            commands::number_tools::dec_to_hex,
+            commands::number_tools::hex_to_dec,
+            commands::number_tools::dec_to_binary,
+            commands::number_tools::binary_to_dec,
+            commands::number_tools::dec_to_octal,
+            commands::number_tools::octal_to_dec,
+            commands::number_tools::scientific_to_decimal,
+            commands::number_tools::to_roman,
+            commands::number_tools::from_roman,
+            commands::number_tools::fraction_to_decimal,
+            commands::number_tools::decimal_to_fraction,
+
+            // 字符集 / 编解码扩展（punycode 复用 encoding 模块）
+            commands::charset_tools::detect_encoding,
+            commands::charset_tools::convert_encoding,
+            commands::charset_tools::url_encode_component,
+            commands::charset_tools::url_decode_component,
+            commands::charset_tools::html_entity_encode,
+            commands::charset_tools::html_entity_decode,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

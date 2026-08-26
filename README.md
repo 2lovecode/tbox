@@ -18,7 +18,8 @@
 | **本地 / 云端 LLM** | 默认 `local` 提供者：内置进程内 llama.cpp 推理引擎（`llama-cpp-2` 编译进应用，无外部进程 / 端口），在设置中下载精选 GGUF 后即可完全离线对话；无已下载模型时自动回退检测本机 Ollama；也可切换 OpenAI 兼容 / DeepSeek / Anthropic / Gemini / 自定义端点。本地无模型时不会静默请求云端 |
 | **国密与加密** | SM2/SM3/SM4、AES、RSA、JWT、哈希、各类编解码，数据留在本地进程 |
 
-产品行为规格见 [`openspec/specs/`](openspec/specs/)（[product](openspec/specs/product/spec.md) · [agent-chat](openspec/specs/agent-chat/spec.md) · [local-llm-runtime](openspec/specs/local-llm-runtime/spec.md) · [spotlight](openspec/specs/spotlight/spec.md) · [tool-registry](openspec/specs/tool-registry/spec.md) · [encoding-crypto](openspec/specs/encoding-crypto/spec.md) · [hardware-info](openspec/specs/hardware-info/spec.md) · [local-ai-search](openspec/specs/local-ai-search/spec.md)）。
+产品行为规格见 [`openspec/specs/`](openspec/specs/)（共 13 个能力）：
+[product](openspec/specs/product/spec.md) · [tool-registry](openspec/specs/tool-registry/spec.md) · [spotlight](openspec/specs/spotlight/spec.md) · [hardware-info](openspec/specs/hardware-info/spec.md) · [local-ai-search](openspec/specs/local-ai-search/spec.md) · [encoding-crypto](openspec/specs/encoding-crypto/spec.md) · [agent-chat](openspec/specs/agent-chat/spec.md) · [local-llm-runtime](openspec/specs/local-llm-runtime/spec.md) · [agent-tool-harness](openspec/specs/agent-tool-harness/spec.md) · [app-layer-eval-suite](openspec/specs/app-layer-eval-suite/spec.md) · [app-layer-tools-registered](openspec/specs/app-layer-tools-registered/spec.md) · [chat-reasoning-display](openspec/specs/chat-reasoning-display/spec.md) · [skill-content-enrichment](openspec/specs/skill-content-enrichment/spec.md)。
 
 更多文档：
 
@@ -46,7 +47,7 @@
 
 ## 快速开始
 
-**环境：** Node.js ≥ 18、pnpm ≥ 8、Rust stable。Linux 还需 GTK / WebKit 依赖，见 [Tauri 前置要求](https://v2.tauri.app/start/prerequisites/)。
+**环境：** Node.js ≥ 18（CI 用 24）、pnpm 10（`packageManager` 锁定 10.34.5）、Rust stable（`rust-toolchain.toml` 锁定 1.96.0）。Linux 还需 GTK / WebKit 依赖，见 [Tauri 前置要求](https://v2.tauri.app/start/prerequisites/)。
 
 ```bash
 git clone https://github.com/2lovecode/tbox.git
@@ -75,7 +76,8 @@ tbox/
 ├── src/                        # Vue 前端
 │   ├── views/HomePage.vue      # 对话首页（根路由）
 │   ├── views/ToolboxPage.vue   # 工具箱（分类网格）
-│   ├── views/tools/            # 各工具页（动态 import，按路由分片）
+│   ├── views/tools/            # 多数工具页（动态 import，按路由分片）
+│   ├── views/*.vue             # 其余顶层工具页（Base64 / 哈希 / JSON 等）
 │   ├── components/             # Spotlight、设置弹窗、通用组件
 │   ├── stores/                 # Pinia（tools / conversations / llm / search / settings）
 │   └── router/main.ts          # memory history 路由
@@ -84,7 +86,7 @@ tbox/
 │   │   ├── embedded_engine.rs  # llama-cpp-2 进程内推理（专用线程，崩溃不退出主窗口）
 │   │   ├── registry.rs         # 纯计算工具 allowlist + schema 校验 + dispatch
 │   │   └── llm.rs / genai_model.rs / loop.rs / skills.rs
-│   ├── commands/               # Tauri invoke 命令（约 40 个模块）
+│   ├── commands/               # Tauri invoke 命令（领域模块）
 │   ├── db.rs                   # ~/.toolbox/tools.db 连接与初始化
 │   └── lib.rs                  # 插件注册、全局快捷键、invoke_handler
 ├── openspec/

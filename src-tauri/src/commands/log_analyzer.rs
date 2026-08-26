@@ -21,7 +21,7 @@ pub fn analyze_logs(log_content: String, pattern: String) -> Result<serde_json::
             for cap in re.captures_iter(line) {
                 for (i, match_str) in cap.iter().enumerate() {
                     if let Some(s) = match_str {
-                        let key = format!("group_{}", i);
+                        let _key = format!("group_{}", i);
                         *stats.entry(s.as_str().to_string()).or_insert(0usize) += 1;
                     }
                 }

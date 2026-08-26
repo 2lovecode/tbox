@@ -88,7 +88,7 @@ pub async fn dns_lookup(domain: String, record_type: String) -> Result<Vec<Strin
             let lines: Vec<String> = stdout.lines().map(|s| s.to_string()).collect();
             Ok(lines)
         }
-        Err(e) => {
+        Err(_e) => {
             // 如果命令失败，返回示例数据
             Ok(vec![
                 format!("DNS查询 - 域名: {}", domain),
@@ -156,7 +156,6 @@ pub async fn ping_test(host: String, count: u32) -> Result<serde_json::Value, St
 #[tauri::command]
 pub async fn get_ssl_cert(hostname: String) -> Result<serde_json::Value, String> {
     // 使用简化的实现，通过在线API查询SSL证书信息
-    let client = Client::new();
     let url = format!("https://{}:443", hostname);
 
     // 简化版本：只返回基本信息

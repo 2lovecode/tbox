@@ -2,7 +2,7 @@
 
 ## Purpose
 
-全局 Spotlight 搜索与快捷唤起（原 BMAD Epic 2/3 相关：全局快捷键、搜索 store、组件、键盘流与一键复制）。
+全局 Spotlight 搜索与快捷唤起（全局快捷键、搜索 store、组件、键盘流与一键复制）。
 
 ## Requirements
 

@@ -9,6 +9,5 @@
 1. 行为变更 / 新能力 → **OpenSpec**（`/opsx:propose` → `/opsx:apply` → `/opsx:archive`）
 2. 长期规格只认 `openspec/specs/`
 3. 高风险实现用 `superpowers-bridge` + Superpowers 执行纪律
-4. 勿使用已移除的 BMAD 流程
 
 OpenSpec skills 位于 `.claude/skills/openspec-*`；命令位于 `.claude/commands/opsx/`。

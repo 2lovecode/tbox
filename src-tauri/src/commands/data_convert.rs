@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct JsonField {
@@ -10,8 +9,8 @@ pub struct JsonField {
 
 /// JSON转实体类 - Java
 #[tauri::command]
-pub fn json_to_java(jsonStr: String, class_name: String) -> Result<String, String> {
-    let json_value: serde_json::Value = serde_json::from_str(&jsonStr)
+pub fn json_to_java(json_str: String, class_name: String) -> Result<String, String> {
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("JSON解析失败: {}", e))?;
 
     let fields = extract_fields(&json_value);
@@ -63,8 +62,8 @@ pub fn json_to_java(jsonStr: String, class_name: String) -> Result<String, Strin
 
 /// JSON转实体类 - C#
 #[tauri::command]
-pub fn json_to_csharp(jsonStr: String, class_name: String) -> Result<String, String> {
-    let json_value: serde_json::Value = serde_json::from_str(&jsonStr)
+pub fn json_to_csharp(json_str: String, class_name: String) -> Result<String, String> {
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("JSON解析失败: {}", e))?;
 
     let fields = extract_fields(&json_value);
@@ -95,8 +94,8 @@ pub fn json_to_csharp(jsonStr: String, class_name: String) -> Result<String, Str
 
 /// JSON转实体类 - Go
 #[tauri::command]
-pub fn json_to_go(jsonStr: String, struct_name: String) -> Result<String, String> {
-    let json_value: serde_json::Value = serde_json::from_str(&jsonStr)
+pub fn json_to_go(json_str: String, struct_name: String) -> Result<String, String> {
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("JSON解析失败: {}", e))?;
 
     let fields = extract_fields(&json_value);
@@ -121,8 +120,8 @@ pub fn json_to_go(jsonStr: String, struct_name: String) -> Result<String, String
 
 /// JSON转实体类 - Python
 #[tauri::command]
-pub fn json_to_python(jsonStr: String, class_name: String) -> Result<String, String> {
-    let json_value: serde_json::Value = serde_json::from_str(&jsonStr)
+pub fn json_to_python(json_str: String, class_name: String) -> Result<String, String> {
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("JSON解析失败: {}", e))?;
 
     let fields = extract_fields(&json_value);
@@ -154,8 +153,8 @@ pub fn json_to_python(jsonStr: String, class_name: String) -> Result<String, Str
 
 /// JSON转实体类 - TypeScript
 #[tauri::command]
-pub fn json_to_typescript(jsonStr: String, interface_name: String) -> Result<String, String> {
-    let json_value: serde_json::Value = serde_json::from_str(&jsonStr)
+pub fn json_to_typescript(json_str: String, interface_name: String) -> Result<String, String> {
+    let json_value: serde_json::Value = serde_json::from_str(&json_str)
         .map_err(|e| format!("JSON解析失败: {}", e))?;
 
     let fields = extract_fields(&json_value);

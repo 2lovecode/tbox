@@ -14,7 +14,7 @@ pub fn format_sql(input: String) -> Result<String, String> {
         "DROP TABLE", "UNION", "UNION ALL", "CASE", "WHEN", "THEN", "ELSE", "END"
     ];
 
-    let mut lines: Vec<&str> = sql.lines().collect();
+    let lines: Vec<&str> = sql.lines().collect();
     if lines.is_empty() {
         return Ok(String::new());
     }

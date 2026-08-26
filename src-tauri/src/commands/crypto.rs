@@ -1,19 +1,12 @@
-use aes::Aes256;
-use aes::cipher::{
-    BlockEncrypt, BlockDecrypt, KeyInit,
-    generic_array::GenericArray,
-};
-use rsa::{RsaPrivateKey, Pkcs1v15Encrypt, Pkcs1v15Sign};
+use rsa::RsaPrivateKey;
 use sha2::{Sha256, Digest};
-use hmac::{Hmac, Mac};
 use base64::{Engine as _, engine::general_purpose};
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey};
+use jsonwebtoken::{encode, Header, EncodingKey};
 use rand::rngs::OsRng;
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// AES-256-CBC加密
 #[tauri::command]
+#[allow(unused_variables)] // 参数名即 invoke 契约（前端传 iv），简化实现暂未使用
 pub fn aes_encrypt(plaintext: String, key: String, iv: String) -> Result<String, String> {
     // 这里简化实现，实际应该使用CBC模式
     let key_bytes = key.as_bytes();
@@ -47,12 +40,10 @@ pub fn aes_decrypt(ciphertext: String, key: String, _iv: String) -> Result<Strin
 #[tauri::command]
 pub fn generate_rsa_keypair(bits: u32) -> Result<(String, String), String> {
     let mut rng = OsRng;
-    let private_key = RsaPrivateKey::new(&mut rng, bits as usize)
+    let _private_key = RsaPrivateKey::new(&mut rng, bits as usize)
         .map_err(|e| format!("生成RSA密钥对失败: {}", e))?;
 
     // 简化版本：返回密钥信息的JSON
-    let public_key = private_key.to_public_key();
-
     Ok((
         format!("RSA私钥 ({}位) 已生成", bits),
         format!("RSA公钥 ({}位) 已生成", bits)
@@ -101,7 +92,7 @@ pub fn parse_jwt(token: String) -> Result<serde_json::Value, String> {
     let payload: serde_json::Value = serde_json::from_str(&payload_decoded)
         .map_err(|e| format!("解析Payload失败: {}", e))?;
 
-    let mut result = serde_json::json!({
+    let result = serde_json::json!({
         "header": header,
         "payload": payload,
         "signature": parts[2]

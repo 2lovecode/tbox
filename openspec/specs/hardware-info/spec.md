@@ -2,7 +2,7 @@
 
 ## Purpose
 
-跨平台系统硬件信息查询（由 BMAD story `story-hardware-info` 迁移）。同一套 UI 与 Tauri 命令在 Windows / macOS / Linux 可用。
+跨平台系统硬件信息查询。同一套 UI 与 Tauri 命令在 Windows / macOS / Linux 可用。
 
 ## Requirements
 

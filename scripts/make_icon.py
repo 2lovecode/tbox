@@ -1,194 +1,94 @@
-"""Final source icon: monogram logomark.
+"""App icon generator: blue disc + white glyph, upscaled from a small source.
 
-Concept: a heavy geometric \"T\" (for tbox) set against the slate
-backdrop, with a glowing pip in the right end of the top bar and a
-small \">_\" terminal glyph underneath as a developer-tool cue.
+Source of truth: `scripts/icon-source.png` (69x71 PNG, white background,
+solid indigo-blue disc, white `>_`-style glyph inside the disc).
+
+The source is tiny, so a naive 15x upscale would look soft. Pipeline:
+
+1. Upscale to 1024 with LANCZOS (flat colors upscale well).
+2. Mild unsharp mask to keep the glyph crisp.
+3. Detect the blue disc (bounding box of blue pixels) and rebuild the
+   disc edge as a supersampled antialiased circular alpha mask — the
+   outline comes out vector-crisp, and everything outside the disc
+   (the white backdrop) becomes transparent.
+4. Write `src-tauri/icons/icon.png` (1024x1024, RGBA) — the input for
+   `pnpm tauri icon`, which regenerates all platform sizes.
+
+Run after changing the source:
+    python3 scripts/make_icon.py && pnpm tauri icon
 """
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
+import os
+import sys
 
 SIZE = 1024
-SS = 4
-S = SIZE * SS
-
-# Palette
-BG_TOP = (15, 23, 42, 255)       # slate-900
-BG_BOT = (2, 6, 23, 255)         # slate-950
-T_MAIN = (56, 189, 248, 255)     # sky-400
-T_HI = (125, 211, 252, 255)      # sky-300
-T_LO = (14, 116, 144, 255)       # sky-700
-PIP = (224, 242, 254, 255)       # near-white
-TERM = (148, 163, 184, 255)      # slate-400
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "icon-source.png")
+OUT = os.path.join(HERE, "..", "src-tauri", "icons", "icon.png")
 
 
-def lerp(a, b, t):
-    return tuple(int(round(a[i] + (b[i] - a[i]) * t)) for i in range(3))
+def blue(p):
+    """Source palette: indigo-blue disc on white."""
+    r, g, b = p[:3]
+    return b > 130 and b > r + 50
 
 
-img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-draw = ImageDraw.Draw(img)
+def main():
+    src = Image.open(SRC).convert("RGB")
+    sw, sh = src.size
 
-# Rounded backdrop with vertical gradient.
-r = 192 * SS
-corner_mask = Image.new("L", (S, S), 0)
-ImageDraw.Draw(corner_mask).rounded_rectangle((0, 0, S, S), radius=r, fill=255)
-grad = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-gd = ImageDraw.Draw(grad)
-for i in range(64):
-    t = (i + 0.5) / 64
-    color = lerp(BG_TOP, BG_BOT, t)
-    y0 = int(i * S / 64)
-    y1 = int((i + 1) * S / 64)
-    gd.rectangle((0, y0, S, y1), fill=color)
-img.paste(grad, (0, 0), corner_mask)
+    # 1. Upscale preserving aspect (fit height), center on square canvas.
+    scale = SIZE / sh
+    uw = round(sw * scale)
+    up = src.resize((uw, SIZE), Image.LANCZOS)
+    canvas = Image.new("RGB", (SIZE, SIZE), (255, 255, 255))
+    canvas.paste(up, ((SIZE - uw) // 2, 0))
 
-# Cyan radial glow centered behind the T.
-glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-gg = ImageDraw.Draw(glow)
-cx, cy = S // 2, int(S * 0.47)
-for i in range(40, 0, -1):
-    a = int(70 * (1 - i / 40) ** 2)
-    rr = int(S * 0.45 * i / 40)
-    gg.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), fill=(56, 189, 248, a))
-img = Image.alpha_composite(img, glow)
-draw = ImageDraw.Draw(img)
-
-# The T:
-#  vertical stem: a thick rounded rectangle, slightly tapered toward the bottom
-#  for a \"sturdy\" look. Width and height picked so the T reads at any size.
-stem_w = int(S * 0.18)
-stem_top = int(S * 0.30)
-stem_bot = int(S * 0.80)
-stem_x = (S - stem_w) // 2
-draw.rounded_rectangle(
-    (stem_x, stem_top, stem_x + stem_w, stem_bot),
-    radius=int(stem_w * 0.20),
-    fill=T_MAIN,
-)
-# Top bar of the T: wider, with a tiny chamfer at its outer ends.
-bar_h = int(S * 0.18)
-bar_x = int(S * 0.16)
-bar_w = S - 2 * bar_x
-draw.rounded_rectangle(
-    (bar_x, int(S * 0.22), bar_x + bar_w, int(S * 0.22) + bar_h),
-    radius=int(bar_h * 0.25),
-    fill=T_HI,
-)
-# Subtle inner highlight along the top edge of the bar (sky-200).
-hl = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-hd = ImageDraw.Draw(hl)
-hd.rounded_rectangle(
-    (bar_x + int(S * 0.01), int(S * 0.225), bar_x + bar_w - int(S * 0.01), int(S * 0.245)),
-    radius=int(bar_h * 0.20),
-    fill=(224, 242, 254, 120),
-)
-img.alpha_composite(hl)
-draw = ImageDraw.Draw(img)
-
-# Stem-bar overlap: an inner darker band along the bottom of the bar to give
-# the join a tiny shadow (so the stem doesn't look stuck ON TOP of the bar).
-shadow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-sd = ImageDraw.Draw(shadow)
-sd.rounded_rectangle(
-    (bar_x + int(S * 0.012), int(S * 0.22) + bar_h - int(S * 0.022),
-     bar_x + bar_w - int(S * 0.012), int(S * 0.22) + bar_h),
-    radius=int(bar_h * 0.10),
-    fill=(7, 89, 133, 160),
-)
-img.alpha_composite(shadow)
-draw = ImageDraw.Draw(img)
-
-# Stem face: redraw on top of the inner shadow strip so the join is clean.
-draw.rounded_rectangle(
-    (stem_x, stem_top, stem_x + stem_w, stem_bot),
-    radius=int(stem_w * 0.20),
-    fill=T_MAIN,
-)
-# Stem inner highlight strip (vertical).
-hl2 = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-hd2 = ImageDraw.Draw(hl2)
-hd2.rounded_rectangle(
-    (stem_x + int(stem_w * 0.12), stem_top + int(stem_w * 0.05),
-     stem_x + int(stem_w * 0.32), stem_bot - int(stem_w * 0.10)),
-    radius=int(stem_w * 0.10),
-    fill=(186, 230, 253, 140),
-)
-img.alpha_composite(hl2)
-draw = ImageDraw.Draw(img)
-
-# Pip: a bright dot with halo, sitting in the right end of the top bar
-# (the \"dot of the i\"-equivalent for tbox). Place it INSIDE the bar.
-pip_cx = int(S * 0.74)
-pip_cy = int(S * 0.30)
-pip_r = int(S * 0.050)
-# Halo
-for i in range(10, 0, -1):
-    a = int(90 * (1 - i / 10))
-    rr = pip_r + i * 6
-    draw.ellipse(
-        (pip_cx - rr, pip_cy - rr, pip_cx + rr, pip_cy + rr),
-        fill=(125, 211, 252, a),
+    # 2. Mild sharpen after the big upscale.
+    canvas = canvas.filter(
+        ImageFilter.UnsharpMask(radius=6, percent=80, threshold=2)
     )
-draw.ellipse(
-    (pip_cx - pip_r, pip_cy - pip_r, pip_cx + pip_r, pip_cy + pip_r),
-    fill=PIP,
-)
 
-# Small \">_ \" terminal glyph tucked under the stem. Three rounded
-# rectangles: a chevron, an underscore, and a cursor block.
-glyph_y = int(S * 0.86)
-glyph_h = int(S * 0.024)
+    # 3. Detect the disc from the ORIGINAL pixels (cheap and exact):
+    #    bounding box of blue pixels -> center + radius.
+    w, h = src.size
+    xs, ys = [], []
+    for y in range(h):
+        for x in range(w):
+            if blue(src.getpixel((x, y))):
+                xs.append(x)
+                ys.append(y)
+    if not xs:
+        print("no blue disc found in source", file=sys.stderr)
+        sys.exit(1)
+    cx = (min(xs) + max(xs)) / 2 / sw      # 0..1
+    cy = (min(ys) + max(ys)) / 2 / sh
+    rr = (max(xs) - min(xs)) / 2 / sw      # relative radius
 
+    # Map onto the upscaled canvas geometry.
+    ox = (SIZE - uw) // 2
+    CCX = ox + cx * uw
+    CCY = cy * SIZE
+    RAD = rr * uw
+    # Grow very slightly (1px) so the mask never eats into the disc edge.
+    RAD += 1
 
-def stick(canvas, x, y, w, h, color, angle=0):
-    layer = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(layer).rounded_rectangle(
-        (x, y, x + w, y + h),
-        radius=h // 2,
-        fill=color,
+    # 4. Supersampled circular alpha mask (4x, then downsample = antialias).
+    ss = 4
+    mask = Image.new("L", (SIZE * ss, SIZE * ss), 0)
+    ImageDraw.Draw(mask).ellipse(
+        (CCX * ss - RAD * ss, CCY * ss - RAD * ss,
+         CCX * ss + RAD * ss, CCY * ss + RAD * ss),
+        fill=255,
     )
-    if angle:
-        layer = layer.rotate(angle, resample=Image.BICUBIC, center=(x + w // 2, y + h // 2))
-    canvas.alpha_composite(layer)
+    mask = mask.resize((SIZE, SIZE), Image.LANCZOS)
+
+    icon = canvas.convert("RGBA")
+    icon.putalpha(mask)
+    icon.save(OUT, "PNG", optimize=True)
+    print(f"wrote {OUT} {icon.size} disc=({CCX:.0f},{CCY:.0f}) r={RAD:.0f}")
 
 
-# Cursor block (right).
-stick(
-    img,
-    x=int(S * 0.60),
-    y=glyph_y,
-    w=glyph_h,
-    h=glyph_h,
-    color=TERM,
-)
-
-# Underscore (middle).
-stick(
-    img,
-    x=int(S * 0.48),
-    y=glyph_y + int(S * 0.013),
-    w=int(S * 0.10),
-    h=int(S * 0.014),
-    color=TERM,
-)
-
-# \">\" caret (left): a single angled slash reads more clearly than two
-# paired lines at small render sizes.
-stick(
-    img,
-    x=int(S * 0.38),
-    y=glyph_y,
-    w=int(S * 0.080),
-    h=glyph_h,
-    color=TERM,
-    angle=-30,
-)
-
-# Downsample.
-out = img.resize((SIZE, SIZE), Image.LANCZOS)
-out.save(
-    "/Users/lh/Documents/dev/projects/hobby/rust/tbox/src-tauri/icons/icon.png",
-    "PNG",
-    optimize=True,
-)
-print("wrote icon.png", out.size)
+if __name__ == "__main__":
+    main()

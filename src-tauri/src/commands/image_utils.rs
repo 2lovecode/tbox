@@ -1,5 +1,4 @@
-use image::{ImageFormat, DynamicImage, GenericImageView};
-use std::io::Cursor;
+use image::{ImageFormat, GenericImageView};
 use base64::{Engine as _, engine::general_purpose};
 
 /// 图片格式转换
@@ -127,6 +126,7 @@ pub async fn flip_image(
 
 /// 压缩图片质量
 #[tauri::command]
+#[allow(unused_variables)] // 参数名即 invoke 契约，简化实现暂未使用
 pub async fn compress_image_quality(
     input_path: String,
     output_path: String,
@@ -161,12 +161,13 @@ pub fn get_detailed_image_info(input_path: String) -> Result<serde_json::Value, 
 
 /// 添加水印
 #[tauri::command]
+#[allow(unused_variables)] // 参数名即 invoke 契约，简化实现暂未使用
 pub async fn add_watermark(
     input_path: String,
     output_path: String,
     watermark_text: String
 ) -> Result<String, String> {
-    let mut img = image::open(&input_path)
+    let img = image::open(&input_path)
         .map_err(|e| format!("无法加载图片: {}", e))?;
 
     // 简化实现：在图片右下角添加文字水印

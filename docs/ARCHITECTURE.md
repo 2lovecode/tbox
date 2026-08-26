@@ -9,9 +9,9 @@
 │                                                                             │
 │  WebView (Vue 3 + TS)                    Rust 后端 (tbox_lib)              │
 │  ┌──────────────────────┐   invoke    ┌──────────────────────────────┐     │
-│  │ HomePage  (对话) /   │ ──────────▶ │ commands/ (~40 模块)          │     │
+│  │ HomePage  (对话) /   │ ──────────▶ │ commands/ (领域模块)           │     │
 │  │ ToolboxPage(工具箱)  │ ◀────────── │  tool / conversation / llm /  │     │
-│  │ views/tools/* (37页) │   events   │  agent / crypto / image / …   │     │
+│  │ views/ 顶层 + tools/ │   events   │  agent / screen / image / …   │     │
 │  │ SpotlightSearch.vue  │            └──────┬───────────────────────┘     │
 │  │ stores/ (Pinia)      │                   │                              │
 │  └──────────────────────┘                   ▼                              │
@@ -47,7 +47,7 @@
 
 ### commands/（Tauri invoke 入口）
 
-每个领域一个模块：`tool.rs`（工具/分类注册与查询）、`conversation.rs`（会话与消息）、`llm.rs`（提供者配置、密钥加密存储）、`llm_presets.rs`（内置 + CC-Switch 预置模板）、`model_catalog.rs` / `ollama_pull.rs`（精选 GGUF 目录与下载）、`agent.rs`（对话入口）、以及各工具模块（`crypto.rs`、`gm_crypto.rs`、`json.rs`、`image.rs`、`pdf.rs` 等）。
+每个领域一个模块：`tool.rs`（工具/分类注册与查询）、`conversation.rs`（会话与消息）、`llm.rs`（提供者配置、密钥加密存储）、`llm_presets.rs`（内置 + CC-Switch 预置模板）、`model_catalog.rs` / `ollama_pull.rs`（精选 GGUF 目录与下载）、`agent.rs`（对话入口）、以及各工具模块（`code.rs`、`json.rs`、`encoding.rs`、`image.rs`、`pdf.rs`、`file_ops.rs` 等）。
 
 ### agent/（对话 Agent）
 
@@ -76,4 +76,4 @@
 
 ## OpenSpec 变更历史（已归档）
 
-见 `openspec/changes/archive/`：`migrate-from-bmad`、`remove-role-system`、`add-chat-home-agent`、`embed-llm-runtime`、`llm-multi-provider-protocols`。
+见 `openspec/changes/archive/`（当前 8 个已归档变更）。

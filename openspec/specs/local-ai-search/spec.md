@@ -2,7 +2,7 @@
 
 ## Purpose
 
-本地智能搜索（原 BMAD Epic 5 / Phase 1.5）。v0 已交付轻量本地能力；完整对话 / 嵌入式 LLM 由 `agent-chat` 与 `local-llm-runtime` 能力交付。
+本地智能搜索（Phase 1.5）。v0 已交付轻量本地能力；完整对话 / 嵌入式 LLM 由 `agent-chat` 与 `local-llm-runtime` 能力交付。
 
 ## Requirements
 

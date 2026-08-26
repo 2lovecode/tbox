@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# npm lockfile — this project uses pnpm (pnpm-lock.yaml) as the single source
+# of truth; keep `npm install` from silently reintroducing a second lockfile.
+package-lock.json
+
 # Project-local pnpm store (created when the default global store is not
 # writable, e.g. sandboxed install — keep out of the repo).
 .pnpm-store/
@@ -44,9 +48,6 @@ LPT1 LPT2 LPT3 LPT4 LPT5 LPT6 LPT7 LPT8 LPT9
 # Local AI tooling — agent skills/commands, not committed (like .cursor/)
 .claude/
 .agents/
-
-_bmad/
-_bmad-output/
 
 # Cursor: local only（rules/commands/skills 本机生成，不进 git）
 .cursor/

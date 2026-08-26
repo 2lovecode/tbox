@@ -2,7 +2,7 @@
 
 ## 环境要求
 
-- Node.js ≥ 18、pnpm ≥ 8、Rust stable（含 cargo）
+- Node.js ≥ 18（CI 用 24）、pnpm 10（`packageManager` 锁定 10.34.5）、Rust stable（`rust-toolchain.toml` 锁定 1.96.0）
 - Linux 额外需要 GTK / WebKit 系统库：[Tauri 2 前置要求](https://v2.tauri.app/start/prerequisites/)
 - macOS 构建嵌入式推理引擎会启用 Metal feature；其他平台走 CPU
 
@@ -36,6 +36,8 @@ pnpm dev            # 仅 Vite dev server（无 Rust 壳，invoke 不可用）
 | 变量 | 作用 |
 |------|------|
 | `TBOX_AGENT_MOCK=1` | Agent 走 mock 回复路径，无真实 LLM 也能开发 / 演示对话与工具调用 |
+| `TBOX_ENABLE_TOOL_GRAMMAR=1` | 强制开启工具调用约束解码（默认关闭：实测对 0.5B 模型意图率有损） |
+| `HF_ENDPOINT` | 覆盖 HuggingFace 下载端点前缀（如 `https://hf-mirror.com`），用于 GGUF 模型目录下载 |
 
 ## 本地数据（开发期会真实读写）
 
@@ -43,11 +45,16 @@ pnpm dev            # 仅 Vite dev server（无 Rust 壳，invoke 不可用）
 
 ## 新增一个工具
 
-行为变更，**必须先走 OpenSpec**（`/opsx-propose` 或等价 skill → 实现 → `/opsx-archive`），见 [`AGENTS.md`](../AGENTS.md)。实现落点通常是四处：
+行为变更，**必须先走 OpenSpec**（`/opsx-propose` 或等价 skill → 实现 → `/opsx-archive`），见 [`AGENTS.md`](../AGENTS.md)。实现落点取决于工具类型：
 
-1. **Rust 命令**：`src-tauri/src/commands/<domain>.rs`，并在 `commands/mod.rs`、`lib.rs` 的 `invoke_handler!` 注册。
-2. **前端页面**：`src/views/tools/<Tool>.vue`（或 `src/views/` 下的顶层工具页）。
-3. **路由**：`src/router/main.ts` 加一条动态 import 路由。
+**纯前端工具**（JS 可直接实现，如 Base64 / 哈希 / JSON 格式化等）只需两步：
+
+1. **前端页面**：`src/views/tools/<Tool>.vue`（或 `src/views/` 下的顶层工具页）。
+2. **路由**：`src/router/main.ts` 加一条动态 import 路由。
+
+**需要系统能力 / 本地数据 / 原生库的工具**，额外再加两步：
+
+3. **Rust 命令**：`src-tauri/src/commands/<domain>.rs`，并在 `commands/mod.rs` 声明 `pub mod`、`lib.rs` 的 `generate_handler![...]` 注册。
 4. **工具注册**：SQLite 工具 / 分类表（`commands/tool.rs` 的初始化与 `add_missing_tools` 迁移要同步补齐，保证老库升级能补上新工具）。
 
 若工具同时希望被**对话 Agent** 调用，还要在 `src-tauri/src/agent/registry.rs` 白名单注册（仅限纯计算、无副作用的工具，入参提供 JSON Schema）。

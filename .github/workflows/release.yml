@@ -1,17 +1,18 @@
 name: Release
 
-# Build on every push of a `v*` tag, across macOS / Ubuntu / Windows,
-# then publish all platform bundles to a single draft GitHub Release
-# via `tauri-apps/tauri-action`. The release stays `draft` so the
-# maintainer can review notes / assets before publishing.
+# Build on every push of a `v*` tag, across macOS (Intel + Apple Silicon) /
+# Ubuntu / Windows, then publish all platform bundles to a single draft
+# GitHub Release via `tauri-apps/tauri-action`. The release stays `draft` so
+# the maintainer can review notes / assets before publishing.
 
 on:
   push:
     tags:
       - 'v*'
 
-# One release per tag; cancel in-flight replays if you push the same
-# tag twice in quick succession.
+# One release per tag. `cancel-in-progress` stays false because GitHub does
+# not allow moving an existing tag, so re-pushing the same tag is a retry of
+# the same release rather than two competing runs.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -19,8 +20,8 @@ concurrency:
 permissions:
   contents: write
   # `id-token: write` is reserved for future macOS notarization via
-  # `tauri-action`. The current job does not reference it; granting
-  # ahead of time avoids re-running the workflow once secrets land.
+  # `tauri-action`. The current job does not reference it; granting ahead of
+  # time avoids re-running the workflow once secrets land.
   id-token: write
 
 jobs:
@@ -29,6 +30,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Intel Macs (x64). Native build on the last Intel macOS runner —
+          # prefer this over an experimental `--target x86_64-apple-darwin`
+          # cross-compile. If GitHub retires `macos-13`, switch this entry to
+          # `macos-latest` with `--target x86_64-apple-darwin`.
+          - platform: 'macos-13'
+            args: ''
+          # Apple Silicon Macs (arm64).
           - platform: 'macos-latest'
             args: ''
           - platform: 'ubuntu-22.04'
@@ -37,19 +45,36 @@ jobs:
             args: ''
 
     runs-on: ${{ matrix.platform }}
+    # llama-cpp-2 / tauri compilation can be slow on Windows and Linux; cap
+    # the job so a hung build fails fast instead of burning runner minutes.
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # Full history so the release-notes step can locate the previous tag.
+          fetch-depth: 0
+
+      - name: Verify tag matches app version
+        shell: bash
+        run: |
+          APP_VERSION="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          TAG="${{ github.ref_name }}"
+          if [ "$TAG" != "v$APP_VERSION" ]; then
+            echo "::error::tag '$TAG' does not match app version 'v$APP_VERSION' (src-tauri/tauri.conf.json). Bump the version before pushing the tag."
+            exit 1
+          fi
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        # Version comes from the `packageManager` field in package.json.
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: 'pnpm'
-
-      - name: Install pnpm
-        run: npm install -g pnpm@9
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -60,7 +85,9 @@ jobs:
             librsvg2-dev patchelf
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        # Toolchain pinned by rust-toolchain.toml — single source of truth for
+        # local dev and CI, so every release builds with the same compiler.
 
       - name: Setup Rust cache
         uses: swatinem/rust-cache@v2
@@ -70,24 +97,57 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Generate release notes
+        id: notes
+        shell: bash
+        run: |
+          CURRENT="${{ github.ref_name }}"
+          PREV_TAG="$(git tag --sort=-version:refname | grep -vFx "$CURRENT" | head -n 1 || true)"
+
+          if [ -n "$PREV_TAG" ]; then
+            RANGE="$PREV_TAG..$CURRENT"
+            echo "## Changes since $PREV_TAG" > /tmp/notes.md
+          else
+            RANGE="HEAD"
+            echo "## First release" > /tmp/notes.md
+          fi
+
+          echo >> /tmp/notes.md
+          git log --pretty=format:'- %s (%an)' --max-count=100 "$RANGE" >> /tmp/notes.md
+          {
+            echo 'body<<EOF'
+            cat /tmp/notes.md
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # `tauri-action` already runs `pnpm tauri build` on its own;
-          # we pin the CLI by relying on the project-locked
-          # `@tauri-apps/cli` (see package.json devDependencies) which
-          # `pnpm install --frozen-lockfile` just materialised.
+          # `tauri-action` already runs `pnpm tauri build` on its own; the CLI
+          # is the project-locked `@tauri-apps/cli` materialised by
+          # `pnpm install --frozen-lockfile` above.
           tagName: ${{ github.ref_name }}
           releaseName: 'tbox v__VERSION__'
-          releaseBody: 'See the assets to download and install this app.'
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: true
-          prerelease: false
+          # Tags carrying a `-` (e.g. v0.2.0-beta.1) are published as prereleases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
 
-  # Signing skipped intentionally — there are no macOS / Windows code
-  # signing secrets in this repo yet. The `id-token: write`
-  # permission above is reserved for notarization once the secrets
-  # are added; until then, the bundles are unsigned and the first
-  # launch will be blocked by Gatekeeper / SmartScreen.
+      - name: Generate SHA256 checksums
+        shell: bash
+        run: node scripts/checksums.mjs src-tauri/target/release/bundle "SHA256SUMS-${{ matrix.platform }}.txt"
+
+      - name: Upload checksums to release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" "SHA256SUMS-${{ matrix.platform }}.txt" --clobber
+
+  # Signing skipped intentionally — there are no macOS / Windows code signing
+  # secrets in this repo yet. The `id-token: write` permission above is
+  # reserved for notarization once the secrets are added; until then the
+  # bundles are unsigned and the first launch will be blocked by
+  # Gatekeeper / SmartScreen.

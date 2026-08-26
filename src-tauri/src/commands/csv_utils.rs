@@ -1,6 +1,5 @@
 use csv::{ReaderBuilder, WriterBuilder};
 use serde_json::Value;
-use std::io::Cursor;
 
 /// CSV转JSON
 #[tauri::command]
@@ -51,7 +50,7 @@ pub fn json_to_csv(input: String, has_header: bool) -> Result<String, String> {
 
         if let Some(array) = value.as_array() {
             if !array.is_empty() {
-                if let Some(first_obj) = array[0].as_object() {
+                if let Some(_first_obj) = array[0].as_object() {
                     // 获取所有可能的字段
                     let mut headers = Vec::new();
                     for obj in array {

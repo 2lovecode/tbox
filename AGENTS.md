@@ -37,7 +37,6 @@ Cursor 会读根目录 `AGENTS.md`；不必也不应把 `.cursor` 提交进仓�
 
 5. **禁止**  
    - 忽略已有 `openspec/changes/<name>/` 直接大改  
-   - 重新引入 BMAD（`_bmad`、bmad-* skills）  
    - 在 `docs/superpowers/` 另建长期规格替代 OpenSpec
 
 ## 开工检查清单
@@ -96,6 +95,11 @@ Schema：
 | 编码/加密 | `openspec/specs/encoding-crypto/` |
 | Agent 对话 | `openspec/specs/agent-chat/` |
 | 本地 LLM 运行时 | `openspec/specs/local-llm-runtime/` |
+| Agent 工具 Harness | `openspec/specs/agent-tool-harness/` |
+| 应用层评测套件 | `openspec/specs/app-layer-eval-suite/` |
+| 应用层工具注册 | `openspec/specs/app-layer-tools-registered/` |
+| 对话推理展示 | `openspec/specs/chat-reasoning-display/` |
+| Skill 内容增强 | `openspec/specs/skill-content-enrichment/` |
 
 Backlog 清单可参考 `ROADMAP.md`（不是行为规格）。
 

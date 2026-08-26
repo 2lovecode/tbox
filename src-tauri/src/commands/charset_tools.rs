@@ -123,18 +123,3 @@ pub fn html_entity_decode(input: String) -> String {
     result
 }
 
-/// Punycode编码（IDN域名）
-#[tauri::command]
-pub fn punycode_encode(domain: String) -> Result<String, String> {
-    // 简化实现：返回提示
-    // 实际项目中应使用punycode库
-    Ok(format!("Punycode编码: {}", domain))
-}
-
-/// Punycode解码
-#[tauri::command]
-pub fn punycode_decode(domain: String) -> Result<String, String> {
-    // 简化实现：返回提示
-    // 实际项目中应使用punycode库
-    Ok(format!("Punycode解码: {}", domain))
-}
