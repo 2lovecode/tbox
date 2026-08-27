@@ -37,6 +37,39 @@ export interface LlmConfig {
   hasApiKey: boolean;
 }
 
+/** multi-provider-models: 一个已保存的提供方配置。 */
+export interface LlmProfile {
+  id: string;
+  name: string;
+  provider: string;
+  protocol?: LlmProtocolId;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
+export interface LlmProfilesSnapshot {
+  profiles: LlmProfile[];
+  activeId: string | null;
+}
+
+/** save_llm_profile 的前端载荷（id 为 null 时新建）。 */
+export interface LlmProfileInputDraft {
+  id: string | null;
+  name: string;
+  provider: string;
+  protocol: LlmProtocolId | null;
+  baseUrl: string;
+  model: string;
+  apiKey: string | null;
+}
+
+/** list_profile_models 的返回。 */
+export interface ProfileModels {
+  models: string[];
+  message: string;
+}
+
 export interface LlmTestResult {
   success: boolean;
   message: string;

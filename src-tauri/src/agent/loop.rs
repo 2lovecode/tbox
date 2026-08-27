@@ -91,16 +91,32 @@ pub fn run_agent_on(
 
         match turn {
             ModelTurn::Text { text, reasoning } => {
-                if let Some(r) = reasoning.as_ref().filter(|r| !r.trim().is_empty()) {
-                    emit(AgentEvent::Reasoning { text: r.clone() });
+                // 内联 <think> 标签（Qwen/DeepSeek 风格）剥离为 reasoning，
+                // 与后端已分离的 reasoning（reasoning_content / thinking 块）合并。
+                let (inline_reasoning, body) = super::llm::split_think_tags(&text);
+                let reasoning = match (
+                    reasoning.filter(|r| !r.trim().is_empty()),
+                    inline_reasoning,
+                ) {
+                    (Some(a), Some(b)) => Some(format!("{a}\n{b}")),
+                    (r, i) => r.or(i),
+                };
+
+                // 分块流式发出：思考先于正文，均按块 emit（spec: Chunked
+                // Streaming Emission）；持久化仍写完整文本。
+                const CHUNK_CHARS: usize = 24;
+                if let Some(r) = reasoning.as_ref() {
+                    for chunk in super::llm::chunk_text(r, CHUNK_CHARS) {
+                        emit(AgentEvent::Reasoning { text: chunk });
+                    }
                 }
-                emit(AgentEvent::Token {
-                    text: text.clone(),
-                });
+                for chunk in super::llm::chunk_text(&body, CHUNK_CHARS) {
+                    emit(AgentEvent::Token { text: chunk });
+                }
                 append_assistant_message_on(
                     conn,
                     conv_id,
-                    &text,
+                    &body,
                     None,
                     reasoning.as_deref(),
                 )?;

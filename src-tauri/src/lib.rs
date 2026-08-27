@@ -103,6 +103,15 @@ pub fn run() {
             commands::llm::delete_llm_config,
             commands::llm::test_llm_connection,
             commands::llm::list_llm_presets,
+            // multi-provider-models: 多提供方 profile 配置
+            commands::llm::list_llm_profiles,
+            commands::llm::save_llm_profile,
+            commands::llm::delete_llm_profile,
+            commands::llm::set_active_llm_profile,
+            commands::llm::clear_llm_profile_api_key,
+            commands::llm::list_profile_models,
+            commands::llm::list_endpoint_models,
+            commands::llm::reveal_llm_profile_api_key,
 
             // 文件操作
             commands::file::download_file,

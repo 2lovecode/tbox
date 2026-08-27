@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useConversationsStore, type ChatMessage } from '@/stores/conversations';
 import { useSettingsStore } from '@/stores/settings';
 import { renderMarkdown } from '@/utils/markdown';
+import ModelSwitcher from '@/components/ModelSwitcher.vue';
 
 const conversations = useConversationsStore();
 const settings = useSettingsStore();
@@ -280,6 +281,49 @@ const onKeydown = (event: KeyboardEvent) => {
 };
 
 const md = (src: string) => renderMarkdown(src);
+
+// ---------------------------------------------------------------------------
+// 助手头像：按会话随机（spec: Agent Avatar Variety）——头像集合为活泼的
+// 动物/趣味图标 × 渐变配色，用会话 id 哈希稳定选取：新会话随机、同一
+// 会话（含重开）不变。
+// ---------------------------------------------------------------------------
+const AGENT_AVATARS: { icon: string; gradient: string }[] = [
+  { icon: 'fas fa-otter', gradient: 'linear-gradient(135deg, #f7971e, #ffd200)' },
+  { icon: 'fas fa-frog', gradient: 'linear-gradient(135deg, #43e97b, #38f9d7)' },
+  { icon: 'fas fa-hippo', gradient: 'linear-gradient(135deg, #a18cd1, #fbc2eb)' },
+  { icon: 'fas fa-kiwi-bird', gradient: 'linear-gradient(135deg, #89f7fe, #66a6ff)' },
+  { icon: 'fas fa-cat', gradient: 'linear-gradient(135deg, #f093fb, #f5576c)' },
+  { icon: 'fas fa-dog', gradient: 'linear-gradient(135deg, #ffecd2, #fcb69f)' },
+  { icon: 'fas fa-dragon', gradient: 'linear-gradient(135deg, #667eea, #764ba2)' },
+  { icon: 'fas fa-ghost', gradient: 'linear-gradient(135deg, #a8edea, #fed6e3)' },
+  { icon: 'fas fa-crow', gradient: 'linear-gradient(135deg, #5f72be, #9921e8)' },
+  { icon: 'fas fa-fish', gradient: 'linear-gradient(135deg, #2af598, #009efd)' },
+  { icon: 'fas fa-horse', gradient: 'linear-gradient(135deg, #ff9a9e, #fecfef)' },
+  { icon: 'fas fa-rocket', gradient: 'linear-gradient(135deg, #f6d365, #fda085)' },
+  { icon: 'fas fa-wand-magic-sparkles', gradient: 'linear-gradient(135deg, #c471f5, #fa71cd)' },
+  { icon: 'fas fa-seedling', gradient: 'linear-gradient(135deg, #00b09b, #96c93d)' },
+];
+
+/** 简单字符串哈希（FNV-1a）：同一 id 永远映射同一头像。 */
+function hashId(id: string): number {
+  let h = 2166136261;
+  for (const ch of id) {
+    h ^= ch.codePointAt(0) ?? 0;
+    h = Math.imul(h, 16777619);
+  }
+  return Math.abs(h);
+}
+
+const agentAvatar = computed(() => {
+  const id = conversations.activeId ?? '';
+  return AGENT_AVATARS[hashId(id) % AGENT_AVATARS.length];
+});
+
+const agentAvatarStyle = computed(() => ({
+  background: agentAvatar.value.gradient,
+  color: '#fff',
+  borderColor: 'transparent',
+}));
 </script>
 
 <template>
@@ -303,7 +347,9 @@ const md = (src: string) => renderMarkdown(src);
 
       <template v-for="msg in conversations.messages" :key="msg.id">
         <div v-if="msg.content || msg.reasoning" class="message" :class="msg.role">
-          <!-- 思考过程：默认收起（spec: Collapsed-by-default） -->
+          <!-- 思考过程：默认收起（spec: Collapsed-by-default）。
+               主流聊天样式：一行轻量入口（图标+文字链），不用大块面板，
+               展开后的内容才带浅色容器，与消息流自然融合。 -->
           <div v-if="msg.role === 'assistant' && msg.reasoning" class="reasoning">
             <button
               type="button"
@@ -312,12 +358,11 @@ const md = (src: string) => renderMarkdown(src);
               @click="toggleReasoning(msg.id)"
             >
               <i
-                class="fas"
+                class="fas reasoning-icon"
                 :class="expandedReasoning.has(msg.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
               ></i>
-              <i class="fas fa-lightbulb reasoning-icon"></i>
-              <span>思考过程</span>
-              <span class="reasoning-hint">{{ expandedReasoning.has(msg.id) ? '点击收起' : '点击展开' }}</span>
+              <span class="reasoning-label">思考过程</span>
+              <span class="reasoning-hint">{{ expandedReasoning.has(msg.id) ? '收起' : '展开' }}</span>
             </button>
             <div v-show="expandedReasoning.has(msg.id)" class="reasoning-body md-content">
               <!-- eslint-disable-next-line vue/no-v-html — 输出经 DOMPurify 消毒 -->
@@ -330,9 +375,10 @@ const md = (src: string) => renderMarkdown(src);
               v-if="msg.role !== 'user'"
               class="avatar"
               :class="msg.role"
+              :style="agentAvatarStyle"
               aria-hidden="true"
             >
-              <i class="fas fa-robot"></i>
+              <i :class="agentAvatar.icon"></i>
             </div>
             <div class="bubble-wrap" :class="msg.role">
               <div
@@ -383,16 +429,16 @@ const md = (src: string) => renderMarkdown(src);
         v-if="streamingReasoning || streamingText"
         class="message assistant streaming"
       >
-        <div v-if="streamingReasoning && !streamingText" class="reasoning">
+        <div v-if="streamingReasoning && !streamingText" class="reasoning streaming">
           <div class="reasoning-toggle passive">
-            <i class="fas fa-lightbulb reasoning-icon"></i>
-            <span>思考中…</span>
+            <i class="fas fa-lightbulb reasoning-icon streaming-icon"></i>
+            <span class="reasoning-label">思考中</span>
             <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
           </div>
         </div>
         <div v-if="streamingText" class="message-row">
-          <div class="avatar assistant" aria-hidden="true">
-            <i class="fas fa-robot"></i>
+          <div class="avatar assistant" :style="agentAvatarStyle" aria-hidden="true">
+            <i :class="agentAvatar.icon"></i>
           </div>
           <div class="bubble-wrap assistant">
             <div class="message-body md-content">
@@ -419,6 +465,10 @@ const md = (src: string) => renderMarkdown(src);
     </p>
 
     <form class="composer" @submit.prevent="send">
+      <!-- 模型切换器：主流聊天输入框样式（spec: In-chat Model Switcher） -->
+      <div class="composer-toolbar">
+        <ModelSwitcher />
+      </div>
       <textarea
         v-model="draft"
         class="composer-input"
@@ -456,9 +506,9 @@ const md = (src: string) => renderMarkdown(src);
   display: flex;
   flex-direction: column;
   width: 100%;
-  max-width: 800px;
+  max-width: 860px;
   margin: 0 auto;
-  padding: 16px 4px 8px;
+  padding: 20px 12px 12px;
   overflow: hidden;
 }
 
@@ -470,8 +520,8 @@ const md = (src: string) => renderMarkdown(src);
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 8px 8px 16px;
+  gap: 22px;
+  padding: 12px 10px 20px;
   scrollbar-width: thin;
 }
 
@@ -480,9 +530,9 @@ const md = (src: string) => renderMarkdown(src);
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 14px;
-  margin-bottom: 12px;
-  border-radius: 12px;
+  padding: 12px 16px;
+  margin-bottom: 14px;
+  border-radius: 14px;
   background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(249, 115, 22, 0.08));
   border: 1px solid rgba(245, 158, 11, 0.35);
   flex-shrink: 0;
@@ -503,14 +553,20 @@ const md = (src: string) => renderMarkdown(src);
 
 .banner-btn {
   flex-shrink: 0;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: none;
-  border-radius: 8px;
-  background: #f59e0b;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #f59e0b, #f97316);
   color: white;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.banner-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
 }
 
 .chat-empty {
@@ -521,14 +577,14 @@ const md = (src: string) => renderMarkdown(src);
   justify-content: center;
   text-align: center;
   gap: 12px;
-  padding: 40px 16px;
+  padding: 48px 16px;
 }
 
 .welcome-icon {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.12), rgba(72, 149, 239, 0.12));
+  width: 80px;
+  height: 80px;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(67, 97, 238, 0.14), rgba(72, 149, 239, 0.14));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -536,7 +592,7 @@ const md = (src: string) => renderMarkdown(src);
 }
 
 .welcome-icon i {
-  font-size: 32px;
+  font-size: 34px;
   color: var(--primary);
 }
 
@@ -545,22 +601,29 @@ const md = (src: string) => renderMarkdown(src);
   font-weight: 700;
   color: var(--text-primary);
   margin: 0;
+  letter-spacing: -0.5px;
 }
 
 .welcome-subtitle {
   font-size: 15px;
   color: var(--text-secondary);
   margin: 0;
-  max-width: 420px;
-  line-height: 1.5;
+  max-width: 440px;
+  line-height: 1.6;
 }
 
 /* ---------- 消息 ---------- */
 .message {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-width: 94%;
+  gap: 8px;
+  max-width: 92%;
+  animation: msg-in 0.22s ease;
+}
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .message.user {
@@ -576,7 +639,7 @@ const md = (src: string) => renderMarkdown(src);
 
 .message-row {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-end;
   min-width: 0;
 }
@@ -586,23 +649,25 @@ const md = (src: string) => renderMarkdown(src);
 }
 
 .avatar {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
+  width: 34px;
+  height: 34px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 13px;
+  font-size: 15px;
   flex-shrink: 0;
   background: var(--bg-tertiary);
   color: var(--primary);
   border: 1px solid var(--border-color);
+  margin-bottom: 2px;
 }
 
 .avatar.user {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white;
   border-color: transparent;
+  border-radius: 12px;
 }
 
 .bubble-wrap {
@@ -614,10 +679,10 @@ const md = (src: string) => renderMarkdown(src);
 }
 
 .message-body {
-  padding: 10px 14px;
-  border-radius: 14px;
+  padding: 12px 16px;
+  border-radius: 18px;
   font-size: 14.5px;
-  line-height: 1.6;
+  line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -625,7 +690,8 @@ const md = (src: string) => renderMarkdown(src);
 .message.user .message-body {
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 6px;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 25%, transparent);
 }
 
 .message.assistant .message-body,
@@ -633,8 +699,8 @@ const md = (src: string) => renderMarkdown(src);
   background: var(--bg-primary);
   color: var(--text-primary);
   border: 1px solid var(--border-color);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.05);
-  border-bottom-left-radius: 4px;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
+  border-bottom-left-radius: 6px;
   white-space: normal;
 }
 
@@ -645,11 +711,11 @@ const md = (src: string) => renderMarkdown(src);
 /* 复制按钮：hover / 聚焦消息时出现 */
 .copy-btn {
   position: absolute;
-  top: -12px;
+  bottom: 6px;
   width: 26px;
   height: 26px;
   border: 1px solid var(--border-color);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--bg-primary);
   color: var(--text-secondary);
   font-size: 11px;
@@ -658,7 +724,8 @@ const md = (src: string) => renderMarkdown(src);
   justify-content: center;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
 }
 
 .message.user .copy-btn {
@@ -678,80 +745,119 @@ const md = (src: string) => renderMarkdown(src);
 
 .copy-btn:hover {
   color: var(--primary);
+  border-color: var(--primary);
 }
 
-/* ---------- 思考过程折叠块 ---------- */
+/* ---------- 思考过程（主流聊天样式：轻量行入口 + 展开内容容器） ---------- */
 .reasoning {
-  align-self: stretch;
+  align-self: flex-start;
   max-width: 100%;
-  border: 1px dashed var(--border-color);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-tertiary) 30%, transparent);
-  overflow: hidden;
+  margin-left: 46px; /* 与头像对齐（34px 头像 + 12px 间距） */
 }
 
 .reasoning-toggle {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 6px 10px;
+  gap: 6px;
+  padding: 3px 8px;
+  margin: 0 0 2px -8px;
   border: none;
+  border-radius: 8px;
   background: transparent;
   color: var(--text-secondary);
   font-size: 12.5px;
   cursor: pointer;
   text-align: left;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.reasoning-toggle:not(.passive):hover {
+  background: color-mix(in srgb, var(--bg-tertiary) 45%, transparent);
+  color: var(--text-primary);
 }
 
 .reasoning-toggle.passive {
   cursor: default;
 }
 
-.reasoning-toggle:hover:not(.passive) {
-  color: var(--text-primary);
+.reasoning-toggle > i {
+  font-size: 11px;
+  transition: color 0.15s ease;
 }
 
-.reasoning-icon {
-  color: #d97706;
+.reasoning-toggle:not(.passive):hover > i {
+  color: var(--primary);
+}
+
+.reasoning-label {
+  font-weight: 500;
 }
 
 .reasoning-hint {
-  margin-left: auto;
   font-size: 11px;
-  opacity: 0.75;
+  opacity: 0.6;
+}
+
+.reasoning-icon {
+  color: var(--text-secondary);
+}
+
+.streaming-icon {
+  color: #d97706;
+  animation: pulse-icon 1.6s ease-in-out infinite;
+}
+
+@keyframes pulse-icon {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.12); }
 }
 
 .reasoning-body {
-  padding: 4px 12px 10px;
-  font-size: 13px;
-  line-height: 1.6;
+  padding: 10px 14px;
+  margin-top: 4px;
+  font-size: 12.5px;
+  line-height: 1.65;
   color: var(--text-secondary);
-  border-top: 1px dashed var(--border-color);
+  border-left: 2px solid color-mix(in srgb, var(--primary) 35%, var(--border-color));
+  background: color-mix(in srgb, var(--bg-tertiary) 22%, transparent);
+  border-radius: 4px 10px 10px 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  scrollbar-width: thin;
 }
 
 /* ---------- 工具卡片 ---------- */
 .tool-card {
   align-self: flex-start;
-  width: min(100%, 460px);
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--bg-secondary);
+  width: min(100%, 480px);
+  padding: 0;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-secondary) 80%, var(--bg-primary));
   border: 1px solid var(--border-color);
   font-size: 12px;
+  overflow: hidden;
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
 }
 
 .tool-card-header {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 9px 14px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 6px;
+  background: color-mix(in srgb, var(--bg-tertiary) 30%, transparent);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.tool-card-header > i {
+  color: var(--primary);
+  font-size: 12px;
 }
 
 .tool-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
 }
 
 .tool-status {
@@ -761,6 +867,7 @@ const md = (src: string) => renderMarkdown(src);
   display: flex;
   align-items: center;
   gap: 5px;
+  font-size: 11px;
 }
 
 .tool-status.done {
@@ -770,21 +877,32 @@ const md = (src: string) => renderMarkdown(src);
 .tool-args,
 .tool-result {
   margin: 0;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-color);
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 0;
   overflow: auto;
-  max-height: 140px;
+  max-height: 150px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 11px;
-  line-height: 1.5;
+  line-height: 1.55;
   color: var(--text-primary);
 }
 
+.tool-card > .tool-args { border-bottom: 1px dashed var(--border-color); }
+
 .tool-result {
-  margin-top: 6px;
+  color: var(--text-secondary);
 }
+
+/* ---------- 深色模式微调 ---------- */
+:global(.dark-mode) .llm-banner strong { color: #fbbf24; }
+:global(.dark-mode) .llm-banner p { color: #fcd34d; }
+:global(.dark-mode) .chat-error { color: #f87171; }
+:global(.dark-mode) .composer-cancel { background: rgba(239, 68, 68, 0.2); }
+:global(.dark-mode) .reasoning-icon { color: #fbbf24; }
+:global(.dark-mode) .streaming-icon { color: #fbbf24; }
+:global(.dark-mode) .tool-status.done { color: #4ade80; }
 
 /* ---------- 流式指示 ---------- */
 .stream-cursor {
@@ -825,17 +943,18 @@ const md = (src: string) => renderMarkdown(src);
 /* ---------- 错误条（固定输入区上方） ---------- */
 .chat-error {
   flex-shrink: 0;
-  margin: 0 0 8px;
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: rgba(239, 68, 68, 0.1);
-  border: 1px solid rgba(239, 68, 68, 0.3);
+  margin: 0 0 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.28);
   color: #b91c1c;
   font-size: 13px;
   display: flex;
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+  animation: msg-in 0.22s ease;
 }
 
 .chat-error-text {
@@ -857,13 +976,35 @@ const md = (src: string) => renderMarkdown(src);
 .composer {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 10px;
-  padding: 12px 14px;
+  gap: 6px 10px;
+  padding: 10px 14px 12px;
   background: var(--bg-primary);
-  border-radius: 14px;
-  box-shadow: 0 2px 16px rgba(0, 0, 0, 0.08);
+  border-radius: 18px;
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.05),
+    0 8px 24px rgba(0, 0, 0, 0.07);
   border: 1px solid var(--border-color);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border-color));
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.05),
+    0 8px 28px rgba(0, 0, 0, 0.08),
+    0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding-bottom: 2px;
+  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
+  margin-bottom: 2px;
 }
 
 .composer-input {
@@ -896,27 +1037,39 @@ const md = (src: string) => renderMarkdown(src);
   width: 40px;
   height: 40px;
   border: none;
-  border-radius: 10px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
 .composer-send {
-  background: var(--primary);
+  background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white;
+  box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 35%, transparent);
+}
+
+.composer-send:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 45%, transparent);
 }
 
 .composer-send:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+  box-shadow: none;
 }
 
 .composer-cancel {
   background: #fee2e2;
   color: #b91c1c;
+}
+
+.composer-cancel:hover {
+  transform: translateY(-1px);
 }
 
 /* ---------- Markdown 内容样式（v-html 需 :deep） ---------- */
@@ -999,10 +1152,11 @@ const md = (src: string) => renderMarkdown(src);
 .md-content :deep(.md-code-block) {
   position: relative;
   margin: 8px 0;
-  padding: 26px 10px 10px;
-  border-radius: 8px;
+  padding: 28px 12px 12px;
+  border-radius: 10px;
   background: #1e1e2e;
   overflow-x: auto;
+  border: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .md-content :deep(.md-code-block code) {

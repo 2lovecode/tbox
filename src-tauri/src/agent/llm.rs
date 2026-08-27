@@ -135,6 +135,60 @@ impl ModelTurn {
     }
 }
 
+/// 剥离模型正文里内联的思考标记（`<think>…</think>`，Qwen/DeepSeek 风格），
+/// 返回 (reasoning, 正文)。支持：
+/// - 多个 think 块（内容以换行拼接）
+/// - 被截断未闭合的 `<think>…`（生成中断时），其后全部内容视为思考
+/// 无 think 标记时原样返回（reasoning = None）。
+pub fn split_think_tags(text: &str) -> (Option<String>, String) {
+    const OPEN: &str = "<think>";
+    const CLOSE: &str = "</think>";
+    if !text.contains(OPEN) {
+        return (None, text.to_string());
+    }
+    let mut reasoning_parts: Vec<String> = Vec::new();
+    let mut body = String::new();
+    let mut rest = text;
+    while let Some(i) = rest.find(OPEN) {
+        body.push_str(&rest[..i]);
+        let after = &rest[i + OPEN.len()..];
+        match after.find(CLOSE) {
+            Some(j) => {
+                reasoning_parts.push(after[..j].to_string());
+                rest = &after[j + CLOSE.len()..];
+            }
+            None => {
+                // 未闭合（截断）：其后全部内容归入思考。
+                reasoning_parts.push(after.to_string());
+                rest = "";
+                break;
+            }
+        }
+    }
+    body.push_str(rest);
+    let reasoning = reasoning_parts
+        .iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let reasoning = if reasoning.is_empty() { None } else { Some(reasoning) };
+    (reasoning, body.trim().to_string())
+}
+
+/// 把文本切成小块供事件流式发出（体验层伪流式：模型回合本身非流式，
+/// 但分块 emit 让前端逐步渲染）。空文本返回单个空块以保留事件语义。
+pub fn chunk_text(text: &str, chunk_chars: usize) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.is_empty() {
+        return vec![String::new()];
+    }
+    chars
+        .chunks(chunk_chars.max(1))
+        .map(|c| c.iter().collect())
+        .collect()
+}
+
 /// 模型后端描述：harness 策略选档依据（backend 如 "embedded" / "genai"）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendDesc {
@@ -586,6 +640,41 @@ fn parse_anthropic_turn(json: &Value) -> Result<ModelTurn, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn split_think_basic() {
+        let (r, body) = split_think_tags("<think>推理过程</think>最终答案");
+        assert_eq!(r.as_deref(), Some("推理过程"));
+        assert_eq!(body, "最终答案");
+    }
+
+    #[test]
+    fn split_think_unclosed_on_truncation() {
+        let (r, body) = split_think_tags("<think>只写到一半");
+        assert_eq!(r.as_deref(), Some("只写到一半"));
+        assert_eq!(body, "");
+    }
+
+    #[test]
+    fn split_think_multiple_blocks() {
+        let (r, body) = split_think_tags("<think>a</think>中段<think>b</think>尾");
+        assert_eq!(r.as_deref(), Some("a\nb"));
+        assert_eq!(body, "中段尾");
+    }
+
+    #[test]
+    fn split_think_absent_returns_original() {
+        let (r, body) = split_think_tags("普通回复，无思考");
+        assert!(r.is_none());
+        assert_eq!(body, "普通回复，无思考");
+    }
+
+    #[test]
+    fn chunk_text_splits_and_keeps_empty() {
+        let chunks = chunk_text("abcdef", 2);
+        assert_eq!(chunks, vec!["ab", "cd", "ef"]);
+        assert_eq!(chunk_text("", 4), vec![String::new()]);
+    }
 
     #[test]
     fn local_without_model_does_not_hit_cloud() {

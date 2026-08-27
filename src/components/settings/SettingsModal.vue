@@ -35,7 +35,9 @@ const llmStore = useLlmStore();
 const { confirm: confirmDialog } = useConfirm();
 const { isOpen, activeTab } = storeToRefs(settingsStore);
 const {
-  config: llmConfig,
+  draft: llmDraft,
+  profiles,
+  activeId,
   presets,
   apiKeyDraft,
   revealApiKey,
@@ -45,12 +47,40 @@ const {
   lastError: llmError,
   testResult,
   canSave,
-  isConfigured,
-  currentPreset,
+  draftPreset: currentPreset,
   isLocalProvider,
   isOllamaProvider,
   isOAuthPreset,
+  draftModels,
+  draftModelsMessage,
+  isFetchingDraftModels,
+  pendingModel,
 } = storeToRefs(llmStore);
+
+const editingProfile = computed(() =>
+  llmStore.profiles.find((p) => p.id === llmStore.draft.id),
+);
+const editingHasApiKey = computed(() => editingProfile.value?.hasApiKey ?? false);
+
+const profileProviderLabel = (providerId: string) =>
+  presets.value.find((p) => p.id === providerId)?.label ?? providerId;
+
+const profileStatus = (p: { provider: string; model: string; hasApiKey: boolean }) => {
+  if (p.provider === 'local') return { label: '本地', cls: 'muted' };
+  if (p.provider === 'ollama') return p.model ? { label: 'Ollama', cls: 'ok' } : { label: '缺模型', cls: 'warn' };
+  if (!p.hasApiKey) return { label: '缺少 Key', cls: 'warn' };
+  return { label: '已配置', cls: 'ok' };
+};
+
+async function onDeleteProfile(id: string, name: string) {
+  const ok = await confirmDialog(`将删除配置「${name}」及其保存的 API Key。`, {
+    title: '删除该配置？',
+    confirmLabel: '删除',
+    variant: 'danger',
+  });
+  if (!ok) return;
+  void llmStore.remove(id);
+}
 
 const panelRef = ref<HTMLDivElement | null>(null);
 const localModels = ref<LocalModelInfo[]>([]);
@@ -218,9 +248,11 @@ const llmStatusLabel = computed(() => {
     const installed = localModels.value.some((m) => m.installed);
     return installed ? '本地模型已就绪' : '需下载本地模型';
   }
-  if (isOllamaProvider.value) return llmConfig.value.model ? 'Ollama 已配置' : '需填写模型名';
-  if (!isConfigured.value) return '未配置';
-  if (!llmConfig.value.hasApiKey) return '缺少 API Key';
+  if (isOllamaProvider.value) return llmDraft.value.model ? 'Ollama 已配置' : '需填写模型名';
+  const baseUrl = llmDraft.value.baseUrl ?? '';
+  const model = llmDraft.value.model ?? '';
+  if (!baseUrl.trim() || !model.trim()) return '未配置';
+  if (!editingHasApiKey.value) return '缺少 API Key';
   return '已配置';
 });
 
@@ -229,14 +261,21 @@ const llmStatusClass = computed(() => {
   if (isLocalProvider.value) {
     return localModels.value.some((m) => m.installed) ? 'ok' : 'warn';
   }
-  if (isOllamaProvider.value) return llmConfig.value.model ? 'ok' : 'warn';
-  if (!isConfigured.value) return 'muted';
-  if (!llmConfig.value.hasApiKey) return 'warn';
+  if (isOllamaProvider.value) return llmDraft.value.model ? 'ok' : 'warn';
+  const baseUrl = llmDraft.value.baseUrl ?? '';
+  const model = llmDraft.value.model ?? '';
+  if (!baseUrl.trim() || !model.trim()) return 'muted';
+  if (!editingHasApiKey.value) return 'warn';
   return 'ok';
 });
 
 const showRemoteFields = computed(
   () => !isLocalProvider.value && !isOllamaProvider.value && !isOAuthPreset.value,
+);
+
+/** 模型字段旁的「拉取模型」按钮适用范围：云端 + Ollama（本地直接列已装模型）。 */
+const canFetchModels = computed(
+  () => !isOAuthPreset.value && (showRemoteFields.value || isOllamaProvider.value),
 );
 
 const showApiKey = computed(() => showRemoteFields.value);
@@ -270,8 +309,8 @@ async function startOllamaPull() {
   ollamaPullFeedback.value = null;
   try {
     await invoke('start_ollama_pull', {
-      name: llmConfig.value.model,
-      baseUrl: llmConfig.value.baseUrl || null,
+      name: llmDraft.value.model,
+      baseUrl: llmDraft.value.baseUrl || null,
     });
   } catch (error) {
     ollamaPullFeedback.value = error instanceof Error ? error.message : String(error);
@@ -286,13 +325,17 @@ function formatBytes(n: number): string {
 }
 
 async function resetLlm() {
-  const ok = await confirmDialog('此操作会删除已保存的 API Key。', {
-    title: '确定要清空 LLM 配置吗？',
-    confirmLabel: '清空',
+  if (llmStore.profiles.length === 0) return;
+  const ok = await confirmDialog('将删除全部已保存配置及各自的 API Key。', {
+    title: '删除全部 LLM 配置？',
+    confirmLabel: '全部删除',
     variant: 'danger',
   });
   if (!ok) return;
-  void llmStore.deleteConfig();
+  for (const p of [...llmStore.profiles]) {
+    await llmStore.remove(p.id);
+  }
+  llmStore.newProfile();
 }
 </script>
 
@@ -357,7 +400,77 @@ async function resetLlm() {
             <div v-if="isLoadingLlm" class="state-line">加载配置中…</div>
 
             <template v-else>
+              <!-- 已保存的提供方配置列表 -->
+              <div class="profile-list-block">
+                <div class="profile-list-head">
+                  <span class="field-label">已保存配置（{{ profiles.length }}）</span>
+                  <button type="button" class="btn btn-secondary" @click="llmStore.newProfile()">
+                    <i class="fas fa-plus" aria-hidden="true"></i>
+                    新建配置
+                  </button>
+                </div>
+                <ul v-if="profiles.length" class="profile-list">
+                  <li
+                    v-for="p in profiles"
+                    :key="p.id"
+                    :class="['profile-row', { active: p.id === activeId }]"
+                  >
+                    <div class="profile-meta">
+                      <strong class="profile-name">
+                        {{ p.name }}
+                        <span v-if="p.id === activeId" class="status-pill ok inline">当前</span>
+                        <span :class="['status-pill', profileStatus(p).cls, 'inline']">
+                          {{ profileStatus(p).label }}
+                        </span>
+                      </strong>
+                      <span class="profile-sub">
+                        {{ profileProviderLabel(p.provider) }}
+                        <template v-if="p.model"> · {{ p.model }}</template>
+                      </span>
+                    </div>
+                    <div class="profile-actions">
+                      <button
+                        v-if="p.id !== activeId"
+                        type="button"
+                        class="btn btn-ghost"
+                        @click="llmStore.setActive(p.id)"
+                      >
+                        使用
+                      </button>
+                      <button type="button" class="btn btn-ghost" @click="llmStore.editProfile(p)">
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost danger"
+                        @click="onDeleteProfile(p.id, p.name)"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </li>
+                </ul>
+                <p v-else class="field-hint">
+                  还没有任何配置。可在下方表单新建第一个提供方配置，保存后即成为当前使用的模型。
+                </p>
+              </div>
+
+              <div class="section-intro">
+                <h3>{{ llmDraft.id ? '编辑配置' : '新建配置' }}</h3>
+              </div>
+
               <div class="form-grid">
+                <label class="field">
+                  <span class="field-label">配置名称</span>
+                  <input
+                    v-model.trim="llmDraft.name"
+                    class="field-input"
+                    type="text"
+                    placeholder="例如：DeepSeek 日常 / 本地小模型"
+                  />
+                  <span class="field-hint">仅用于在列表和聊天切换器中辨认。</span>
+                </label>
+
                 <label class="field">
                   <span class="field-label">提供方</span>
                   <input
@@ -371,7 +484,7 @@ async function resetLlm() {
                   <select
                     v-if="!presetFilter"
                     class="field-input"
-                    :value="llmConfig.provider"
+                    :value="llmDraft.provider"
                     @change="onProviderChange"
                   >
                     <option
@@ -392,7 +505,7 @@ async function resetLlm() {
                         type="button"
                         class="preset-result-item"
                         :disabled="p.requiresOauth"
-                        :class="{ active: p.id === llmConfig.provider }"
+                        :class="{ active: p.id === llmDraft.provider }"
                         @click="applyPresetAndClearFilter(p.id)"
                       >
                         <span class="preset-result-label">
@@ -429,7 +542,7 @@ async function resetLlm() {
                   <span class="field-label">协议</span>
                   <select
                     class="field-input"
-                    :value="llmConfig.protocol"
+                    :value="llmDraft.protocol"
                     @change="onProtocolChange"
                   >
                     <option v-for="proto in LLM_PROTOCOLS" :key="proto.id" :value="proto.id">
@@ -488,7 +601,7 @@ async function resetLlm() {
                   <label class="field">
                     <span class="field-label">Base URL</span>
                     <input
-                      v-model.trim="llmConfig.baseUrl"
+                      v-model.trim="llmDraft.baseUrl"
                       class="field-input"
                       type="text"
                       placeholder="http://127.0.0.1:11434"
@@ -496,12 +609,52 @@ async function resetLlm() {
                   </label>
                   <label class="field">
                     <span class="field-label">模型名</span>
-                    <input
-                      v-model.trim="llmConfig.model"
-                      class="field-input"
-                      type="text"
-                      placeholder="llama3.2"
-                    />
+                    <div class="model-fetch-row">
+                      <input
+                        v-model.trim="llmDraft.model"
+                        class="field-input"
+                        type="text"
+                        placeholder="llama3.2 或点右侧拉取"
+                      />
+                      <button
+                        v-if="canFetchModels"
+                        type="button"
+                        class="btn btn-ghost fetch-btn"
+                        :disabled="isFetchingDraftModels"
+                        title="从端点拉取可用模型列表"
+                        @click="llmStore.fetchDraftModels()"
+                      >
+                        <i
+                          :class="isFetchingDraftModels ? 'fas fa-spinner fa-spin' : 'fas fa-rotate'"
+                          aria-hidden="true"
+                        ></i>
+                        拉取
+                      </button>
+                    </div>
+                    <!-- 拉取成功：下拉选择 + 添加 -->
+                    <div v-if="draftModels.length" class="model-add-row">
+                      <select
+                        class="field-input model-select"
+                        :value="pendingModel"
+                        aria-label="选择要添加的模型"
+                        @change="llmStore.setPendingModel(($event.target as HTMLSelectElement).value)"
+                      >
+                        <option v-for="m in draftModels" :key="m" :value="m">{{ m }}</option>
+                      </select>
+                      <button
+                        type="button"
+                        class="btn btn-primary add-btn"
+                        :disabled="!pendingModel"
+                        title="将选中的模型填入模型字段"
+                        @click="llmStore.addPendingModel()"
+                      >
+                        <i class="fas fa-plus" aria-hidden="true"></i>
+                        添加
+                      </button>
+                    </div>
+                    <span v-if="draftModelsMessage" class="field-hint">
+                      {{ draftModelsMessage }}
+                    </span>
                   </label>
                   <div class="model-actions">
                     <button type="button" class="btn primary" @click="startOllamaPull">
@@ -525,7 +678,7 @@ async function resetLlm() {
                     inputmode="url"
                     autocomplete="off"
                     spellcheck="false"
-                    v-model.trim="llmConfig.baseUrl"
+                    v-model.trim="llmDraft.baseUrl"
                     :placeholder="currentPreset?.defaultBaseUrl || 'https://your-endpoint/v1'"
                   />
                   <span class="field-hint">OpenAI 兼容端点；自定义请填写完整 URL（不含尾部路径）。</span>
@@ -533,21 +686,59 @@ async function resetLlm() {
 
                 <label v-if="showRemoteFields" class="field">
                   <span class="field-label">模型</span>
-                  <input
-                    class="field-input"
-                    type="text"
-                    autocomplete="off"
-                    spellcheck="false"
-                    v-model.trim="llmConfig.model"
-                    :placeholder="currentPreset?.defaultModel || 'model-name'"
-                  />
-                  <span class="field-hint">填写该提供方下你想使用的模型标识。</span>
+                  <div class="model-fetch-row">
+                    <input
+                      class="field-input"
+                      type="text"
+                      autocomplete="off"
+                      spellcheck="false"
+                      v-model.trim="llmDraft.model"
+                      :placeholder="currentPreset?.defaultModel || 'model-name'"
+                    />
+                    <button
+                      type="button"
+                      class="btn btn-ghost fetch-btn"
+                      :disabled="isFetchingDraftModels"
+                      title="从端点拉取可用模型列表"
+                      @click="llmStore.fetchDraftModels()"
+                    >
+                      <i
+                        :class="isFetchingDraftModels ? 'fas fa-spinner fa-spin' : 'fas fa-rotate'"
+                        aria-hidden="true"
+                      ></i>
+                      拉取
+                    </button>
+                  </div>
+                  <div v-if="draftModels.length" class="model-add-row">
+                    <select
+                      class="field-input model-select"
+                      :value="pendingModel"
+                      aria-label="选择要添加的模型"
+                      @change="llmStore.setPendingModel(($event.target as HTMLSelectElement).value)"
+                    >
+                      <option v-for="m in draftModels" :key="m" :value="m">{{ m }}</option>
+                    </select>
+                    <button
+                      type="button"
+                      class="btn btn-primary add-btn"
+                      :disabled="!pendingModel"
+                      title="将选中的模型填入模型字段"
+                      @click="llmStore.addPendingModel()"
+                    >
+                      <i class="fas fa-plus" aria-hidden="true"></i>
+                      添加
+                    </button>
+                  </div>
+                  <span v-if="draftModelsMessage" class="field-hint">
+                    {{ draftModelsMessage }}
+                  </span>
+                  <span v-else class="field-hint">填写模型标识，或点「拉取」从端点获取列表后选择添加。</span>
                 </label>
 
                 <div v-if="showApiKey" class="field">
                   <span class="field-label">
                     API Key
-                    <span v-if="llmConfig.hasApiKey && !apiKeyDraft" class="status-pill ok inline">
+                    <span v-if="editingHasApiKey && !apiKeyDraft" class="status-pill ok inline">
                       已保存
                     </span>
                   </span>
@@ -558,9 +749,19 @@ async function resetLlm() {
                       autocomplete="off"
                       spellcheck="false"
                       :value="apiKeyDraft"
-                      :placeholder="llmConfig.hasApiKey ? '留空则保留现有 Key，输入新值则替换' : 'sk-...'"
+                      :placeholder="editingHasApiKey ? '留空则保留现有 Key，输入新值则替换' : 'sk-...'"
                       @input="llmStore.setApiKeyDraft(($event.target as HTMLInputElement).value)"
                     />
+                     <button
+                       v-if="editingHasApiKey && !apiKeyDraft"
+                       type="button"
+                       class="icon-btn"
+                       title="回填已保存的 Key"
+                       aria-label="回填已保存的 API Key"
+                       @click="llmStore.backfillApiKey()"
+                     >
+                       <i class="fas fa-rotate-left" aria-hidden="true"></i>
+                     </button>
                     <button
                       type="button"
                       class="icon-btn"
@@ -572,7 +773,7 @@ async function resetLlm() {
                     </button>
                   </div>
                   <span class="field-hint">
-                    <template v-if="llmConfig.hasApiKey">
+                    <template v-if="editingHasApiKey">
                       已配置本地加密的 Key。留空保存时保留；填新值则替换。
                     </template>
                     <template v-else>
@@ -596,7 +797,7 @@ async function resetLlm() {
                 </button>
                 <div class="action-spacer"></div>
                 <button
-                  v-if="llmConfig.hasApiKey"
+                  v-if="editingHasApiKey"
                   type="button"
                   class="btn btn-ghost"
                   :disabled="isSavingLlm"
@@ -643,7 +844,7 @@ async function resetLlm() {
                   高级
                 </summary>
                 <div class="advanced-body">
-                  <p class="muted">配置存放在 <code>~/.toolbox/llm_config.json</code> 与 <code>~/.toolbox/llm_secret.bin</code>。后者使用 AES-256-GCM 加密，密钥派生自本机主机名 + 应用常量盐。</p>
+                  <p class="muted">配置存放在 <code>~/.toolbox/llm_profiles.json</code>，各 API Key 独立加密保存在 <code>~/.toolbox/llm_secrets/</code>（AES-256-GCM，密钥派生自本机主机名 + 应用常量盐）。旧版单配置会在首次读取时自动迁移。</p>
                   <button
                     type="button"
                     class="btn btn-ghost danger"
@@ -850,6 +1051,100 @@ async function resetLlm() {
 .muted {
   color: var(--text-secondary, #6c757d);
 }
+
+/* ---- Profile list ---- */
+
+.profile-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 8px;
+  background: var(--surface-2, #f8fafc);
+}
+
+.profile-row.active {
+  border-color: var(--primary, #4361ee);
+  background: rgba(67, 97, 238, 0.06);
+}
+
+.profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.profile-name {
+  font-size: 13px;
+  color: var(--text-primary, #1f2937);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.profile-sub {
+  font-size: 11px;
+  color: var(--text-secondary, #6c757d);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.profile-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* ---- Model fetch + add ---- */
+
+.model-fetch-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.model-fetch-row .field-input { flex: 1; }
+
+.fetch-btn { flex-shrink: 0; }
+
+/* 拉取成功后的「下拉选择 + 添加」行 */
+.model-add-row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.model-select { flex: 1; }
+
+.add-btn { flex-shrink: 0; }
 
 /* ---- LLM form ---- */
 

@@ -336,4 +336,54 @@ mod tests {
             "https://api.openai.com/v1/"
         );
     }
+
+    /// multi-provider-models: the resolve path must follow the (active
+    /// profile projected) config, so switching the active profile changes
+    /// the endpoint/model used by the next turn. Uses the Ollama branch,
+    /// which resolves without network access.
+    #[test]
+    fn resolve_target_follows_active_profile_config() {
+        let mk = |model: &str, base: &str| LlmConfig {
+            provider: "ollama".into(),
+            protocol: Some(LlmProtocol::OllamaNative),
+            base_url: base.into(),
+            model: model.into(),
+            has_api_key: false,
+        };
+
+        let (_, endpoint_a, model_a, _) =
+            resolve_target(&mk("llama3.2", ""), None, LlmProtocol::OllamaNative).unwrap();
+        assert_eq!(model_a, "llama3.2");
+        assert_eq!(endpoint_a, "http://127.0.0.1:11434");
+
+        // Profile switched: same resolve call now yields B's endpoint/model.
+        let (_, endpoint_b, model_b, _) = resolve_target(
+            &mk("qwen2.5", "http://127.0.0.2:11434"),
+            None,
+            LlmProtocol::OllamaNative,
+        )
+        .unwrap();
+        assert_eq!(model_b, "qwen2.5");
+        assert_eq!(endpoint_b, "http://127.0.0.2:11434");
+    }
+
+    /// The active-profile projection keeps the legacy config shape intact.
+    #[test]
+    fn profile_projection_preserves_config_shape() {
+        let profile = crate::commands::llm::LlmProfile {
+            id: "p1".into(),
+            name: "Test".into(),
+            provider: "openai".into(),
+            protocol: Some(LlmProtocol::OpenaiChat),
+            base_url: "https://api.openai.com/v1".into(),
+            model: "gpt-4o-mini".into(),
+            has_api_key: true,
+        };
+        let cfg = profile.to_config();
+        assert_eq!(cfg.provider, "openai");
+        assert_eq!(cfg.base_url, "https://api.openai.com/v1");
+        assert_eq!(cfg.model, "gpt-4o-mini");
+        assert!(cfg.has_api_key);
+        assert_eq!(cfg.resolved_protocol(), LlmProtocol::OpenaiChat);
+    }
 }
