@@ -21,4 +21,6 @@ rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
 # if you ever need to reproduce the old failure (e.g. for verifying
 # an upstream patch).
 [env]
-MACOSX_DEPLOYMENT_TARGET = "10.15"
+# force = true: tauri-cli injects MACOSX_DEPLOYMENT_TARGET=10.13 when it
+# spawns cargo, and non-forced [env] entries never override existing vars.
+MACOSX_DEPLOYMENT_TARGET = { value = "10.15", force = true }
