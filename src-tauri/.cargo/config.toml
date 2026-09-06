@@ -24,3 +24,8 @@ rustflags = ["-C", "link-arg=-Wl,--exclude-all-symbols"]
 # force = true: tauri-cli injects MACOSX_DEPLOYMENT_TARGET=10.13 when it
 # spawns cargo, and non-forced [env] entries never override existing vars.
 MACOSX_DEPLOYMENT_TARGET = { value = "10.15", force = true }
+# llama-cpp GPU backends (CUDA/Vulkan) need Ninja on Windows: the default
+# "Visual Studio" generator breaks nested ExternalProject (vulkan-shaders-gen)
+# and CUDA toolset discovery under Build Tools. Override locally with
+# CMAKE_GENERATOR= if you must use another generator.
+CMAKE_GENERATOR = { value = "Ninja", force = true }

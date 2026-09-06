@@ -84,18 +84,30 @@ jobs:
 
       - name: Setup Ninja (Windows)
         if: matrix.name == 'windows-x64'
-        uses: seanmiddleditch/gha-setup-ninja@master
+        uses: seanmiddleditch/gha-setup-ninja@v6
 
+      # Jimver/cuda-toolkit ≥0.2.25 is broken on current Windows runners
+      # ("Got no files in tool cache"). Install via NVIDIA network installer.
       - name: Install CUDA Toolkit (Windows)
         if: matrix.name == 'windows-x64'
-        uses: Jimver/cuda-toolkit@v0.2.27
         id: cuda-toolkit
-        with:
-          cuda: '12.6.3'
-          method: network
-          sub-packages: '["nvcc", "cudart", "cudart_dev", "cublas", "cublas_dev"]'
-          use-github-cache: false
-          use-local-cache: false
+        shell: pwsh
+        run: |
+          $version = "12.6.3"
+          $short = "12.6"
+          $url = "https://developer.download.nvidia.com/compute/cuda/$version/network_installers/cuda_${version}_windows_network.exe"
+          Write-Host "Downloading CUDA $version network installer..."
+          Invoke-WebRequest -Uri $url -OutFile cuda_installer.exe -UseBasicParsing
+          $packages = "nvcc_$short cudart_$short cudart_dev_$short cublas_$short cublas_dev_$short"
+          Write-Host "Installing: $packages"
+          Start-Process -FilePath .\cuda_installer.exe -ArgumentList "-s $packages" -Wait -NoNewWindow
+          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$short"
+          if (-not (Test-Path (Join-Path $cudaPath 'bin\nvcc.exe'))) {
+            throw "CUDA install finished but nvcc missing under $cudaPath"
+          }
+          "CUDA_PATH=$cudaPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "CUDA_PATH=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "CUDA installed at: $cudaPath"
 
       - name: Configure Windows CUDA env
         if: matrix.name == 'windows-x64'
@@ -106,7 +118,6 @@ jobs:
           if (-not $cuda -or -not (Test-Path (Join-Path $cuda 'bin\nvcc.exe'))) {
             throw "CUDA toolkit not found (CUDA_PATH=$cuda)"
           }
-          "CUDA_PATH=$cuda" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "CMAKE_CUDA_COMPILER=$cuda\bin\nvcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "Path=$cuda\bin;$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           # Junction keeps object paths short (MAX_PATH) while leaving
@@ -124,8 +135,21 @@ jobs:
           cmd /c mklink /J "$target" C:\tbx
           if ($LASTEXITCODE -ne 0) { throw "mklink failed for $target -> C:\tbx" }
 
+      - name: Resolve Rust toolchain
+        id: rust-toolchain
+        shell: bash
+        run: |
+          CHANNEL="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' rust-toolchain.toml | head -n1)"
+          if [ -z "$CHANNEL" ]; then
+            echo "::error::could not parse channel from rust-toolchain.toml"
+            exit 1
+          fi
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ steps.rust-toolchain.outputs.channel }}
 
       - name: Add Rust cross target
         if: matrix.rust_target != ''

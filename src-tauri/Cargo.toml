@@ -17,6 +17,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [features]
 # 端到端 harness 评测：需本机已安装目录内 GGUF 模型
 agent-eval = []
+# 需要本机 CUDA toolkit（nvcc）+ Ninja；显著增大产物体积与首次编译时间。
+# Windows 默认经 `tauri.windows.conf.json` 启用。构建请用
+# `scripts/windows-gpu-dev.ps1`（vcvars + 短 CARGO_TARGET_DIR）。
+cuda = ["llama-cpp-2/cuda"]
+# 跨厂商 GPU；需 Vulkan SDK（`VULKAN_SDK`）与 Ninja。
+# Linux 默认经 `tauri.linux.conf.json` 启用；Windows 可改 conf 切到 vulkan。
+vulkan = ["llama-cpp-2/vulkan"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -106,7 +113,8 @@ jieba-rs = "0.6"
 genai = "0.6"
 
 # 嵌入式本地 LLM 推理（llama.cpp Rust 绑定，进程内推理）。
-# Apple Silicon 走 Metal GPU（target-specific）；其余平台默认 CPU。
+# Apple Silicon → Metal；Windows → CUDA（tauri.windows.conf）；
+# Linux → Vulkan（tauri.linux.conf）。纯 cargo 需 `--features cuda|vulkan`。
 llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler"] }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]

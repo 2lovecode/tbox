@@ -1,5 +1,5 @@
-# Single source of truth for the Rust toolchain, shared by local dev and CI.
-# `dtolnay/rust-toolchain@master` in the workflows reads this file, so a
-# release always builds with the same compiler. Bump deliberately.
+# `dtolnay/rust-toolchain@master` requires an explicit `toolchain` input
+# (it does NOT read this file). Workflows parse `channel` below and pass it.
+# Bump deliberately; keep workflow and local `rustup` in sync via this file.
 [toolchain]
 channel = "1.96.0"
