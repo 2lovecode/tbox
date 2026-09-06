@@ -61,7 +61,7 @@ jobs:
           - name: windows-x64
             platform: windows-latest
             # CPU build on hosted runners (see tauri.ci-windows.conf.json).
-            args: '--config tauri.ci-windows.conf.json'
+            args: '--config src-tauri/tauri.ci-windows.conf.json'
             rust_target: ''
             bundle_subdir: release/bundle
             timeout_minutes: 90
