@@ -1,6 +1,6 @@
 [package]
 name = "tbox"
-version = "0.0.3"
+version = "0.0.4"
 description = "开发者工具箱 - Tauri + Vue + TypeScript"
 authors = ["2lovecode <tanklh@outlook.com>"]
 edition = "2021"
