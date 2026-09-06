@@ -81,3 +81,7 @@ openspec validate --specs
 - Windows 平台部分验证项存在 gap（见归档 change 中的说明），跨平台改动请在对应平台验证。
 - 全局快捷键刻意不注册 `Ctrl+Space`（输入法冲突）；注册失败只打日志不阻断启动。
 - 前端路由是 memory history，刷新 / 深链行为与 browser history 不同，测试时以应用内导航为准。
+
+## 发版
+
+多平台 tag → Draft Release 的步骤与抽检清单见 [`RELEASE.md`](./RELEASE.md)。

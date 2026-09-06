@@ -25,6 +25,7 @@
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — 架构与数据流
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — 构建、测试、环境变量、新增工具指南
+- [docs/RELEASE.md](docs/RELEASE.md) — 多平台发版检查清单（tag → Draft Release）
 - [ROADMAP.md](ROADMAP.md) — 规划清单（非行为规格）
 
 ## 技术栈

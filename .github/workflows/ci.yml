@@ -1,9 +1,8 @@
 name: CI
 
-# Compile-only check on every push/PR to main. We deliberately mirror
-# the matrix in release.yml so a green CI means the next release push
-# will not be the first time we learn about a platform break.
-# On tag pushes the `Release` workflow takes over instead.
+# Compile-only check on every push/PR to main. Matrix mirrors release.yml so a
+# green CI means the next tagged release will not be the first time we learn
+# about a platform / GPU-backend break. Tag pushes are handled by `Release`.
 
 on:
   push:
@@ -18,24 +17,45 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  CMAKE_GENERATOR: Ninja
+
 jobs:
   build:
-    name: build (${{ matrix.platform }})
+    name: build (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
-        platform:
-          - 'macos-13'
-          - 'macos-latest'
-          - 'ubuntu-22.04'
-          - 'windows-latest'
+        include:
+          - name: macos-arm64
+            platform: macos-latest
+            args: '--no-bundle'
+            rust_target: ''
+            timeout_minutes: 45
+
+          - name: macos-x64
+            platform: macos-latest
+            args: '--no-bundle --target x86_64-apple-darwin'
+            rust_target: x86_64-apple-darwin
+            timeout_minutes: 45
+
+          - name: linux-x64
+            platform: ubuntu-22.04
+            args: '--no-bundle'
+            rust_target: ''
+            timeout_minutes: 45
+
+          - name: windows-x64
+            platform: windows-latest
+            args: '--no-bundle'
+            rust_target: ''
+            timeout_minutes: 75
 
     runs-on: ${{ matrix.platform }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.timeout_minutes }}
 
-    # Skip duplicated runs: pushes to main fire the `push` event AND
-    # open a PR (if any), so we don't want to count the same commit
-    # twice through this matrix.
+    # Skip duplicated runs: pushes to main fire the `push` event AND open a PR
+    # (if any), so we don't want to count the same commit twice.
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
 
     steps:
@@ -44,37 +64,83 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        # Version comes from the `packageManager` field in package.json.
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: 'pnpm'
+          cache: pnpm
 
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install Linux dependencies (WebKit + Vulkan + Ninja)
+        if: matrix.name == 'linux-x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            build-essential cmake ninja-build pkg-config \
             libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf
+            librsvg2-dev patchelf \
+            libvulkan-dev vulkan-tools glslang-tools spirv-tools \
+            mesa-vulkan-drivers
+
+      - name: Setup Ninja (Windows)
+        if: matrix.name == 'windows-x64'
+        uses: seanmiddleditch/gha-setup-ninja@master
+
+      - name: Install CUDA Toolkit (Windows)
+        if: matrix.name == 'windows-x64'
+        uses: Jimver/cuda-toolkit@v0.2.27
+        id: cuda-toolkit
+        with:
+          cuda: '12.6.3'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cudart_dev", "cublas", "cublas_dev"]'
+          use-github-cache: false
+          use-local-cache: false
+
+      - name: Configure Windows CUDA env
+        if: matrix.name == 'windows-x64'
+        shell: pwsh
+        run: |
+          $cuda = $env:CUDA_PATH
+          if (-not $cuda) { $cuda = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" }
+          if (-not $cuda -or -not (Test-Path (Join-Path $cuda 'bin\nvcc.exe'))) {
+            throw "CUDA toolkit not found (CUDA_PATH=$cuda)"
+          }
+          "CUDA_PATH=$cuda" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CMAKE_CUDA_COMPILER=$cuda\bin\nvcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "Path=$cuda\bin;$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Junction keeps object paths short (MAX_PATH) while leaving
+          # src-tauri/target in place for cargo / rust-cache.
+          New-Item -ItemType Directory -Force -Path C:\tbx | Out-Null
+          $target = Join-Path $env:GITHUB_WORKSPACE 'src-tauri\target'
+          if (Test-Path $target) {
+            $item = Get-Item $target
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+              cmd /c rmdir "$target"
+            } else {
+              Remove-Item $target -Recurse -Force
+            }
+          }
+          cmd /c mklink /J "$target" C:\tbx
+          if ($LASTEXITCODE -ne 0) { throw "mklink failed for $target -> C:\tbx" }
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@master
-        # Toolchain pinned by rust-toolchain.toml.
+
+      - name: Add Rust cross target
+        if: matrix.rust_target != ''
+        run: rustup target add ${{ matrix.rust_target }}
 
       - name: Setup Rust cache
         uses: swatinem/rust-cache@v2
         with:
           workspaces: './src-tauri -> target'
+          shared-key: ci-${{ matrix.name }}
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        run: pnpm tauri build --no-bundle
-        # `--no-bundle` skips the slow installer / .dmg / .msi packaging
-        # step; on CI we only need to validate that the Rust + JS
-        # toolchain produces a runnable binary. The `Release` workflow
-        # is the one that produces actual installers.
+        # `--no-bundle` validates Rust + JS without packaging installers;
+        # `Release` produces the real artifacts.
+        run: pnpm tauri build ${{ matrix.args }}
