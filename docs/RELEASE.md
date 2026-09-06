@@ -9,7 +9,7 @@
 |----|------|
 | 触发 | 仅推送匹配 `v*` 的 git tag（如 `v0.0.3`、`v0.2.0-beta.1`） |
 | 版本对齐 | tag 必须等于 `v` + `src-tauri/tauri.conf.json` 的 `version`，否则 Release job 直接失败 |
-| 产物矩阵 | Windows x64（CUDA）、Linux x64（Vulkan）、macOS arm64（Metal）、macOS x64（在 arm runner 上交叉编译） |
+| 产物矩阵 | Windows x64（**CI/Release 为 CPU**；本机可用 CUDA）、Linux x64（Vulkan）、macOS arm64（Metal）、macOS x64（交叉编译） |
 | Release 形态 | **Draft**；含 `-` 的 tag（如 `-beta`）会标为 prerelease |
 | 签名 / 公证 | 暂无 Apple / Authenticode / Tauri updater 签名；用户首次安装可能被 Gatekeeper / SmartScreen 拦截 |
 | Updater | 未启用；待 Secrets + `tauri.conf` updater 配置就绪后再开 |

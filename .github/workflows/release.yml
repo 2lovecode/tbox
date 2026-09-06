@@ -60,7 +60,8 @@ jobs:
 
           - name: windows-x64
             platform: windows-latest
-            args: ''
+            # CPU build on hosted runners (see tauri.ci-windows.conf.json).
+            args: '--config tauri.ci-windows.conf.json'
             rust_target: ''
             bundle_subdir: release/bundle
             timeout_minutes: 90
@@ -109,42 +110,12 @@ jobs:
         if: matrix.name == 'windows-x64'
         uses: seanmiddleditch/gha-setup-ninja@v6
 
-      # Jimver/cuda-toolkit ≥0.2.25 is broken on current Windows runners
-      # ("Got no files in tool cache"). Install via NVIDIA network installer.
-      - name: Install CUDA Toolkit (Windows)
-        if: matrix.name == 'windows-x64'
-        id: cuda-toolkit
-        shell: pwsh
-        run: |
-          $version = "12.6.3"
-          $short = "12.6"
-          $url = "https://developer.download.nvidia.com/compute/cuda/$version/network_installers/cuda_${version}_windows_network.exe"
-          Write-Host "Downloading CUDA $version network installer..."
-          Invoke-WebRequest -Uri $url -OutFile cuda_installer.exe -UseBasicParsing
-          $packages = "nvcc_$short cudart_$short cudart_dev_$short cublas_$short cublas_dev_$short"
-          Write-Host "Installing: $packages"
-          Start-Process -FilePath .\cuda_installer.exe -ArgumentList "-s $packages" -Wait -NoNewWindow
-          $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v$short"
-          if (-not (Test-Path (Join-Path $cudaPath 'bin\nvcc.exe'))) {
-            throw "CUDA install finished but nvcc missing under $cudaPath"
-          }
-          "CUDA_PATH=$cudaPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "CUDA_PATH=$cudaPath" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "CUDA installed at: $cudaPath"
-
-      - name: Configure Windows CUDA env
+      # Hosted Windows runners cannot reliably install CUDA. Release ships a
+      # CPU Windows build; local GPU remains tauri.windows.conf.json + script.
+      - name: Configure Windows build env
         if: matrix.name == 'windows-x64'
         shell: pwsh
         run: |
-          $cuda = $env:CUDA_PATH
-          if (-not $cuda) { $cuda = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" }
-          if (-not $cuda -or -not (Test-Path (Join-Path $cuda 'bin\nvcc.exe'))) {
-            throw "CUDA toolkit not found (CUDA_PATH=$cuda)"
-          }
-          "CMAKE_CUDA_COMPILER=$cuda\bin\nvcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "Path=$cuda\bin;$env:Path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          # Junction keeps object paths short (MAX_PATH) while leaving
-          # src-tauri/target in place for tauri-action + rust-cache.
           New-Item -ItemType Directory -Force -Path C:\tbx | Out-Null
           $target = Join-Path $env:GITHUB_WORKSPACE 'src-tauri\target'
           if (Test-Path $target) {
