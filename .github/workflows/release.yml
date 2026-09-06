@@ -4,11 +4,11 @@ name: Release
 # and attach them to one draft GitHub Release via `tauri-apps/tauri-action`.
 # Review notes + assets, then publish the draft manually.
 #
-# Platform GPU backends match local defaults (see tauri.*.conf.json):
+# Platform GPU backends for *local* builds (see tauri.*.conf.json):
 #   Windows → CUDA, Linux → Vulkan, macOS aarch64 → Metal (Cargo target cfg).
-# Updater signing is intentionally not enabled yet — wire
-# TAURI_SIGNING_PRIVATE_KEY(+_PASSWORD) and `createUpdaterArtifacts` once
-# secrets + tauri.conf updater block are ready.
+# Hosted CI/Release clears Win/Linux GPU features via tauri.ci-*.conf.json
+# (CUDA/Vulkan toolchains are unreliable on GitHub-hosted runners).
+# macOS arm64 still ships Metal. Updater signing is not enabled yet.
 
 on:
   push:
@@ -53,7 +53,8 @@ jobs:
 
           - name: linux-x64
             platform: ubuntu-22.04
-            args: ''
+            # CPU build on hosted runners (see tauri.ci-linux.conf.json).
+            args: '--config src-tauri/tauri.ci-linux.conf.json'
             rust_target: ''
             bundle_subdir: release/bundle
             timeout_minutes: 60
@@ -95,16 +96,16 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Install Linux dependencies (WebKit + Vulkan + Ninja)
+      - name: Install Linux dependencies (WebKit + Ninja)
         if: matrix.name == 'linux-x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build pkg-config \
             libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf \
-            libvulkan-dev vulkan-tools glslang-tools spirv-tools \
-            mesa-vulkan-drivers
+            librsvg2-dev patchelf
+          # Vulkan omitted: Release uses tauri.ci-linux.conf.json (CPU).
+          # Local GPU remains tauri.linux.conf.json.
 
       - name: Setup Ninja (Windows)
         if: matrix.name == 'windows-x64'

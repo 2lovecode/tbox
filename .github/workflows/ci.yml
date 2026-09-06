@@ -41,7 +41,8 @@ jobs:
 
           - name: linux-x64
             platform: ubuntu-22.04
-            args: '--no-bundle'
+            # CPU build on hosted runners (see tauri.ci-linux.conf.json).
+            args: '--no-bundle --config src-tauri/tauri.ci-linux.conf.json'
             rust_target: ''
             timeout_minutes: 45
 
@@ -72,16 +73,16 @@ jobs:
           node-version: 24
           cache: pnpm
 
-      - name: Install Linux dependencies (WebKit + Vulkan + Ninja)
+      - name: Install Linux dependencies (WebKit + Ninja)
         if: matrix.name == 'linux-x64'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             build-essential cmake ninja-build pkg-config \
             libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev \
-            librsvg2-dev patchelf \
-            libvulkan-dev vulkan-tools glslang-tools spirv-tools \
-            mesa-vulkan-drivers
+            librsvg2-dev patchelf
+          # Vulkan SDK omitted: hosted Linux builds use tauri.ci-linux.conf.json
+          # (CPU). Local GPU remains tauri.linux.conf.json.
 
       - name: Setup Ninja (Windows)
         if: matrix.name == 'windows-x64'
