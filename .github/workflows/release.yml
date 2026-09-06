@@ -176,7 +176,13 @@ jobs:
           fi
 
           echo >> /tmp/notes.md
-          git log --pretty=format:'- %s (%an)' --max-count=100 "$RANGE" >> /tmp/notes.md
+          # `git log --pretty=format` omits a trailing newline; without it the
+          # GITHUB_OUTPUT heredoc closer (`EOF`) glues to the last line and fails.
+          {
+            git log --pretty=format:'- %s (%an)' --max-count=100 "$RANGE"
+            printf '\n'
+          } >> /tmp/notes.md
+
           {
             echo 'body<<EOF'
             cat /tmp/notes.md
