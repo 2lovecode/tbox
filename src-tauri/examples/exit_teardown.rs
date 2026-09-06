@@ -27,7 +27,7 @@ fn main() {
                 eprintln!("SKIP: no model at {}", path.display());
                 return;
             }
-            engine.ensure_loaded(&path).expect("load model");
+            engine.ensure_loaded(&path, 4096).expect("load model");
             if mode == "reload" {
                 // Switch models the way the UI does: a different path forces
                 // a genuine second load, so the FIRST model must be freed
@@ -41,7 +41,7 @@ fn main() {
                 let _ = std::fs::remove_file(&alt);
                 match std::os::unix::fs::symlink(&path, &alt) {
                     Ok(()) => {
-                        engine.ensure_loaded(&alt).expect("reload model");
+                        engine.ensure_loaded(&alt, 4096).expect("reload model");
                         let _ = std::fs::remove_file(&alt);
                     }
                     Err(e) => {

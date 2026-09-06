@@ -5,6 +5,11 @@ keywords: jwt, JWT, token, 令牌, 解码, decode, header, payload, 解析
 
 # JWT 解析（不验签）
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 `jwt.parse` 把 JWT 字符串的 header 和 payload 部分做 Base64URL 解码并以 JSON
 形式输出。**不校验签名**——只解析。参数：`input` — JWT 字符串（`header.payload.signature`）。
 

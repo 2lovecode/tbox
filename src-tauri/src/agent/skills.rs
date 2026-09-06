@@ -65,10 +65,12 @@ static SKILLS: &[EmbeddedSkill] = &[
 struct ParsedSkill {
     tool_ids: Vec<String>,
     keywords: Vec<String>,
+    avoid_keywords: Vec<String>,
     body: String,
 }
 
 fn parse_skill(source: &str) -> Option<ParsedSkill> {
+    let source = source.trim_start_matches('\u{feff}').replace("\r\n", "\n");
     let rest = source.strip_prefix("---\n")?;
     let end = rest.find("\n---\n")?;
     let front_matter = &rest[..end];
@@ -76,6 +78,7 @@ fn parse_skill(source: &str) -> Option<ParsedSkill> {
 
     let mut tool_ids = Vec::new();
     let mut keywords = Vec::new();
+    let mut avoid_keywords = Vec::new();
 
     for line in front_matter.lines() {
         if let Some(value) = line.strip_prefix("tool_id:") {
@@ -92,6 +95,13 @@ fn parse_skill(source: &str) -> Option<ParsedSkill> {
                     keywords.push(kw.to_string());
                 }
             }
+        } else if let Some(value) = line.strip_prefix("avoid_keywords:") {
+            for kw in value.split(',') {
+                let kw = kw.trim();
+                if !kw.is_empty() {
+                    avoid_keywords.push(kw.to_string());
+                }
+            }
         }
     }
 
@@ -102,6 +112,7 @@ fn parse_skill(source: &str) -> Option<ParsedSkill> {
     Some(ParsedSkill {
         tool_ids,
         keywords,
+        avoid_keywords,
         body,
     })
 }
@@ -124,7 +135,9 @@ fn score_skill(query: &str, parsed: &ParsedSkill) -> i32 {
 
     for kw in &parsed.keywords {
         if contains_match(query, kw) {
-            score += 1;
+            // 更长的路由词权重更高，避免泛词（如 json）压过具体意图。
+            let boost = if kw.chars().count() >= 3 { 3 } else { 1 };
+            score += boost;
         }
     }
 
@@ -133,9 +146,17 @@ fn score_skill(query: &str, parsed: &ParsedSkill) -> i32 {
             score += 3;
         }
         for segment in tool_id.split('.') {
-            if segment.len() >= 2 && contains_match(query, segment) {
+            // 跳过过短/过泛的段（如 json），减少近邻误排。
+            if segment.len() >= 3 && segment != "json" && contains_match(query, segment) {
                 score += 2;
             }
+        }
+    }
+
+    // 命中「何时不用」关键词时强力降权，避免近邻工具抢首位。
+    for kw in &parsed.avoid_keywords {
+        if contains_match(query, kw) {
+            score -= 8;
         }
     }
 
@@ -181,6 +202,20 @@ mod tests {
         let hits = retrieve_skills("帮我解析这段 JWT", 3);
         assert!(hits.iter().any(|s| s.tool_id.contains("jwt")));
         assert!(hits.len() <= 3);
+    }
+
+    #[test]
+    fn flatten_query_ranks_flatten_first() {
+        let hits = retrieve_skills("把嵌套 JSON 平铺开", 3);
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].tool_id, "json.flatten");
+    }
+
+    #[test]
+    fn query_string_ranks_to_query_first() {
+        let hits = retrieve_skills("把 JSON 转成 query string", 3);
+        assert!(!hits.is_empty());
+        assert_eq!(hits[0].tool_id, "json.to_query");
     }
 
     #[test]

@@ -113,10 +113,13 @@ pub struct LlmPresetView {
     pub default_model: String,
     pub default_protocol: String,
     pub requires_oauth: bool,
+    pub icon: String,
+    pub icon_color: String,
 }
 
 impl LlmPresetView {
     pub fn from_preset(p: &llm_presets::LlmPreset) -> Self {
+        let (icon, color) = llm_presets::icon_for(p.id);
         Self {
             id: p.id.to_string(),
             label: p.label.to_string(),
@@ -124,8 +127,46 @@ impl LlmPresetView {
             default_model: p.default_model.to_string(),
             default_protocol: p.default_protocol.as_str().to_string(),
             requires_oauth: p.requires_oauth,
+            icon: icon.to_string(),
+            icon_color: color.to_string(),
         }
     }
+}
+
+/// Built-in sampling defaults (used when profile fields are unset).
+pub const DEFAULT_TEMPERATURE: f32 = 0.7;
+pub const DEFAULT_TOP_P: f32 = 0.9;
+pub const DEFAULT_MAX_TOKENS: u32 = 4096;
+pub const DEFAULT_N_CTX: u32 = 4096;
+
+/// Validate optional generation parameters. Empty/`None` is always OK.
+pub fn validate_generation_params(
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    max_tokens: Option<u32>,
+    n_ctx: Option<u32>,
+) -> Result<(), String> {
+    if let Some(t) = temperature {
+        if !(0.0..=2.0).contains(&t) || !t.is_finite() {
+            return Err("temperature 须在 0～2 之间".into());
+        }
+    }
+    if let Some(p) = top_p {
+        if !(p > 0.0 && p <= 1.0) || !p.is_finite() {
+            return Err("top_p 须在 (0, 1] 之间".into());
+        }
+    }
+    if let Some(m) = max_tokens {
+        if !(1..=128_000).contains(&m) {
+            return Err("max_tokens 须在 1～128000 之间".into());
+        }
+    }
+    if let Some(n) = n_ctx {
+        if !(512..=32_768).contains(&n) {
+            return Err("n_ctx 须在 512～32768 之间".into());
+        }
+    }
+    Ok(())
 }
 
 /// Disk + API shape. `provider` is a preset id (`local`, `ollama`, `openai`, … or CC Switch slug).
@@ -139,6 +180,15 @@ pub struct LlmConfig {
     pub base_url: String,
     pub model: String,
     pub has_api_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    /// Embedded context length (local provider only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_ctx: Option<u32>,
 }
 
 impl Default for LlmConfig {
@@ -149,6 +199,10 @@ impl Default for LlmConfig {
             base_url: String::new(),
             model: String::new(),
             has_api_key: false,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            n_ctx: None,
         }
     }
 }
@@ -171,6 +225,22 @@ impl LlmConfig {
 
     pub fn is_ollama(&self) -> bool {
         self.provider == "ollama"
+    }
+
+    pub fn effective_temperature(&self) -> f32 {
+        self.temperature.unwrap_or(DEFAULT_TEMPERATURE)
+    }
+
+    pub fn effective_top_p(&self) -> f32 {
+        self.top_p.unwrap_or(DEFAULT_TOP_P)
+    }
+
+    pub fn effective_max_tokens(&self) -> u32 {
+        self.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS)
+    }
+
+    pub fn effective_n_ctx(&self) -> u32 {
+        self.n_ctx.unwrap_or(DEFAULT_N_CTX)
     }
 }
 
@@ -234,6 +304,14 @@ pub struct LlmConfigInput {
     pub model: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub n_ctx: Option<u32>,
 }
 
 /// Result of `test_llm_connection`. `success` mirrors the HTTP status;
@@ -328,6 +406,14 @@ pub struct LlmProfile {
     pub model: String,
     #[serde(default)]
     pub has_api_key: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_ctx: Option<u32>,
 }
 
 impl LlmProfile {
@@ -340,6 +426,10 @@ impl LlmProfile {
             base_url: self.base_url.clone(),
             model: self.model.clone(),
             has_api_key: self.has_api_key,
+            temperature: self.temperature,
+            top_p: self.top_p,
+            max_tokens: self.max_tokens,
+            n_ctx: self.n_ctx,
         }
     }
 }
@@ -388,6 +478,14 @@ pub struct LlmProfileInput {
     pub model: String,
     #[serde(default)]
     pub api_key: Option<String>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub n_ctx: Option<u32>,
 }
 
 fn new_profile_id() -> String {
@@ -475,6 +573,10 @@ fn migrate_legacy(dir: &std::path::Path) -> Result<ProfilesFile, String> {
         base_url: legacy.base_url,
         model: legacy.model,
         has_api_key,
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        n_ctx: None,
     };
 
     // Keep rollback copies; rename failures are non-fatal.
@@ -600,6 +702,16 @@ pub fn save_llm_profile(input: LlmProfileInput) -> Result<ProfilesSnapshot, Stri
         }
     }
 
+    validate_generation_params(input.temperature, input.top_p, input.max_tokens, input.n_ctx)?;
+
+    // n_ctx only applies to local; drop silently for other providers so cloud
+    // profiles don't carry a stale embedded-only field.
+    let n_ctx = if input.provider.trim() == "local" {
+        input.n_ctx
+    } else {
+        None
+    };
+
     let mut store = read_profiles()?;
     let id = match input.id.as_deref() {
         Some(existing) if !existing.trim().is_empty() => existing.trim().to_string(),
@@ -633,6 +745,10 @@ pub fn save_llm_profile(input: LlmProfileInput) -> Result<ProfilesSnapshot, Stri
         base_url: input.base_url.trim().to_string(),
         model: input.model.trim().to_string(),
         has_api_key,
+        temperature: input.temperature,
+        top_p: input.top_p,
+        max_tokens: input.max_tokens,
+        n_ctx,
     };
 
     match store.profiles.iter_mut().find(|p| p.id == id) {
@@ -713,6 +829,10 @@ pub fn save_llm_config(input: LlmConfigInput) -> Result<LlmConfig, String> {
         base_url: input.base_url,
         model: input.model,
         api_key: input.api_key,
+        temperature: input.temperature,
+        top_p: input.top_p,
+        max_tokens: input.max_tokens,
+        n_ctx: input.n_ctx,
     })?;
     Ok(get_llm_config())
 }
@@ -814,6 +934,10 @@ pub async fn list_endpoint_models(input: EndpointModelsInput) -> Result<ProfileM
         base_url: input.base_url.trim().to_string(),
         model: String::new(),
         has_api_key: input.api_key.is_some(),
+        temperature: None,
+        top_p: None,
+        max_tokens: None,
+        n_ctx: None,
     };
     // Prefer the freshly typed key; otherwise fall back to the stored one.
     let api_key = match input.api_key.as_deref().map(str::trim) {
@@ -837,11 +961,11 @@ async fn fetch_models_for(config: &LlmConfig, api_key: Option<String>) -> Result
         let models: Vec<String> = crate::commands::model_catalog::list_local_models()
             .unwrap_or_default()
             .into_iter()
-            .filter(|m| m.installed)
-            .map(|m| m.label)
+            .filter(|m| m.installed && m.enabled)
+            .map(|m| m.id)
             .collect();
         let message = if models.is_empty() {
-            "尚未下载本地模型".into()
+            "尚无可用的本地模型（请先下载并勾选可用）".into()
         } else {
             String::new()
         };
@@ -1160,6 +1284,10 @@ mod tests {
             base_url: legacy.base_url,
             model: legacy.model,
             has_api_key: legacy.has_api_key,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            n_ctx: None,
         };
         assert_eq!(cfg.resolved_protocol(), LlmProtocol::OpenaiChat);
     }
@@ -1269,6 +1397,10 @@ mod tests {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4o-mini".into(),
             has_api_key: false,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            n_ctx: None,
         });
         store.active_id = Some("a".into());
         store_write(&dir, &store).unwrap();
@@ -1281,5 +1413,54 @@ mod tests {
         let final_store = store_read(&dir).unwrap();
         assert_eq!(final_store.profiles[0].model, "gpt-4o");
         assert!(final_store.active_id.is_none());
+    }
+
+    #[test]
+    fn generation_params_roundtrip_on_disk() {
+        let dir = temp_dir("gen-params");
+        let mut store = ProfilesFile::default();
+        store.profiles.push(LlmProfile {
+            id: "local1".into(),
+            name: "Local".into(),
+            provider: "local".into(),
+            protocol: None,
+            base_url: String::new(),
+            model: "qwen".into(),
+            has_api_key: false,
+            temperature: Some(0.2),
+            top_p: Some(0.85),
+            max_tokens: Some(2048),
+            n_ctx: Some(8192),
+        });
+        store.active_id = Some("local1".into());
+        store_write(&dir, &store).unwrap();
+        let read = store_read(&dir).unwrap();
+        let p = &read.profiles[0];
+        assert_eq!(p.temperature, Some(0.2));
+        assert_eq!(p.top_p, Some(0.85));
+        assert_eq!(p.max_tokens, Some(2048));
+        assert_eq!(p.n_ctx, Some(8192));
+        let cfg = p.to_config();
+        assert!((cfg.effective_temperature() - 0.2).abs() < f32::EPSILON);
+        assert_eq!(cfg.effective_n_ctx(), 8192);
+    }
+
+    #[test]
+    fn invalid_temperature_rejected() {
+        assert!(validate_generation_params(Some(-0.1), None, None, None).is_err());
+        assert!(validate_generation_params(Some(2.1), None, None, None).is_err());
+        assert!(validate_generation_params(Some(0.5), Some(0.9), Some(1024), Some(4096)).is_ok());
+        assert!(validate_generation_params(None, Some(0.0), None, None).is_err());
+        assert!(validate_generation_params(None, None, Some(0), None).is_err());
+        assert!(validate_generation_params(None, None, None, Some(256)).is_err());
+    }
+
+    #[test]
+    fn missing_generation_params_use_defaults() {
+        let cfg = LlmConfig::default();
+        assert!((cfg.effective_temperature() - DEFAULT_TEMPERATURE).abs() < f32::EPSILON);
+        assert!((cfg.effective_top_p() - DEFAULT_TOP_P).abs() < f32::EPSILON);
+        assert_eq!(cfg.effective_max_tokens(), DEFAULT_MAX_TOKENS);
+        assert_eq!(cfg.effective_n_ctx(), DEFAULT_N_CTX);
     }
 }

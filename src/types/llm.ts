@@ -24,6 +24,10 @@ export interface LlmPresetMeta {
   defaultModel: string;
   defaultProtocol: LlmProtocolId;
   requiresOauth: boolean;
+  /** CC Switch–aligned icon id (optional). */
+  icon?: string | null;
+  /** Hex color for icon badge (optional). */
+  iconColor?: string | null;
 }
 
 /** @deprecated static list — use presets from `list_llm_presets` */
@@ -35,6 +39,10 @@ export interface LlmConfig {
   baseUrl: string;
   model: string;
   hasApiKey: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number | null;
+  nCtx?: number | null;
 }
 
 /** multi-provider-models: 一个已保存的提供方配置。 */
@@ -46,6 +54,10 @@ export interface LlmProfile {
   baseUrl: string;
   model: string;
   hasApiKey: boolean;
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number | null;
+  nCtx?: number | null;
 }
 
 export interface LlmProfilesSnapshot {
@@ -62,6 +74,10 @@ export interface LlmProfileInputDraft {
   baseUrl: string;
   model: string;
   apiKey: string | null;
+  temperature?: number | null;
+  topP?: number | null;
+  maxTokens?: number | null;
+  nCtx?: number | null;
 }
 
 /** list_profile_models 的返回。 */

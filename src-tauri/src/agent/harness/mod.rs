@@ -1,11 +1,11 @@
 //! 可插拔 Agent harness 策略层：所有后端的对话回合统一经由这里
 //! 构建系统提示、解析模型输出、执行校验与修复重试（reask）。
 //!
-//! 档位（见 openspec/changes/agent-tool-harness/design.md D1）：
-//! - `SmallLocalStrategy`：embedded 小模型（目录内 0.5B/1.5B）——强化提示、
-//!   修复预算 2、默认请求约束解码。
-//! - `DefaultStrategy`：云端 / Ollama ——简洁提示、修复预算 1、无约束解码，
-//!   但共享同一套容错解析与 schema 校验。
+//! 档位：
+//! - `SmallLocalStrategy`：embedded Agent 推荐档（≥1.5B）——完整强化提示、修复预算 2
+//! - `LiteLocalStrategy`：embedded 轻量档（0.5B）——缩短少样本、更紧预算、修复预算 2
+//! - `DefaultStrategy`：云端 / Ollama ——简洁提示、修复预算 1
+//! 约束解码默认关闭（0.5B + grammar 实测伤害意图命中率）。
 
 pub mod eval;
 pub mod grammar;
@@ -13,6 +13,7 @@ pub mod parse;
 pub mod prompt;
 
 use crate::agent::llm::ToolCall;
+use crate::commands::model_catalog::{agent_tier_for_model, AgentTier};
 
 /// 一次解析后的模型回合：工具调用 + 剩余纯文本。
 #[derive(Debug, Clone, Default)]
@@ -37,7 +38,7 @@ pub trait HarnessStrategy {
     fn constrained(&self) -> bool;
 }
 
-/// embedded 小模型强化策略。
+/// embedded Agent 推荐档强化策略。
 pub struct SmallLocalStrategy;
 
 impl HarnessStrategy for SmallLocalStrategy {
@@ -53,10 +54,27 @@ impl HarnessStrategy for SmallLocalStrategy {
         2
     }
 
-    // 约束解码默认关闭：实测 0.5B + grammar 后意图命中率从 ~63% 跌至 ~12%
-    // （语法迫使模型过早进 tool_call 形态，破坏自由回答能力）。
-    // 保留能力与 `TBOX_DISABLE_TOOL_GRAMMAR=1` 反向开关（打开 grammar），
-    // 待更大模型/更优语法时再默认启用——见 design.md D3 / 任务 4.3 备注。
+    fn constrained(&self) -> bool {
+        false
+    }
+}
+
+/// embedded 轻量档：更短 few-shot，仍强化工具目录与约束。
+pub struct LiteLocalStrategy;
+
+impl HarnessStrategy for LiteLocalStrategy {
+    fn name(&self) -> &'static str {
+        "lite-local"
+    }
+
+    fn build_system_prompt(&self, user_text: &str) -> String {
+        prompt::build_lite_prompt(user_text)
+    }
+
+    fn repair_budget(&self) -> usize {
+        2
+    }
+
     fn constrained(&self) -> bool {
         false
     }
@@ -83,11 +101,14 @@ impl HarnessStrategy for DefaultStrategy {
     }
 }
 
-/// 按后端与模型名选择策略：embedded 引擎一律小模型强化档，
+/// 按后端与模型名选择策略：embedded 按 catalog Agent 档位分完整/轻量强化，
 /// 其余（genai / 云端 / Ollama）走默认档。
-pub fn strategy_for(backend: &str, _model: &str) -> Box<dyn HarnessStrategy> {
+pub fn strategy_for(backend: &str, model: &str) -> Box<dyn HarnessStrategy> {
     if backend == "embedded" {
-        Box::new(SmallLocalStrategy)
+        match agent_tier_for_model(model) {
+            AgentTier::Lite => Box::new(LiteLocalStrategy),
+            AgentTier::Recommended => Box::new(SmallLocalStrategy),
+        }
     } else {
         Box::new(DefaultStrategy)
     }
@@ -98,11 +119,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn embedded_backend_gets_small_strategy() {
-        let s = strategy_for("embedded", "qwen2.5-0.5b-instruct-q4_k_m");
+    fn embedded_lite_model_gets_lite_strategy() {
+        let s = strategy_for("embedded", "qwen3-0.6b-q4_k_m");
+        assert_eq!(s.name(), "lite-local");
+        assert_eq!(s.repair_budget(), 2);
+        assert!(!s.constrained());
+    }
+
+    #[test]
+    fn embedded_recommended_gets_full_strategy() {
+        let s = strategy_for("embedded", "qwen3-1.7b-q4_k_m");
         assert_eq!(s.name(), "small-local");
         assert_eq!(s.repair_budget(), 2);
-        // constrained 默认 false：4.3 实测 0.5B + grammar 意图率从 63% 跌至 12%。
         assert!(!s.constrained());
     }
 

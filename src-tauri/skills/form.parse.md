@@ -5,6 +5,11 @@ keywords: form, form-urlencoded, x-www-form-urlencoded, 表单, 解析, 编码�
 
 # 表单字符串解析
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 把 `application/x-www-form-urlencoded` 字符串解析为 JSON 对象。重复键合并为
 JSON 数组；值经 percent-decode；空字符串返回 `{}`。
 

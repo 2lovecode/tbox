@@ -1,18 +1,44 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
+import { useRouter } from 'vue-router';
+import { invoke } from '@tauri-apps/api/core';
 import { useLlmStore } from '@/stores/llm';
-import { useSettingsStore } from '@/stores/settings';
+
+interface LocalModelMeta {
+  id: string;
+  effectiveLabel: string;
+  effectiveIcon: string;
+}
 
 const llm = useLlmStore();
-const settings = useSettingsStore();
+const router = useRouter();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 const manualInput = ref('');
+const localMeta = ref<Record<string, LocalModelMeta>>({});
 
 const active = computed(() => llm.activeProfile);
 
 const providerLabel = (providerId: string) =>
   llm.presets.find((p) => p.id === providerId)?.label ?? providerId;
+
+const isLocalProfile = (providerId: string) => providerId === 'local';
+
+function modelDisplay(providerId: string, modelId: string): { label: string; icon: string } {
+  if (isLocalProfile(providerId)) {
+    const meta = localMeta.value[modelId];
+    if (meta) {
+      return { label: meta.effectiveLabel, icon: meta.effectiveIcon };
+    }
+    return { label: modelId, icon: 'fas fa-microchip' };
+  }
+  return { label: modelId, icon: 'fas fa-robot' };
+}
+
+const activeDisplay = computed(() => {
+  if (!active.value) return null;
+  return modelDisplay(active.value.provider, active.value.model || '');
+});
 
 /** 每个分组：一个 profile + 其模型列表。 */
 const groups = computed(() =>
@@ -23,12 +49,32 @@ const groups = computed(() =>
   })),
 );
 
+async function refreshLocalMeta() {
+  try {
+    const list = await invoke<LocalModelMeta[]>('list_local_models');
+    const map: Record<string, LocalModelMeta> = {};
+    for (const m of list) {
+      map[m.id] = {
+        id: m.id,
+        effectiveLabel: m.effectiveLabel,
+        effectiveIcon: m.effectiveIcon,
+      };
+    }
+    localMeta.value = map;
+  } catch (error) {
+    console.error('[switcher] list_local_models failed:', error);
+  }
+}
+
 function toggle() {
   open.value = !open.value;
   if (open.value) {
-    // 打开时懒加载各 profile 的模型列表。
     for (const p of llm.profiles) {
-      void llm.fetchProfileModels(p.id);
+      // Local enable-set can change outside this component — always refetch.
+      void llm.fetchProfileModels(p.id, p.provider === 'local');
+    }
+    if (llm.profiles.some((p) => p.provider === 'local')) {
+      void refreshLocalMeta();
     }
     manualInput.value = '';
   }
@@ -62,6 +108,7 @@ onMounted(async () => {
   if (llm.profiles.length === 0) {
     void llm.loadProfiles();
   }
+  void refreshLocalMeta();
 });
 
 onBeforeUnmount(() => {
@@ -79,9 +126,16 @@ onBeforeUnmount(() => {
       aria-label="切换模型"
       @click="toggle"
     >
-      <i class="fas fa-robot" aria-hidden="true"></i>
+      <i
+        :class="activeDisplay?.icon || 'fas fa-robot'"
+        aria-hidden="true"
+      ></i>
       <span v-if="active" class="switcher-label">
-        {{ active.model || providerLabel(active.provider) }}
+        {{
+          active.model
+            ? activeDisplay?.label || active.model
+            : providerLabel(active.provider)
+        }}
       </span>
       <span v-else class="switcher-label placeholder">选择模型</span>
       <i class="fas fa-chevron-down chevron" :class="{ up: open }" aria-hidden="true"></i>
@@ -105,10 +159,18 @@ onBeforeUnmount(() => {
             @click="pick(g.profile.id, g.profile.model)"
           >
             <i
-              :class="g.profile.id === llm.activeId ? 'fas fa-circle-check' : 'far fa-circle'"
+              :class="
+                isLocalProfile(g.profile.provider)
+                  ? modelDisplay(g.profile.provider, g.profile.model).icon
+                  : g.profile.id === llm.activeId
+                    ? 'fas fa-circle-check'
+                    : 'far fa-circle'
+              "
               aria-hidden="true"
             ></i>
-            <span class="item-name">{{ g.profile.model }}</span>
+            <span class="item-name">{{
+              modelDisplay(g.profile.provider, g.profile.model).label
+            }}</span>
           </button>
 
           <button
@@ -117,18 +179,25 @@ onBeforeUnmount(() => {
             type="button"
             role="option"
             :aria-selected="g.profile.id === llm.activeId && m === g.profile.model"
-            :class="['menu-item', { active: g.profile.id === llm.activeId && m === g.profile.model }]"
+            :class="[
+              'menu-item',
+              { active: g.profile.id === llm.activeId && m === g.profile.model },
+            ]"
             @click="pick(g.profile.id, m)"
           >
             <i
               :class="
-                g.profile.id === llm.activeId && m === g.profile.model
-                  ? 'fas fa-circle-check'
-                  : 'far fa-circle'
+                isLocalProfile(g.profile.provider)
+                  ? modelDisplay(g.profile.provider, m).icon
+                  : g.profile.id === llm.activeId && m === g.profile.model
+                    ? 'fas fa-circle-check'
+                    : 'far fa-circle'
               "
               aria-hidden="true"
             ></i>
-            <span class="item-name">{{ m }}</span>
+            <span class="item-name">{{
+              modelDisplay(g.profile.provider, m).label
+            }}</span>
           </button>
 
           <div v-if="g.message" class="group-hint">{{ g.message }}</div>
@@ -149,7 +218,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="menu-item manage"
-          @click="open = false; settings.open('llm')"
+          @click="open = false; void router.push('/settings/llm')"
         >
           <i class="fas fa-gear" aria-hidden="true"></i>
           <span class="item-name">管理配置…</span>
@@ -162,7 +231,7 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="btn-go-settings"
-            @click="open = false; settings.open('llm')"
+            @click="open = false; void router.push('/settings/llm')"
           >
             前往设置
           </button>
@@ -181,35 +250,39 @@ onBeforeUnmount(() => {
 .switcher-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  max-width: 260px;
-  padding: 5px 10px;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
+  gap: 5px;
+  max-width: 168px;
+  padding: 3px 8px;
+  border: 1px solid color-mix(in srgb, var(--border-color, rgba(0, 0, 0, 0.12)) 70%, transparent);
   border-radius: 999px;
-  background: var(--bg-secondary, #f5f7fa);
-  color: var(--text-primary, #212529);
+  background: transparent;
+  color: var(--text-secondary, #6c757d);
   font: inherit;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  opacity: 0.85;
+  transition: border-color 0.15s ease, background 0.15s ease, opacity 0.15s ease, color 0.15s ease;
 }
 
 .switcher-btn:hover {
-  border-color: var(--primary, #4361ee);
-  background: rgba(67, 97, 238, 0.07);
+  opacity: 1;
+  color: var(--text-primary, #212529);
+  border-color: color-mix(in srgb, var(--border-color, rgba(0, 0, 0, 0.18)) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary, #f5f7fa) 70%, transparent);
 }
 
 .switcher-btn > i:first-child {
-  color: var(--primary, #4361ee);
-  font-size: 12px;
+  color: inherit;
+  font-size: 10px;
+  opacity: 0.85;
 }
 
 .switcher-label {
-  max-width: 190px;
+  max-width: 118px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 500;
+  font-weight: 450;
 }
 
 .switcher-label.placeholder {
@@ -217,8 +290,9 @@ onBeforeUnmount(() => {
 }
 
 .chevron {
-  font-size: 10px;
-  color: var(--text-secondary, #6c757d);
+  font-size: 8px;
+  color: inherit;
+  opacity: 0.7;
   transition: transform 0.15s ease;
 }
 .chevron.up { transform: rotate(180deg); }
@@ -226,7 +300,8 @@ onBeforeUnmount(() => {
 .switcher-menu {
   position: absolute;
   bottom: calc(100% + 8px);
-  left: 0;
+  right: 0;
+  left: auto;
   z-index: 60;
   width: min(340px, 90vw);
   max-height: 380px;

@@ -5,6 +5,11 @@ keywords: url, URL, 解析, parse, 拆解, scheme, host, port, path, query, frag
 
 # URL 拆解
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 把 URL 字符串解析为结构化 JSON（`scheme` / `host` / `port` 可选 / `path` 段数组 /
 `query` 对象 / `fragment` 可选）。query 重复键合并为 JSON 数组；query 值经
 percent-decode。

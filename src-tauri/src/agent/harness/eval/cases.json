@@ -611,6 +611,116 @@
         "input": "{\"k\":[1,2]}"
       },
       "model_output": "<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"k\\\":[1,2]}\"}}</tool_call>"
+    },
+    {
+      "id": "attr-intent-1",
+      "user_input": "今天天气怎么样",
+      "expect_tool": null,
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\":\"base64.encode\",\"arguments\":{\"input\":\"x\"}}</tool_call>",
+      "expect_failure_class": "intent"
+    },
+    {
+      "id": "attr-intent-2",
+      "user_input": "把 hi 编成 Base64",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "你好，我可以直接告诉你答案是 aGk=",
+      "expect_failure_class": "intent"
+    },
+    {
+      "id": "attr-tool-1",
+      "user_input": "把嵌套 JSON 平铺",
+      "expect_tool": "json.flatten",
+      "expect_args": {
+        "input": "{}"
+      },
+      "model_output": "<tool_call>{\"name\":\"json.to_query\",\"arguments\":{\"input\":\"{}\"}}</tool_call>",
+      "expect_failure_class": "tool_choice"
+    },
+    {
+      "id": "attr-tool-2",
+      "user_input": "解码 base64",
+      "expect_tool": "base64.decode",
+      "expect_args": {
+        "input": "aGk="
+      },
+      "model_output": "<tool_call>{\"name\":\"base64.encode\",\"arguments\":{\"input\":\"aGk=\"}}</tool_call>",
+      "expect_failure_class": "tool_choice"
+    },
+    {
+      "id": "attr-args-1",
+      "user_input": "base64 encode",
+      "expect_tool": "base64.encode",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\":\"base64.encode\",\"arguments\":{}}</tool_call>",
+      "expect_failure_class": "args"
+    },
+    {
+      "id": "attr-args-2",
+      "user_input": "hash md5",
+      "expect_tool": "hash.digest",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\":\"hash.digest\",\"arguments\":{\"input\":\"hi\"}}</tool_call>",
+      "expect_failure_class": "args"
+    },
+    {
+      "id": "attr-format-1",
+      "user_input": "encode",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "请调用 tool_call 但格式乱了 {name:base64.encode}",
+      "expect_failure_class": "format"
+    },
+    {
+      "id": "attr-format-2",
+      "user_input": "encode2",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>not-json</tool_call>",
+      "expect_failure_class": "format"
+    },
+    {
+      "id": "attr-loop-1",
+      "user_input": "loop",
+      "expect_tool": "uuid.generate",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\":\"uuid.generate\",\"arguments\":{}}</tool_call><tool_call>{\"name\":\"uuid.generate\",\"arguments\":{}}</tool_call>",
+      "expect_failure_class": "loop"
+    },
+    {
+      "id": "attr-loop-2",
+      "user_input": "loop2",
+      "expect_tool": "uuid.generate",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\":\"base64.encode\",\"arguments\":{\"input\":\"a\"}}</tool_call><tool_call>{\"name\":\"base64.encode\",\"arguments\":{\"input\":\"a\"}}</tool_call>",
+      "expect_failure_class": "loop"
+    },
+    {
+      "id": "attr-answer-1",
+      "user_input": "encode hi",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "[answer_mismatch] tool ok but said wrong",
+      "expect_failure_class": "answer_mismatch"
+    },
+    {
+      "id": "attr-answer-2",
+      "user_input": "encode hi2",
+      "expect_tool": "base64.encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "[answer_mismatch] another mismatch",
+      "expect_failure_class": "answer_mismatch"
     }
   ]
 }

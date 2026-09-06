@@ -5,6 +5,11 @@ keywords: hash, 哈希, md5, MD5, sha256, SHA-256, digest, 摘要, fingerprint
 
 # 哈希摘要
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 `hash.digest` 计算 `md5` 或 `sha256` 摘要（小写 hex 字符串）。参数：
 - `input` — 待哈希的字符串
 - `algorithm` — `md5` 或 `sha256`

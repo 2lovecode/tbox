@@ -23,6 +23,9 @@ pub struct ChatMessage {
     /// 思考/推理内容（模型未提供则序列化时省略）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<String>,
+    /// 有序轨迹 JSON（缺省时前端/解析侧可合成）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trajectory_json: Option<String>,
     pub created_at: i64,
 }
 
@@ -39,6 +42,7 @@ CREATE TABLE IF NOT EXISTS messages (
   content TEXT NOT NULL,
   tool_calls_json TEXT,
   reasoning TEXT NOT NULL DEFAULT '',
+  trajectory_json TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
   FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
 );
@@ -48,21 +52,40 @@ pub fn ensure_conversation_schema(conn: &Connection) -> Result<(), rusqlite::Err
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     conn.execute_batch(SCHEMA_SQL)?;
     migrate_add_reasoning(conn)?;
+    migrate_add_trajectory(conn)?;
+    migrate_add_context_budget(conn)?;
     Ok(())
 }
 
-/// 向后兼容 migration：为旧库的 messages 表幂等补齐 `reasoning` 列
+/// 向后兼容 migration：为旧库的 messages 表幂等补齐列
 /// （duplicate column 错误视为已存在，静默通过）。
-fn migrate_add_reasoning(conn: &Connection) -> Result<(), rusqlite::Error> {
-    // 幂等：列已存在时 SQLite 报 duplicate column，视为成功。
-    match conn.execute(
-        "ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''",
-        [],
-    ) {
+fn migrate_add_column(conn: &Connection, sql: &str) -> Result<(), rusqlite::Error> {
+    match conn.execute(sql, []) {
         Ok(_) => Ok(()),
         Err(e) if e.to_string().contains("duplicate column") => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+fn migrate_add_reasoning(conn: &Connection) -> Result<(), rusqlite::Error> {
+    migrate_add_column(
+        conn,
+        "ALTER TABLE messages ADD COLUMN reasoning TEXT NOT NULL DEFAULT ''",
+    )
+}
+
+fn migrate_add_trajectory(conn: &Connection) -> Result<(), rusqlite::Error> {
+    migrate_add_column(
+        conn,
+        "ALTER TABLE messages ADD COLUMN trajectory_json TEXT NOT NULL DEFAULT ''",
+    )
+}
+
+fn migrate_add_context_budget(conn: &Connection) -> Result<(), rusqlite::Error> {
+    migrate_add_column(
+        conn,
+        "ALTER TABLE conversations ADD COLUMN context_budget_json TEXT NOT NULL DEFAULT ''",
+    )
 }
 
 fn now_ts() -> i64 {
@@ -85,7 +108,8 @@ fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation
 }
 
 fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
-    let reasoning: String = row.get(6)?;
+    let reasoning: String = row.get(6).unwrap_or_default();
+    let trajectory: String = row.get(7).unwrap_or_default();
     Ok(ChatMessage {
         id: row.get(0)?,
         conversation_id: row.get(1)?,
@@ -96,6 +120,11 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
             None
         } else {
             Some(reasoning)
+        },
+        trajectory_json: if trajectory.is_empty() {
+            None
+        } else {
+            Some(trajectory)
         },
         created_at: row.get(5)?,
     })
@@ -122,8 +151,8 @@ pub fn append_user_message_on(
             )
             .map_err(|e| e.to_string())?;
             tx.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
-                 VALUES (?1, ?2, 'user', ?3, NULL, '', ?4)",
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, trajectory_json, created_at)
+                 VALUES (?1, ?2, 'user', ?3, NULL, '', '', ?4)",
                 params![message_id, conv_id, content, ts],
             )
             .map_err(|e| e.to_string())?;
@@ -141,6 +170,7 @@ pub fn append_user_message_on(
                 content: content.to_string(),
                 tool_calls_json: None,
                 reasoning: None,
+                trajectory_json: None,
                 created_at: ts,
             };
             Ok((conversation, message))
@@ -160,8 +190,8 @@ pub fn append_user_message_on(
             )
             .map_err(|e| e.to_string())?;
             tx.execute(
-                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
-                 VALUES (?1, ?2, 'user', ?3, NULL, '', ?4)",
+                "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, trajectory_json, created_at)
+                 VALUES (?1, ?2, 'user', ?3, NULL, '', '', ?4)",
                 params![message_id, conv_id, content, ts],
             )
             .map_err(|e| e.to_string())?;
@@ -174,6 +204,7 @@ pub fn append_user_message_on(
                 content: content.to_string(),
                 tool_calls_json: None,
                 reasoning: None,
+                trajectory_json: None,
                 created_at: ts,
             };
             let updated = Conversation {
@@ -192,6 +223,24 @@ pub fn append_assistant_message_on(
     tool_calls_json: Option<&str>,
     reasoning: Option<&str>,
 ) -> Result<ChatMessage, String> {
+    append_assistant_message_full(
+        conn,
+        conversation_id,
+        content,
+        tool_calls_json,
+        reasoning,
+        None,
+    )
+}
+
+pub fn append_assistant_message_full(
+    conn: &Connection,
+    conversation_id: &str,
+    content: &str,
+    tool_calls_json: Option<&str>,
+    reasoning: Option<&str>,
+    trajectory_json: Option<&str>,
+) -> Result<ChatMessage, String> {
     ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
 
     let mut exists = conn
@@ -203,6 +252,7 @@ pub fn append_assistant_message_on(
 
     let ts = now_ts();
     let message_id = Uuid::new_v4().to_string();
+    let traj = trajectory_json.unwrap_or("");
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     tx.execute(
         "UPDATE conversations SET updated_at = ?1 WHERE id = ?2",
@@ -210,9 +260,17 @@ pub fn append_assistant_message_on(
     )
     .map_err(|e| e.to_string())?;
     tx.execute(
-        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, created_at)
-         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5, ?6)",
-        params![message_id, conversation_id, content, tool_calls_json, reasoning.unwrap_or(""), ts],
+        "INSERT INTO messages (id, conversation_id, role, content, tool_calls_json, reasoning, trajectory_json, created_at)
+         VALUES (?1, ?2, 'assistant', ?3, ?4, ?5, ?6, ?7)",
+        params![
+            message_id,
+            conversation_id,
+            content,
+            tool_calls_json,
+            reasoning.unwrap_or(""),
+            traj,
+            ts
+        ],
     )
     .map_err(|e| e.to_string())?;
     tx.commit().map_err(|e| e.to_string())?;
@@ -224,6 +282,11 @@ pub fn append_assistant_message_on(
         content: content.to_string(),
         tool_calls_json: tool_calls_json.map(|s| s.to_string()),
         reasoning: reasoning.map(|s| s.to_string()).filter(|s| !s.is_empty()),
+        trajectory_json: if traj.is_empty() {
+            None
+        } else {
+            Some(traj.to_string())
+        },
         created_at: ts,
     })
 }
@@ -247,7 +310,7 @@ pub fn get_messages_on(conn: &Connection, conversation_id: &str) -> Result<Vec<C
 
     let mut stmt = conn
         .prepare(
-            "SELECT id, conversation_id, role, content, tool_calls_json, created_at, reasoning
+            "SELECT id, conversation_id, role, content, tool_calls_json, created_at, reasoning, trajectory_json
              FROM messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
         )
         .map_err(|e| e.to_string())?;
@@ -257,6 +320,50 @@ pub fn get_messages_on(conn: &Connection, conversation_id: &str) -> Result<Vec<C
 
     rows.collect::<Result<Vec<_>, _>>()
         .map_err(|e| e.to_string())
+}
+
+/// Persist last context-budget snapshot for reopen (no recompute).
+pub fn save_context_budget_on(
+    conn: &Connection,
+    conversation_id: &str,
+    budget: &impl Serialize,
+) -> Result<(), String> {
+    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+    let json = serde_json::to_string(budget).map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE conversations SET context_budget_json = ?1 WHERE id = ?2",
+        params![json, conversation_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Load last persisted context-budget snapshot; `None` if never recorded.
+pub fn load_context_budget_on(
+    conn: &Connection,
+    conversation_id: &str,
+) -> Result<Option<serde_json::Value>, String> {
+    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+    let raw: String = conn
+        .query_row(
+            "SELECT context_budget_json FROM conversations WHERE id = ?1",
+            params![conversation_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| format!("会话不存在: {conversation_id}"))?;
+    if raw.trim().is_empty() {
+        return Ok(None);
+    }
+    let value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    Ok(Some(value))
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationThread {
+    pub messages: Vec<ChatMessage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_budget: Option<serde_json::Value>,
 }
 
 pub fn delete_conversation_on(conn: &Connection, conversation_id: &str) -> Result<(), String> {
@@ -293,8 +400,14 @@ pub fn get_messages(conversation_id: &str) -> Result<Vec<ChatMessage>, String> {
 
 #[tauri::command]
 #[allow(non_snake_case)]
-pub fn get_conversation_messages(conversationId: String) -> Result<Vec<ChatMessage>, String> {
-    get_messages(&conversationId)
+pub fn get_conversation_messages(conversationId: String) -> Result<ConversationThread, String> {
+    let conn = open_connection()?;
+    let messages = get_messages_on(&conn, &conversationId)?;
+    let context_budget = load_context_budget_on(&conn, &conversationId)?;
+    Ok(ConversationThread {
+        messages,
+        context_budget,
+    })
 }
 
 #[tauri::command]
@@ -376,4 +489,57 @@ fn reasoning_roundtrip_and_migration() {
     assert_eq!(msgs[0].reasoning, None);
     assert_eq!(msgs[1].reasoning.as_deref(), Some("思考中…"));
 }
+
+#[test]
+fn trajectory_roundtrip_and_migration() {
+    let db = test_db();
+    db.execute_batch(
+        "CREATE TABLE messages (
+           id TEXT PRIMARY KEY,
+           conversation_id TEXT NOT NULL,
+           role TEXT NOT NULL,
+           content TEXT NOT NULL,
+           tool_calls_json TEXT,
+           reasoning TEXT NOT NULL DEFAULT '',
+           created_at INTEGER NOT NULL
+         );",
+    )
+    .unwrap();
+    ensure_conversation_schema(&db).unwrap();
+    ensure_conversation_schema(&db).unwrap();
+
+    let (conv, _) = append_user_message_on(&db, None, "hi").unwrap();
+    let traj = r#"[{"type":"reasoning","text":"r"},{"type":"text","text":"answer"}]"#;
+    let saved = append_assistant_message_full(
+        &db,
+        &conv.id,
+        "answer",
+        None,
+        Some("r"),
+        Some(traj),
+    )
+    .unwrap();
+    assert_eq!(saved.trajectory_json.as_deref(), Some(traj));
+
+    let msgs = get_messages_on(&db, &conv.id).unwrap();
+    assert_eq!(msgs[1].trajectory_json.as_deref(), Some(traj));
+}
+
+    #[test]
+    fn context_budget_persists_and_loads() {
+        let db = test_db();
+        let (conv, _) = append_user_message_on(&db, None, "hi").unwrap();
+        assert!(load_context_budget_on(&db, &conv.id).unwrap().is_none());
+
+        let snap = serde_json::json!({
+            "used": 1200,
+            "limit": 4096,
+            "ratio": 1200.0 / 4096.0,
+            "nearLimit": false
+        });
+        save_context_budget_on(&db, &conv.id, &snap).unwrap();
+        let loaded = load_context_budget_on(&db, &conv.id).unwrap().unwrap();
+        assert_eq!(loaded["used"], 1200);
+        assert_eq!(loaded["limit"], 4096);
+    }
 }

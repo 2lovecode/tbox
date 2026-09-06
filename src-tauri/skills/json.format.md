@@ -1,9 +1,15 @@
 ---
 tool_id: json.format
-keywords: json, JSON, 格式化, 美化, pretty, format, 缩进
+keywords: 格式化, 美化, pretty, format, 缩进, 排版 JSON
+avoid_keywords: 平铺, flatten, 展平, query string, URL 参数, 转成 query, form
 ---
 
 # JSON 格式化
+
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
 
 `json.format` 把 JSON 字符串格式化为带缩进的可读形式。参数：`input` — 待格式化的 JSON 字符串。
 

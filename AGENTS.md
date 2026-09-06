@@ -100,6 +100,7 @@ Schema：
 | 应用层工具注册 | `openspec/specs/app-layer-tools-registered/` |
 | 对话推理展示 | `openspec/specs/chat-reasoning-display/` |
 | Skill 内容增强 | `openspec/specs/skill-content-enrichment/` |
+| 用户记忆 | `openspec/specs/user-memory/` |
 
 Backlog 清单可参考 `ROADMAP.md`（不是行为规格）。
 

@@ -7,9 +7,7 @@ import { Tool, Category } from "@/types/tools";
 import { useToolStore  }  from  "@/stores/tools";
 import SideBar from "@/layout/SideBar.vue";
 import SpotlightSearch from "@/components/SpotlightSearch.vue";
-import SettingsModal from "@/components/settings/SettingsModal.vue";
 import { useSearchStore } from "@/stores/search";
-import { useSettingsStore } from "@/stores/settings";
 import { RouterView, useRoute, useRouter } from "vue-router";
 import Toast from "@/components/Toast.vue";
 import ShortcutHints from "@/components/ShortcutHints.vue";
@@ -22,9 +20,17 @@ import { detectPlatform } from "@/utils/platform";
 
 const store  = useToolStore()
 const searchStore = useSearchStore()
-const settingsStore = useSettingsStore()
 const route = useRoute()
 const router = useRouter()
+
+function openSettingsPage() {
+  if (route.path.startsWith('/settings')) {
+    if (window.history.length > 1) router.back()
+    else void router.push('/')
+    return
+  }
+  void router.push('/settings')
+}
 const { isDark, toggleTheme } = useTheme()
 const { isOnline } = useOnlineStatus()
 const shortcuts = useKeyboardShortcuts()
@@ -57,9 +63,9 @@ shortcuts.bind('[', { meta: true, ctrl: true }, () => {
 shortcuts.bind('\\', { meta: true, ctrl: true }, () => {
   toggleTheme();
 });
-// Cmd/Ctrl+, opens the Settings modal (mirrors the macOS convention).
+// Cmd/Ctrl+, opens the Settings page (mirrors the macOS convention).
 shortcuts.bind(',', { meta: true, ctrl: true }, () => {
-  settingsStore.toggle();
+  openSettingsPage();
 });
 
 // 加载categories
@@ -112,7 +118,7 @@ onMounted(async () => {
   }
 })
 
-// 对话首页与工具箱页显示侧栏；具体工具页不显示
+// 对话首页与工具箱页显示侧栏；设置页与具体工具页不显示
 const showSidebar = computed(() => route.path === '/' || route.path === '/toolbox')
 
 // Detect platform once for the keyboard-shortcut hint in the header.
@@ -168,7 +174,7 @@ onBeforeUnmount(() => {
               class="theme-toggle settings-toggle"
               title="设置"
               aria-label="打开设置"
-              @click="settingsStore.toggle()"
+              @click="openSettingsPage()"
             >
               <i class="fas fa-sliders"></i>
             </button>
@@ -195,7 +201,6 @@ onBeforeUnmount(() => {
         <SpotlightSearch />
         <ShortcutHints />
         <ConfirmModal />
-        <SettingsModal />
       </div>
 </template>
 
@@ -205,6 +210,8 @@ onBeforeUnmount(() => {
     padding: 0;
     box-sizing: border-box;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--text-secondary) 35%, transparent) transparent;
   }
   
   :root {
@@ -236,20 +243,60 @@ onBeforeUnmount(() => {
     --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   }
 
+  html,
+  body,
+  #app {
+    height: 100%;
+    margin: 0;
+  }
+
   body {
     background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
     color: var(--text-primary);
-    min-height: 100vh;
-    padding: 20px;
+    height: 100%;
+    overflow: hidden;
+    padding: 16px 20px;
     transition: background 0.3s ease, color 0.3s ease;
+  }
+
+  /* 全局细滚动条：WebKit */
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--text-secondary) 28%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--text-secondary) 48%, transparent);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
   
   .container {
     max-width: 1400px;
     margin: 0 auto;
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
     display: grid;
     grid-template-columns: 210px 1fr;
-    gap: 20px;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 16px 20px;
+    overflow: hidden;
   }
 
   .container.no-sidebar {
@@ -261,14 +308,23 @@ onBeforeUnmount(() => {
     max-width: 100%;
   }
 
-  .main-wrapper {
-    min-height: 400px;
-    background: transparent;
+  .container > aside {
+    min-height: 0;
+    overflow: hidden;
   }
 
-  .container.no-sidebar .main-wrapper {
-    grid-column: 1 / -1;
-    width: 100%;
+  .main-wrapper {
+    min-height: 0;
+    height: 100%;
+    overflow: hidden;
+    background: transparent;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .main-wrapper > * {
+    min-height: 0;
+    flex: 1;
   }
 
   .loading-container {
@@ -302,8 +358,9 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 20px 0;
+    padding: 8px 0 12px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    flex-shrink: 0;
   }
   
   .logo {
@@ -527,23 +584,25 @@ onBeforeUnmount(() => {
   footer {
     grid-column: 1 / -1;
     text-align: center;
-    padding: 30px 0;
+    padding: 12px 0 4px;
     color: var(--gray);
-    font-size: 14px;
+    font-size: 13px;
     border-top: 1px solid rgba(0, 0, 0, 0.05);
-    margin-top: 20px;
+    margin-top: 0;
+    flex-shrink: 0;
   }
   
-  /* 响应式设计 */
-  @media (max-width: 1100px) {
+  /* 窄屏：单列并隐藏侧栏。断点须低于默认窗口宽，避免启动即乱版。
+     用 .container > aside 提高优先级，压过 SideBar scoped 样式。 */
+  @media (max-width: 900px) {
     .container {
       grid-template-columns: 1fr;
     }
-    
-    .sidebar {
+
+    .container > aside {
       display: none;
     }
-    
+
     .featured-tools {
       grid-template-columns: 1fr;
     }

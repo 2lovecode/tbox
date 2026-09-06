@@ -13,6 +13,7 @@ pub mod screen;
 pub mod search;
 pub mod conversation;
 pub mod agent;
+pub mod memory;
 pub mod model_catalog;
 pub mod hardware_info;
 pub mod data_convert;

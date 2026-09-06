@@ -116,6 +116,8 @@ genai = "0.6"
 # Apple Silicon → Metal；Windows → CUDA（tauri.windows.conf）；
 # Linux → Vulkan（tauri.linux.conf）。纯 cargo 需 `--features cuda|vulkan`。
 llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry"] }
 
 [target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
 llama-cpp-2 = { version = "0.1", default-features = false, features = ["sampler", "metal"] }

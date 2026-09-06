@@ -213,6 +213,156 @@ pub trait ChatModel {
     fn backend_desc(&self) -> BackendDesc {
         BackendDesc::default()
     }
+
+    /// 优先真流式；默认实现走 `complete` + 分块（Fallback）。
+    fn complete_streaming(
+        &mut self,
+        msgs: &[ModelMessage],
+        _cancel: &std::sync::atomic::AtomicBool,
+        on_delta: &mut dyn FnMut(StreamDelta),
+    ) -> Result<ModelTurn, String> {
+        let turn = self.complete(msgs)?;
+        emit_turn_as_fallback_chunks(&turn, on_delta);
+        Ok(turn)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StreamMode {
+    Live,
+    Fallback,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StreamDelta {
+    Meta { mode: StreamMode },
+    Reasoning { text: String },
+    Text { text: String },
+}
+
+const FALLBACK_CHUNK_CHARS: usize = 24;
+
+/// Emit a completed turn as Fallback meta + chunked reasoning/text deltas.
+pub fn emit_turn_as_fallback_chunks(turn: &ModelTurn, on_delta: &mut dyn FnMut(StreamDelta)) {
+    on_delta(StreamDelta::Meta {
+        mode: StreamMode::Fallback,
+    });
+    match turn {
+        ModelTurn::Text { text, reasoning } => {
+            if let Some(r) = reasoning.as_ref().filter(|s| !s.trim().is_empty()) {
+                for chunk in chunk_text(r, FALLBACK_CHUNK_CHARS) {
+                    if !chunk.is_empty() {
+                        on_delta(StreamDelta::Reasoning { text: chunk });
+                    }
+                }
+            }
+            for chunk in chunk_text(text, FALLBACK_CHUNK_CHARS) {
+                if !chunk.is_empty() {
+                    on_delta(StreamDelta::Text { text: chunk });
+                }
+            }
+        }
+        ModelTurn::ToolCalls(_) => {
+            // 工具轮不在流式阶段推正文；loop 侧用 ToolStart/End。
+        }
+    }
+}
+
+/// 增量剥离 `<think>…</think>`，供真流式路径使用。
+#[derive(Debug, Default)]
+pub struct ThinkStreamParser {
+    buf: String,
+    in_think: bool,
+    reasoning_acc: String,
+    body_acc: String,
+}
+
+impl ThinkStreamParser {
+    /// Push a text chunk; emits Reasoning/Text deltas with tags stripped.
+    pub fn push(&mut self, chunk: &str, on_delta: &mut dyn FnMut(StreamDelta)) {
+        self.buf.push_str(chunk);
+        loop {
+            if self.in_think {
+                if let Some(i) = self.buf.find("</think>") {
+                    let reason = self.buf[..i].to_string();
+                    self.buf = self.buf[i + "</think>".len()..].to_string();
+                    self.in_think = false;
+                    if !reason.is_empty() {
+                        self.reasoning_acc.push_str(&reason);
+                        on_delta(StreamDelta::Reasoning { text: reason });
+                    }
+                    continue;
+                }
+                let keep = partial_suffix_overlap(&self.buf, "</think>");
+                if self.buf.len() > keep {
+                    let emit = self.buf[..self.buf.len() - keep].to_string();
+                    self.buf.drain(..self.buf.len() - keep);
+                    if !emit.is_empty() {
+                        self.reasoning_acc.push_str(&emit);
+                        on_delta(StreamDelta::Reasoning { text: emit });
+                    }
+                }
+                break;
+            } else if let Some(i) = self.buf.find("<think>") {
+                let before = self.buf[..i].to_string();
+                self.buf = self.buf[i + "<think>".len()..].to_string();
+                self.in_think = true;
+                if !before.is_empty() {
+                    self.body_acc.push_str(&before);
+                    on_delta(StreamDelta::Text { text: before });
+                }
+                continue;
+            } else {
+                let keep = partial_suffix_overlap(&self.buf, "<think>");
+                if self.buf.len() > keep {
+                    let emit = self.buf[..self.buf.len() - keep].to_string();
+                    self.buf.drain(..self.buf.len() - keep);
+                    if !emit.is_empty() {
+                        self.body_acc.push_str(&emit);
+                        on_delta(StreamDelta::Text { text: emit });
+                    }
+                }
+                break;
+            }
+        }
+    }
+
+    /// Flush remaining buffer (unclosed think → reasoning). Returns (reasoning, body).
+    pub fn finish(mut self, on_delta: &mut dyn FnMut(StreamDelta)) -> (Option<String>, String) {
+        if self.in_think {
+            if !self.buf.is_empty() {
+                self.reasoning_acc.push_str(&self.buf);
+                on_delta(StreamDelta::Reasoning {
+                    text: std::mem::take(&mut self.buf),
+                });
+            }
+        } else if !self.buf.is_empty() {
+            self.body_acc.push_str(&self.buf);
+            on_delta(StreamDelta::Text {
+                text: std::mem::take(&mut self.buf),
+            });
+        }
+        let reasoning = {
+            let t = self.reasoning_acc.trim().to_string();
+            if t.is_empty() {
+                None
+            } else {
+                Some(t)
+            }
+        };
+        (reasoning, self.body_acc.trim().to_string())
+    }
+}
+
+fn partial_suffix_overlap(s: &str, tag: &str) -> usize {
+    let max = s.len().min(tag.len().saturating_sub(1));
+    for len in (1..=max).rev() {
+        if s.ends_with(&tag[..len]) {
+            return len;
+        }
+    }
+    0
 }
 
 #[derive(Debug)]
@@ -355,10 +505,98 @@ impl ChatModel for OpenAiCompatModel {
             "{}/chat/completions",
             self.base_url.trim_end_matches('/')
         );
+        let body = self.build_request_body(msgs, false);
+        let client = reqwest::blocking::Client::new();
+        let mut req = client.post(&url).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = req.send().map_err(|e| format!("LLM 请求失败: {e}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().unwrap_or_default();
+            return Err(format!("LLM HTTP {status}: {text}"));
+        }
+        let json: Value = resp
+            .json()
+            .map_err(|e| format!("解析 LLM 响应失败: {e}"))?;
+        parse_openai_turn(&json)
+    }
+
+    fn complete_streaming(
+        &mut self,
+        msgs: &[ModelMessage],
+        cancel: &std::sync::atomic::AtomicBool,
+        on_delta: &mut dyn FnMut(StreamDelta),
+    ) -> Result<ModelTurn, String> {
+        let url = format!(
+            "{}/chat/completions",
+            self.base_url.trim_end_matches('/')
+        );
+        let body = self.build_request_body(msgs, true);
+        let client = reqwest::blocking::Client::new();
+        let mut req = client.post(&url).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.bearer_auth(key);
+        }
+        let resp = match req.send() {
+            Ok(r) => r,
+            Err(_) => {
+                let turn = self.complete(msgs)?;
+                emit_turn_as_fallback_chunks(&turn, on_delta);
+                return Ok(turn);
+            }
+        };
+        if !resp.status().is_success() {
+            let turn = self.complete(msgs)?;
+            emit_turn_as_fallback_chunks(&turn, on_delta);
+            return Ok(turn);
+        }
+
+        on_delta(StreamDelta::Meta {
+            mode: StreamMode::Live,
+        });
+
+        let mut aggregator = OpenAiStreamAggregator::default();
+        let reader = resp;
+        use std::io::{BufRead, BufReader};
+        let mut buf_reader = BufReader::new(reader);
+        let mut line = String::new();
+        loop {
+            if cancel.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+            line.clear();
+            let n = buf_reader
+                .read_line(&mut line)
+                .map_err(|e| format!("读取 SSE 失败: {e}"))?;
+            if n == 0 {
+                break;
+            }
+            let trimmed = line.trim_end();
+            if trimmed.is_empty() || trimmed.starts_with(':') {
+                continue;
+            }
+            let Some(data) = trimmed.strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data == "[DONE]" {
+                break;
+            }
+            if let Ok(json) = serde_json::from_str::<Value>(data) {
+                aggregator.ingest_chunk(&json, on_delta);
+            }
+        }
+        Ok(aggregator.into_turn())
+    }
+}
+
+impl OpenAiCompatModel {
+    fn build_request_body(&self, msgs: &[ModelMessage], stream: bool) -> Value {
         let messages: Vec<Value> = msgs
             .iter()
             .map(|m| {
-                // assistant 工具调用：带 tool_calls 结构（与 role=tool 配对）
                 if m.role == "assistant" && !m.tool_calls.is_empty() {
                     let calls: Vec<Value> = m
                         .tool_calls
@@ -380,7 +618,6 @@ impl ChatModel for OpenAiCompatModel {
                         "tool_calls": calls,
                     });
                 }
-                // 工具结果：role=tool + tool_call_id 配对
                 if m.role == "tool" {
                     return serde_json::json!({
                         "role": "tool",
@@ -394,28 +631,159 @@ impl ChatModel for OpenAiCompatModel {
                 })
             })
             .collect();
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
             "tools": self.tools_json,
             "tool_choice": "auto",
         });
+        if stream {
+            body["stream"] = Value::Bool(true);
+        }
+        body
+    }
+}
 
-        let client = reqwest::blocking::Client::new();
-        let mut req = client.post(&url).json(&body);
-        if let Some(key) = &self.api_key {
-            req = req.bearer_auth(key);
+#[derive(Default)]
+struct OpenAiStreamAggregator {
+    text: String,
+    reasoning: String,
+    /// index -> (id, name, arguments_acc)
+    tool_calls: std::collections::BTreeMap<usize, (String, String, String)>,
+}
+
+impl OpenAiStreamAggregator {
+    fn ingest_chunk(&mut self, json: &Value, on_delta: &mut dyn FnMut(StreamDelta)) {
+        let Some(choice) = json.pointer("/choices/0") else {
+            return;
+        };
+        let delta = choice.get("delta").unwrap_or(choice);
+        if let Some(r) = delta
+            .get("reasoning_content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            self.reasoning.push_str(r);
+            on_delta(StreamDelta::Reasoning {
+                text: r.to_string(),
+            });
         }
-        let resp = req.send().map_err(|e| format!("LLM 请求失败: {e}"))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let text = resp.text().unwrap_or_default();
-            return Err(format!("LLM HTTP {status}: {text}"));
+        if let Some(t) = delta
+            .get("content")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            self.text.push_str(t);
+            on_delta(StreamDelta::Text {
+                text: t.to_string(),
+            });
         }
-        let json: Value = resp
-            .json()
-            .map_err(|e| format!("解析 LLM 响应失败: {e}"))?;
-        parse_openai_turn(&json)
+        if let Some(arr) = delta.get("tool_calls").and_then(|v| v.as_array()) {
+            for c in arr {
+                let idx = c.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                let entry = self.tool_calls.entry(idx).or_insert_with(|| {
+                    (
+                        c.get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("call")
+                            .to_string(),
+                        String::new(),
+                        String::new(),
+                    )
+                });
+                if let Some(id) = c.get("id").and_then(|v| v.as_str()) {
+                    if !id.is_empty() {
+                        entry.0 = id.to_string();
+                    }
+                }
+                if let Some(name) = c.pointer("/function/name").and_then(|v| v.as_str()) {
+                    entry.1.push_str(name);
+                }
+                if let Some(args) = c.pointer("/function/arguments").and_then(|v| v.as_str()) {
+                    entry.2.push_str(args);
+                }
+            }
+        }
+    }
+
+    fn into_turn(self) -> ModelTurn {
+        if !self.tool_calls.is_empty() {
+            let calls: Vec<ToolCall> = self
+                .tool_calls
+                .into_values()
+                .map(|(id, name, args)| ToolCall {
+                    id,
+                    name,
+                    arguments: serde_json::from_str(&args)
+                        .unwrap_or_else(|_| serde_json::json!({})),
+                })
+                .collect();
+            return ModelTurn::ToolCalls(calls);
+        }
+        ModelTurn::Text {
+            text: self.text,
+            reasoning: if self.reasoning.is_empty() {
+                None
+            } else {
+                Some(self.reasoning)
+            },
+        }
+    }
+}
+
+#[cfg(test)]
+mod openai_stream_tests {
+    use super::*;
+
+    #[test]
+    fn sse_aggregator_merges_content_and_tools() {
+        let mut agg = OpenAiStreamAggregator::default();
+        let mut deltas = Vec::new();
+        let mut on = |d: StreamDelta| deltas.push(d);
+        agg.ingest_chunk(
+            &serde_json::json!({
+                "choices": [{"delta": {"content": "hel"}}]
+            }),
+            &mut on,
+        );
+        agg.ingest_chunk(
+            &serde_json::json!({
+                "choices": [{"delta": {"content": "lo"}}]
+            }),
+            &mut on,
+        );
+        let turn = agg.into_turn();
+        assert_eq!(turn, ModelTurn::text("hello"));
+        assert_eq!(deltas.len(), 2);
+
+        let mut agg2 = OpenAiStreamAggregator::default();
+        let mut on2 = |_d: StreamDelta| {};
+        agg2.ingest_chunk(
+            &serde_json::json!({
+                "choices": [{"delta": {"tool_calls": [{
+                    "index": 0,
+                    "id": "c1",
+                    "function": {"name": "base64.encode", "arguments": "{\"in"}
+                }]}}]
+            }),
+            &mut on2,
+        );
+        agg2.ingest_chunk(
+            &serde_json::json!({
+                "choices": [{"delta": {"tool_calls": [{
+                    "index": 0,
+                    "function": {"arguments": "put\":\"hi\"}"}
+                }]}}]
+            }),
+            &mut on2,
+        );
+        match agg2.into_turn() {
+            ModelTurn::ToolCalls(calls) => {
+                assert_eq!(calls[0].name, "base64.encode");
+                assert_eq!(calls[0].arguments["input"], "hi");
+            }
+            other => panic!("expected tool calls, got {other:?}"),
+        }
     }
 }
 
@@ -677,6 +1045,74 @@ mod tests {
     }
 
     #[test]
+    fn think_stream_parser_closed_and_unclosed() {
+        let mut p = ThinkStreamParser::default();
+        let mut deltas = Vec::new();
+        let mut on = |d: StreamDelta| deltas.push(d);
+        p.push("<thi", &mut on);
+        p.push("nk>推理", &mut on);
+        p.push("</think>答案", &mut on);
+        let (r, body) = p.finish(&mut on);
+        assert_eq!(r.as_deref(), Some("推理"));
+        assert_eq!(body, "答案");
+        assert!(deltas.iter().any(|d| matches!(d, StreamDelta::Reasoning { .. })));
+        assert!(deltas.iter().any(|d| matches!(d, StreamDelta::Text { .. })));
+
+        let mut p2 = ThinkStreamParser::default();
+        let mut deltas2 = Vec::new();
+        let mut on2 = |d: StreamDelta| deltas2.push(d);
+        p2.push("<think>半截", &mut on2);
+        let (r2, body2) = p2.finish(&mut on2);
+        assert_eq!(r2.as_deref(), Some("半截"));
+        assert_eq!(body2, "");
+    }
+
+    #[test]
+    fn fallback_streaming_default_emits_meta() {
+        struct OnlyComplete;
+        impl ChatModel for OnlyComplete {
+            fn complete(&mut self, _: &[ModelMessage]) -> Result<ModelTurn, String> {
+                Ok(ModelTurn::text("abcdef"))
+            }
+        }
+        let mut m = OnlyComplete;
+        let mut deltas = Vec::new();
+        let cancel = std::sync::atomic::AtomicBool::new(false);
+        let turn = m
+            .complete_streaming(&[], &cancel, &mut |d| deltas.push(d))
+            .unwrap();
+        assert!(matches!(turn, ModelTurn::Text { .. }));
+        assert!(matches!(
+            deltas.first(),
+            Some(StreamDelta::Meta {
+                mode: StreamMode::Fallback
+            })
+        ));
+        let text: String = deltas
+            .iter()
+            .filter_map(|d| match d {
+                StreamDelta::Text { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(text, "abcdef");
+    }
+
+    #[test]
+    fn stream_meta_serde_snake_case() {
+        let live = serde_json::to_value(StreamMode::Live).unwrap();
+        let fb = serde_json::to_value(StreamMode::Fallback).unwrap();
+        assert_eq!(live, serde_json::json!("live"));
+        assert_eq!(fb, serde_json::json!("fallback"));
+        let ev = crate::agent::r#loop::AgentEvent::StreamMeta {
+            mode: StreamMode::Live,
+        };
+        let v = serde_json::to_value(&ev).unwrap();
+        assert_eq!(v["kind"], "stream_meta");
+        assert_eq!(v["mode"], "live");
+    }
+
+    #[test]
     fn local_without_model_does_not_hit_cloud() {
         let cfg = LlmConfig {
             provider: "local".into(),
@@ -684,6 +1120,7 @@ mod tests {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4o-mini".into(),
             has_api_key: true,
+            ..Default::default()
         };
         let err = resolve_backend(&cfg, None).unwrap_err();
         assert!(matches!(err, AgentError::LlmUnavailable));
@@ -697,6 +1134,7 @@ mod tests {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4o-mini".into(),
             has_api_key: true,
+            ..Default::default()
         };
         assert!(resolve_backend(&cfg, None).is_ok());
     }

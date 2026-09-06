@@ -3,20 +3,32 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useConversationsStore, type ChatMessage } from '@/stores/conversations';
-import { useSettingsStore } from '@/stores/settings';
-import { renderMarkdown } from '@/utils/markdown';
+import { useRouter } from 'vue-router';
 import ModelSwitcher from '@/components/ModelSwitcher.vue';
+import AssistantTrajectory from '@/components/AssistantTrajectory.vue';
+import CopyIconButton from '@/components/CopyIconButton.vue';
+import {
+  appendReasoning,
+  appendText,
+  resolveTrajectory,
+  type StreamMode,
+  type TrajectoryStep,
+} from '@/utils/trajectory';
 
 const conversations = useConversationsStore();
-const settings = useSettingsStore();
+const router = useRouter();
 const draft = ref('');
 const llmReady = ref(true);
-const streamingText = ref('');
-const streamingReasoning = ref('');
-const pendingTools = ref<
-  { id: string; args: unknown; result?: string; status: 'running' | 'done' | 'error' }[]
->([]);
+const activeTrajectory = ref<TrajectoryStep[]>([]);
+const streamMode = ref<StreamMode | null>(null);
 const turnBusy = ref(false);
+const contextBudget = ref<{
+  used: number;
+  limit: number;
+  ratio: number;
+  nearLimit: boolean;
+} | null>(null);
+const compressHint = ref<string | null>(null);
 
 interface AgentEventPayload {
   conversationId: string;
@@ -25,6 +37,9 @@ interface AgentEventPayload {
     | 'reasoning'
     | 'tool_start'
     | 'tool_end'
+    | 'stream_meta'
+    | 'context_budget'
+    | 'compress'
     | 'error'
     | 'interrupted'
     | 'done';
@@ -33,7 +48,41 @@ interface AgentEventPayload {
   args?: unknown;
   result?: string;
   message?: string;
+  mode?: string;
+  budget?: {
+    used: number;
+    limit: number;
+    ratio: number;
+    nearLimit?: boolean;
+  };
+  count?: number;
 }
+
+const budgetLabel = computed(() => {
+  const b = contextBudget.value;
+  if (!b || !b.limit) return null;
+  const pct = Math.min(100, Math.round((b.used / b.limit) * 100));
+  return { pct, used: b.used, limit: b.limit, near: b.nearLimit || pct >= 80 };
+});
+
+/** SVG ring: r=7, circumference ≈ 43.98 */
+const RING_C = 2 * Math.PI * 7;
+const budgetRingOffset = computed(() => {
+  const pct = budgetLabel.value?.pct ?? 0;
+  return RING_C * (1 - Math.min(100, Math.max(0, pct)) / 100);
+});
+
+const budgetTooltip = computed(() => {
+  const b = budgetLabel.value;
+  if (!b) return '上下文用量（估算）';
+  const lines = [
+    `上下文 ${b.pct}%`,
+    `已用 ${b.used} / 上限 ${b.limit}（估算 token）`,
+  ];
+  if (compressHint.value) lines.push(compressHint.value);
+  else if (b.near) lines.push('接近上限，将自动压缩旧工具结果');
+  return lines.join('\n');
+});
 
 const canSend = computed(
   () => draft.value.trim().length > 0 && !conversations.isSending && !turnBusy.value,
@@ -62,9 +111,33 @@ async function followIfAtBottom() {
   el.scrollTop = el.scrollHeight;
 }
 
-watch([streamingText, streamingReasoning], followIfAtBottom);
+watch(activeTrajectory, followIfAtBottom, { deep: true });
 watch(() => conversations.messages.length, followIfAtBottom);
-watch(pendingTools, followIfAtBottom, { deep: true });
+
+watch(
+  () => conversations.activeId,
+  (id) => {
+    compressHint.value = null;
+    if (!id) contextBudget.value = null;
+  },
+);
+
+watch(
+  () => conversations.contextBudget,
+  (snap) => {
+    if (turnBusy.value) return;
+    if (snap && snap.limit) {
+      contextBudget.value = {
+        used: snap.used,
+        limit: snap.limit,
+        ratio: snap.ratio,
+        nearLimit: !!snap.nearLimit,
+      };
+    } else {
+      contextBudget.value = null;
+    }
+  },
+);
 
 /** 让聊天根节点精确占据剩余视口：窗口整体不出现滚动条。 */
 function fitHeight() {
@@ -77,39 +150,14 @@ function fitHeight() {
   el.style.height = `${height}px`;
 }
 
-// ---------------------------------------------------------------------------
-// 思考过程折叠（默认收起）
-// ---------------------------------------------------------------------------
-const expandedReasoning = ref(new Set<string>());
-
-function toggleReasoning(key: string) {
-  const next = new Set(expandedReasoning.value);
-  if (next.has(key)) {
-    next.delete(key);
-  } else {
-    next.add(key);
-  }
-  expandedReasoning.value = next;
-  void nextTick(followIfAtBottom);
-}
-
-// ---------------------------------------------------------------------------
-// 复制消息（原始 Markdown 源文本）
-// ---------------------------------------------------------------------------
-const copiedKey = ref<string | null>(null);
-let copyTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function copyMessage(msg: ChatMessage) {
-  try {
-    await navigator.clipboard.writeText(msg.content);
-    copiedKey.value = msg.id;
-    if (copyTimer) clearTimeout(copyTimer);
-    copyTimer = setTimeout(() => {
-      copiedKey.value = null;
-    }, 1500);
-  } catch (error) {
-    console.error('[chat] copy failed:', error);
-  }
+function messageSteps(msg: ChatMessage): TrajectoryStep[] {
+  if (msg.role !== 'assistant') return [];
+  return resolveTrajectory(
+    msg.trajectory_json,
+    msg.reasoning,
+    msg.tool_calls_json,
+    msg.content,
+  );
 }
 
 onMounted(async () => {
@@ -124,7 +172,6 @@ onMounted(async () => {
 
   unlisten = await listen<AgentEventPayload>('agent-event', (event) => {
     const payload = event.payload;
-    // Tauri may deliver snake_case from serde flatten — normalize
     const p = payload as AgentEventPayload & {
       conversation_id?: string;
       type?: string;
@@ -136,27 +183,53 @@ onMounted(async () => {
     }
     const type = (p.type ?? (p as { kind?: string }).kind) as AgentEventPayload['type'];
     switch (type) {
+      case 'stream_meta':
+        streamMode.value = p.mode === 'live' ? 'live' : 'fallback';
+        break;
+      case 'context_budget': {
+        const b = p.budget;
+        if (b) {
+          const snap = {
+            used: b.used,
+            limit: b.limit,
+            ratio: b.ratio,
+            nearLimit: !!b.nearLimit,
+          };
+          contextBudget.value = snap;
+          conversations.contextBudget = snap;
+        }
+        break;
+      }
+      case 'compress':
+        compressHint.value = p.message ?? `已压缩 ${p.count ?? 0} 条工具结果`;
+        break;
       case 'reasoning':
-        streamingReasoning.value += p.text ?? '';
+        activeTrajectory.value = appendReasoning(activeTrajectory.value, p.text ?? '');
         break;
       case 'token':
-        streamingText.value += p.text ?? '';
+        activeTrajectory.value = appendText(activeTrajectory.value, p.text ?? '');
         break;
       case 'tool_start':
-        pendingTools.value = [
-          ...pendingTools.value,
-          { id: p.id ?? 'tool', args: p.args, status: 'running' },
+        activeTrajectory.value = [
+          ...activeTrajectory.value,
+          {
+            type: 'tool',
+            id: p.id ?? 'tool',
+            args: p.args,
+            status: 'running',
+          },
         ];
         break;
       case 'tool_end': {
-        const idx = pendingTools.value.findIndex(
-          (t) => t.id === p.id && t.status === 'running',
-        );
-        if (idx >= 0) {
-          const next = [...pendingTools.value];
-          next[idx] = { ...next[idx], result: p.result, status: 'done' };
-          pendingTools.value = next;
+        const steps = [...activeTrajectory.value];
+        for (let i = steps.length - 1; i >= 0; i--) {
+          const s = steps[i];
+          if (s.type === 'tool' && s.id === p.id && s.status === 'running') {
+            steps[i] = { ...s, result: p.result, status: 'done' };
+            break;
+          }
         }
+        activeTrajectory.value = steps;
         break;
       }
       case 'error':
@@ -183,37 +256,47 @@ onBeforeUnmount(() => {
     unlisten = null;
   }
   window.removeEventListener('resize', fitHeight);
-  if (copyTimer) clearTimeout(copyTimer);
 });
 
 function finalizeStreaming(suffix?: string) {
-  const text = (streamingText.value + (suffix ?? '')).trim();
-  const reasoning = streamingReasoning.value.trim();
-  if (text || reasoning) {
+  let steps = activeTrajectory.value;
+  if (suffix) {
+    steps = appendText(steps, suffix);
+  }
+  const text = steps
+    .filter((s): s is Extract<TrajectoryStep, { type: 'text' }> => s.type === 'text')
+    .map((s) => s.text)
+    .join('')
+    .trim();
+  const reasoning = steps
+    .filter((s): s is Extract<TrajectoryStep, { type: 'reasoning' }> => s.type === 'reasoning')
+    .map((s) => s.text)
+    .join('\n')
+    .trim();
+  const tools = steps.filter((s) => s.type === 'tool');
+  if (text || reasoning || tools.length) {
     const msg: ChatMessage = {
       id: `local-${Date.now()}`,
       conversation_id: conversations.activeId ?? '',
       role: 'assistant',
       content: text,
-      tool_calls_json: pendingTools.value.length
-        ? JSON.stringify(pendingTools.value)
-        : null,
+      tool_calls_json: tools.length ? JSON.stringify(tools) : null,
       ...(reasoning ? { reasoning } : {}),
+      trajectory_json: JSON.stringify(steps),
       created_at: Math.floor(Date.now() / 1000),
     };
+    // 仅有工具/思考、尚无正文时仍写入轨迹，但 UI 不把工具当对话气泡展示
     conversations.messages = [...conversations.messages, msg];
   }
-  streamingText.value = '';
-  streamingReasoning.value = '';
-  pendingTools.value = [];
-  // Reload from DB so ids match persistence
+  activeTrajectory.value = [];
+  streamMode.value = null;
   if (conversations.activeId) {
     void conversations.openConversation(conversations.activeId);
   }
 }
 
 const openLlmSettings = () => {
-  settings.open('llm');
+  void router.push('/settings/llm');
 };
 
 const send = async () => {
@@ -247,9 +330,8 @@ const send = async () => {
   if (!conversationId) return;
 
   turnBusy.value = true;
-  streamingText.value = '';
-  streamingReasoning.value = '';
-  pendingTools.value = [];
+  activeTrajectory.value = [];
+  streamMode.value = null;
   try {
     await invoke('send_chat_turn', { conversationId, content: text });
   } catch (error) {
@@ -279,51 +361,6 @@ const onKeydown = (event: KeyboardEvent) => {
     void send();
   }
 };
-
-const md = (src: string) => renderMarkdown(src);
-
-// ---------------------------------------------------------------------------
-// 助手头像：按会话随机（spec: Agent Avatar Variety）——头像集合为活泼的
-// 动物/趣味图标 × 渐变配色，用会话 id 哈希稳定选取：新会话随机、同一
-// 会话（含重开）不变。
-// ---------------------------------------------------------------------------
-const AGENT_AVATARS: { icon: string; gradient: string }[] = [
-  { icon: 'fas fa-otter', gradient: 'linear-gradient(135deg, #f7971e, #ffd200)' },
-  { icon: 'fas fa-frog', gradient: 'linear-gradient(135deg, #43e97b, #38f9d7)' },
-  { icon: 'fas fa-hippo', gradient: 'linear-gradient(135deg, #a18cd1, #fbc2eb)' },
-  { icon: 'fas fa-kiwi-bird', gradient: 'linear-gradient(135deg, #89f7fe, #66a6ff)' },
-  { icon: 'fas fa-cat', gradient: 'linear-gradient(135deg, #f093fb, #f5576c)' },
-  { icon: 'fas fa-dog', gradient: 'linear-gradient(135deg, #ffecd2, #fcb69f)' },
-  { icon: 'fas fa-dragon', gradient: 'linear-gradient(135deg, #667eea, #764ba2)' },
-  { icon: 'fas fa-ghost', gradient: 'linear-gradient(135deg, #a8edea, #fed6e3)' },
-  { icon: 'fas fa-crow', gradient: 'linear-gradient(135deg, #5f72be, #9921e8)' },
-  { icon: 'fas fa-fish', gradient: 'linear-gradient(135deg, #2af598, #009efd)' },
-  { icon: 'fas fa-horse', gradient: 'linear-gradient(135deg, #ff9a9e, #fecfef)' },
-  { icon: 'fas fa-rocket', gradient: 'linear-gradient(135deg, #f6d365, #fda085)' },
-  { icon: 'fas fa-wand-magic-sparkles', gradient: 'linear-gradient(135deg, #c471f5, #fa71cd)' },
-  { icon: 'fas fa-seedling', gradient: 'linear-gradient(135deg, #00b09b, #96c93d)' },
-];
-
-/** 简单字符串哈希（FNV-1a）：同一 id 永远映射同一头像。 */
-function hashId(id: string): number {
-  let h = 2166136261;
-  for (const ch of id) {
-    h ^= ch.codePointAt(0) ?? 0;
-    h = Math.imul(h, 16777619);
-  }
-  return Math.abs(h);
-}
-
-const agentAvatar = computed(() => {
-  const id = conversations.activeId ?? '';
-  return AGENT_AVATARS[hashId(id) % AGENT_AVATARS.length];
-});
-
-const agentAvatarStyle = computed(() => ({
-  background: agentAvatar.value.gradient,
-  color: '#fff',
-  borderColor: 'transparent',
-}));
 </script>
 
 <template>
@@ -337,7 +374,7 @@ const agentAvatarStyle = computed(() => ({
     </div>
 
     <div ref="messageListEl" class="message-list" role="log" aria-live="polite" @scroll="onListScroll">
-      <div v-if="!conversations.hasMessages && !streamingText && !streamingReasoning" class="chat-empty">
+      <div v-if="!conversations.hasMessages && !activeTrajectory.length" class="chat-empty">
         <div class="welcome-icon" aria-hidden="true">
           <i class="fas fa-comments"></i>
         </div>
@@ -346,108 +383,29 @@ const agentAvatarStyle = computed(() => ({
       </div>
 
       <template v-for="msg in conversations.messages" :key="msg.id">
-        <div v-if="msg.content || msg.reasoning" class="message" :class="msg.role">
-          <!-- 思考过程：默认收起（spec: Collapsed-by-default）。
-               主流聊天样式：一行轻量入口（图标+文字链），不用大块面板，
-               展开后的内容才带浅色容器，与消息流自然融合。 -->
-          <div v-if="msg.role === 'assistant' && msg.reasoning" class="reasoning">
-            <button
-              type="button"
-              class="reasoning-toggle"
-              :aria-expanded="expandedReasoning.has(msg.id)"
-              @click="toggleReasoning(msg.id)"
-            >
-              <i
-                class="fas reasoning-icon"
-                :class="expandedReasoning.has(msg.id) ? 'fa-chevron-down' : 'fa-chevron-right'"
-              ></i>
-              <span class="reasoning-label">思考过程</span>
-              <span class="reasoning-hint">{{ expandedReasoning.has(msg.id) ? '收起' : '展开' }}</span>
-            </button>
-            <div v-show="expandedReasoning.has(msg.id)" class="reasoning-body md-content">
-              <!-- eslint-disable-next-line vue/no-v-html — 输出经 DOMPurify 消毒 -->
-              <div v-html="md(msg.reasoning)"></div>
+        <div v-if="msg.role === 'user'" class="message user">
+          <div class="bubble-col copy-host">
+            <div class="message-body user-bubble">{{ msg.content }}</div>
+            <div class="msg-actions">
+              <CopyIconButton :text="msg.content" label="复制消息" />
             </div>
           </div>
-
-          <div v-if="msg.content" class="message-row">
-            <div
-              v-if="msg.role !== 'user'"
-              class="avatar"
-              :class="msg.role"
-              :style="agentAvatarStyle"
-              aria-hidden="true"
-            >
-              <i :class="agentAvatar.icon"></i>
-            </div>
-            <div class="bubble-wrap" :class="msg.role">
-              <div
-                v-if="msg.role === 'user'"
-                class="message-body"
-              >{{ msg.content }}</div>
-              <!-- eslint-disable-next-line vue/no-v-html — 输出经 DOMPurify 消毒 -->
-              <div v-else class="message-body md-content" v-html="md(msg.content)"></div>
-              <button
-                type="button"
-                class="copy-btn"
-                :title="copiedKey === msg.id ? '已复制' : '复制'"
-                :aria-label="copiedKey === msg.id ? '已复制' : '复制消息'"
-                @click="copyMessage(msg)"
-              >
-                <i class="fas" :class="copiedKey === msg.id ? 'fa-check' : 'fa-copy'"></i>
-              </button>
-            </div>
-          </div>
+        </div>
+        <div
+          v-else-if="messageSteps(msg).length"
+          class="message assistant"
+        >
+          <AssistantTrajectory :steps="messageSteps(msg)" />
         </div>
       </template>
 
-      <!-- 进行中的工具调用卡片 -->
-      <div
-        v-for="(tool, i) in pendingTools"
-        :key="`tool-${tool.id}-${i}`"
-        class="tool-card"
-      >
-        <div class="tool-card-header">
-          <i class="fas fa-wrench"></i>
-          <span class="tool-name">{{ tool.id }}</span>
-          <span class="tool-status" :class="tool.status">
-            <i
-              v-if="tool.status === 'running'"
-              class="fas fa-spinner fa-spin"
-              aria-hidden="true"
-            ></i>
-            <i v-else class="fas fa-check-circle" aria-hidden="true"></i>
-            {{ tool.status === 'running' ? '运行中…' : '完成' }}
-          </span>
-        </div>
-        <pre v-if="tool.args" class="tool-args">{{ JSON.stringify(tool.args, null, 2) }}</pre>
-        <pre v-if="tool.result" class="tool-result">{{ tool.result }}</pre>
-      </div>
-
-      <!-- 流式中的助手消息 -->
-      <div
-        v-if="streamingReasoning || streamingText"
-        class="message assistant streaming"
-      >
-        <div v-if="streamingReasoning && !streamingText" class="reasoning streaming">
-          <div class="reasoning-toggle passive">
-            <i class="fas fa-lightbulb reasoning-icon streaming-icon"></i>
-            <span class="reasoning-label">思考中</span>
-            <span class="typing-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-          </div>
-        </div>
-        <div v-if="streamingText" class="message-row">
-          <div class="avatar assistant" :style="agentAvatarStyle" aria-hidden="true">
-            <i :class="agentAvatar.icon"></i>
-          </div>
-          <div class="bubble-wrap assistant">
-            <div class="message-body md-content">
-              <!-- eslint-disable-next-line vue/no-v-html — 输出经 DOMPurify 消毒 -->
-              <div v-html="md(streamingText)"></div>
-              <span class="stream-cursor" aria-hidden="true"></span>
-            </div>
-          </div>
-        </div>
+      <!-- 流式中的助手轨迹 -->
+      <div v-if="activeTrajectory.length" class="message assistant streaming">
+        <AssistantTrajectory
+          :steps="activeTrajectory"
+          streaming
+          :stream-mode="streamMode"
+        />
       </div>
     </div>
 
@@ -465,10 +423,6 @@ const agentAvatarStyle = computed(() => ({
     </p>
 
     <form class="composer" @submit.prevent="send">
-      <!-- 模型切换器：主流聊天输入框样式（spec: In-chat Model Switcher） -->
-      <div class="composer-toolbar">
-        <ModelSwitcher />
-      </div>
       <textarea
         v-model="draft"
         class="composer-input"
@@ -478,25 +432,42 @@ const agentAvatarStyle = computed(() => ({
         :disabled="conversations.isSending || turnBusy"
         @keydown="onKeydown"
       />
-      <button
-        v-if="turnBusy"
-        type="button"
-        class="composer-cancel"
-        title="取消"
-        aria-label="取消"
-        @click="cancel"
-      >
-        <i class="fas fa-stop"></i>
-      </button>
-      <button
-        type="submit"
-        class="composer-send"
-        :disabled="!canSend"
-        :title="canSend ? '发送' : '输入消息后发送'"
-        aria-label="发送"
-      >
-        <i class="fas fa-paper-plane"></i>
-      </button>
+      <div class="composer-actions">
+        <div
+          v-if="budgetLabel"
+          class="context-ring"
+          :class="{ near: budgetLabel.near }"
+          role="img"
+          :aria-label="budgetTooltip"
+          :title="budgetTooltip"
+        >
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+            <circle class="context-ring-track" cx="10" cy="10" r="7" />
+            <circle
+              class="context-ring-fill"
+              cx="10"
+              cy="10"
+              r="7"
+              :stroke-dasharray="RING_C"
+              :stroke-dashoffset="budgetRingOffset"
+              transform="rotate(-90 10 10)"
+            />
+          </svg>
+        </div>
+        <ModelSwitcher />
+        <button
+          type="button"
+          class="composer-send"
+          :class="{ busy: turnBusy }"
+          :disabled="!turnBusy && !canSend"
+          :title="turnBusy ? '停止生成' : canSend ? '发送' : '输入消息后发送'"
+          :aria-label="turnBusy ? '停止生成' : '发送'"
+          @click="turnBusy ? cancel() : send()"
+        >
+          <i v-if="turnBusy" class="fas fa-stop" aria-hidden="true"></i>
+          <i v-else class="fas fa-paper-plane" aria-hidden="true"></i>
+        </button>
+      </div>
     </form>
   </main>
 </template>
@@ -505,24 +476,34 @@ const agentAvatarStyle = computed(() => ({
 .chat-home {
   display: flex;
   flex-direction: column;
+  gap: 10px;
   width: 100%;
   max-width: 860px;
   margin: 0 auto;
   padding: 20px 12px 12px;
   overflow: hidden;
+  height: 100%;
+  max-height: 100%;
+  box-sizing: border-box;
 }
 
-/* 消息列表：唯一滚动容器 */
+/* 消息列表：唯一滚动容器；略区分于壳层背景，对比保持克制 */
 .message-list {
   flex: 1;
   min-height: 0;
+  overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
   gap: 22px;
-  padding: 12px 10px 20px;
-  scrollbar-width: thin;
+  padding: 16px 16px 20px;
+  scrollbar-gutter: stable;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-primary, #fff) 82%, var(--bg-tertiary, #e4edf5));
+  border: 1px solid color-mix(in srgb, var(--border-color, rgba(0, 0, 0, 0.1)) 55%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary, #fff) 70%, transparent);
 }
 
 .llm-banner {
@@ -617,7 +598,9 @@ const agentAvatarStyle = computed(() => ({
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 92%;
+  max-width: min(92%, 100%);
+  min-width: 0;
+  box-sizing: border-box;
   animation: msg-in 0.22s ease;
 }
 
@@ -633,126 +616,68 @@ const agentAvatarStyle = computed(() => ({
 
 .message.assistant,
 .message.tool {
-  align-self: flex-start;
-  align-items: flex-start;
+  align-self: stretch;
+  align-items: stretch;
+  max-width: 100%;
+  width: 100%;
+  padding-right: 8px;
 }
 
-.message-row {
-  display: flex;
-  gap: 12px;
-  align-items: flex-end;
-  min-width: 0;
-}
-
-.message.user .message-row {
-  flex-direction: row-reverse;
-}
-
-.avatar {
-  width: 34px;
-  height: 34px;
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 15px;
-  flex-shrink: 0;
-  background: var(--bg-tertiary);
-  color: var(--primary);
-  border: 1px solid var(--border-color);
-  margin-bottom: 2px;
-}
-
-.avatar.user {
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  color: white;
-  border-color: transparent;
-  border-radius: 12px;
-}
-
-.bubble-wrap {
-  position: relative;
+.message.assistant :deep(.trajectory) {
   min-width: 0;
   max-width: 100%;
+  overflow-x: hidden;
+}
+
+.message.assistant :deep(.reply-block),
+.message.assistant :deep(.message-body),
+.message.assistant :deep(.md-content) {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.bubble-col {
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: min(100%, 36rem);
+}
+
+.msg-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-height: 26px;
 }
 
 .message-body {
-  padding: 12px 16px;
-  border-radius: 18px;
   font-size: 14.5px;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
-.message.user .message-body {
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
-  color: white;
-  border-bottom-right-radius: 6px;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 25%, transparent);
-}
-
-.message.assistant .message-body,
-.message.tool .message-body {
-  background: var(--bg-primary);
+.message-body.user-bubble {
+  padding: 10px 14px;
+  border-radius: 14px;
+  border-bottom-right-radius: 5px;
+  background: color-mix(in srgb, var(--primary, #4361ee) 8%, var(--bg-primary, #fff));
   color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.05);
-  border-bottom-left-radius: 6px;
-  white-space: normal;
+  border: 1px solid color-mix(in srgb, var(--primary, #4361ee) 18%, var(--border-color, #e5e7eb));
 }
 
 .message.assistant .message-body:empty {
   display: none;
 }
 
-/* 复制按钮：hover / 聚焦消息时出现 */
-.copy-btn {
-  position: absolute;
-  bottom: 6px;
-  width: 26px;
-  height: 26px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
-}
-
-.message.user .copy-btn {
-  right: 4px;
-}
-
-.message.assistant .copy-btn,
-.message.tool .copy-btn {
-  left: 4px;
-}
-
-.bubble-wrap:hover .copy-btn,
-.bubble-wrap:focus-within .copy-btn,
-.copy-btn:focus-visible {
-  opacity: 1;
-}
-
-.copy-btn:hover {
-  color: var(--primary);
-  border-color: var(--primary);
-}
-
 /* ---------- 思考过程（主流聊天样式：轻量行入口 + 展开内容容器） ---------- */
 .reasoning {
   align-self: flex-start;
   max-width: 100%;
-  margin-left: 46px; /* 与头像对齐（34px 头像 + 12px 间距） */
 }
 
 .reasoning-toggle {
@@ -760,7 +685,7 @@ const agentAvatarStyle = computed(() => ({
   align-items: center;
   gap: 6px;
   padding: 3px 8px;
-  margin: 0 0 2px -8px;
+  margin: 0 0 2px;
   border: none;
   border-radius: 8px;
   background: transparent;
@@ -899,7 +824,6 @@ const agentAvatarStyle = computed(() => ({
 :global(.dark-mode) .llm-banner strong { color: #fbbf24; }
 :global(.dark-mode) .llm-banner p { color: #fcd34d; }
 :global(.dark-mode) .chat-error { color: #f87171; }
-:global(.dark-mode) .composer-cancel { background: rgba(239, 68, 68, 0.2); }
 :global(.dark-mode) .reasoning-icon { color: #fbbf24; }
 :global(.dark-mode) .streaming-icon { color: #fbbf24; }
 :global(.dark-mode) .tool-status.done { color: #4ade80; }
@@ -972,13 +896,55 @@ const agentAvatarStyle = computed(() => ({
   text-decoration: underline;
 }
 
+/* ---------- 上下文用量环（输入区旁，低调） ---------- */
+.context-ring {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  cursor: default;
+  opacity: 0.72;
+}
+
+.context-ring:hover {
+  opacity: 1;
+}
+
+.context-ring svg {
+  display: block;
+}
+
+.context-ring-track {
+  fill: none;
+  stroke: color-mix(in srgb, var(--text-secondary, #9ca3af) 35%, transparent);
+  stroke-width: 2;
+}
+
+.context-ring-fill {
+  fill: none;
+  stroke: color-mix(in srgb, var(--text-secondary, #6b7280) 85%, var(--primary, #4361ee));
+  stroke-width: 2;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.25s ease, stroke 0.2s ease;
+}
+
+.context-ring.near {
+  opacity: 0.9;
+}
+
+.context-ring.near .context-ring-fill {
+  stroke: #d97706;
+}
+
 /* ---------- 输入区 ---------- */
 .composer {
   flex-shrink: 0;
   display: flex;
-  flex-wrap: wrap;
   align-items: flex-end;
-  gap: 6px 10px;
+  gap: 10px;
   padding: 10px 14px 12px;
   background: var(--bg-primary);
   border-radius: 18px;
@@ -997,18 +963,17 @@ const agentAvatarStyle = computed(() => ({
     0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
 }
 
-.composer-toolbar {
+.composer-actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+  flex-shrink: 0;
   padding-bottom: 2px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border-color) 60%, transparent);
-  margin-bottom: 2px;
 }
 
 .composer-input {
   flex: 1;
+  min-width: 0;
   border: none;
   outline: none;
   resize: none;
@@ -1032,8 +997,7 @@ const agentAvatarStyle = computed(() => ({
   opacity: 0.7;
 }
 
-.composer-send,
-.composer-cancel {
+.composer-send {
   width: 40px;
   height: 40px;
   border: none;
@@ -1043,10 +1007,7 @@ const agentAvatarStyle = computed(() => ({
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-}
-
-.composer-send {
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, background 0.15s ease;
   background: linear-gradient(135deg, var(--primary), var(--secondary));
   color: white;
   box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 35%, transparent);
@@ -1058,18 +1019,24 @@ const agentAvatarStyle = computed(() => ({
 }
 
 .composer-send:disabled {
-  cursor: not-allowed;
   opacity: 0.45;
+  cursor: not-allowed;
   box-shadow: none;
 }
 
-.composer-cancel {
-  background: #fee2e2;
-  color: #b91c1c;
+.composer-send.busy {
+  background: color-mix(in srgb, var(--text-secondary, #6b7280) 22%, var(--bg-secondary, #f3f4f6));
+  color: var(--text-primary, #374151);
+  box-shadow: none;
+  border: 1px solid color-mix(in srgb, var(--border-color, #e5e7eb) 80%, transparent);
 }
 
-.composer-cancel:hover {
-  transform: translateY(-1px);
+.composer-send.busy:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, #ef4444 14%, var(--bg-secondary, #f3f4f6));
+  color: #b91c1c;
+  border-color: color-mix(in srgb, #ef4444 35%, transparent);
+  box-shadow: none;
 }
 
 /* ---------- Markdown 内容样式（v-html 需 :deep） ---------- */
@@ -1152,6 +1119,8 @@ const agentAvatarStyle = computed(() => ({
 .md-content :deep(.md-code-block) {
   position: relative;
   margin: 8px 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 28px 12px 12px;
   border-radius: 10px;
   background: #1e1e2e;

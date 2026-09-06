@@ -16,6 +16,9 @@ pub struct GenaiChatModel {
     client: Client,
     model: String,
     tools: Vec<Tool>,
+    temperature: Option<f64>,
+    top_p: Option<f64>,
+    max_tokens: Option<u32>,
 }
 
 impl GenaiChatModel {
@@ -56,6 +59,9 @@ impl GenaiChatModel {
             client,
             model,
             tools: tools_from_registry(),
+            temperature: cfg.temperature.map(|t| t as f64),
+            top_p: cfg.top_p.map(|p| p as f64),
+            max_tokens: cfg.max_tokens,
         })
     }
 }
@@ -273,7 +279,16 @@ impl ChatModel for GenaiChatModel {
         let chat_req = ChatRequest::new(to_genai_messages(msgs)).with_tools(self.tools.clone());
         let client = self.client.clone();
         let model = self.model.clone();
-        let options = ChatOptions::default().with_capture_reasoning_content(true);
+        let mut options = ChatOptions::default().with_capture_reasoning_content(true);
+        if let Some(t) = self.temperature {
+            options = options.with_temperature(t);
+        }
+        if let Some(p) = self.top_p {
+            options = options.with_top_p(p);
+        }
+        if let Some(m) = self.max_tokens {
+            options = options.with_max_tokens(m);
+        }
 
         let chat_res = tauri::async_runtime::block_on(async move {
             client.exec_chat(&model, chat_req, Some(&options)).await
@@ -306,6 +321,40 @@ impl ChatModel for GenaiChatModel {
 }
 
 #[cfg(test)]
+mod genai_stream_tests {
+    use crate::agent::llm::{ChatModel, ModelTurn, StreamDelta, StreamMode};
+    use std::sync::atomic::AtomicBool;
+
+    /// genai 路径首期走 trait 默认 Fallback（库 stream 探测留待增强）。
+    #[test]
+    fn genai_uses_default_fallback_streaming() {
+        struct Stub;
+        impl ChatModel for Stub {
+            fn complete(&mut self, _: &[crate::agent::llm::ModelMessage]) -> Result<ModelTurn, String> {
+                Ok(ModelTurn::text("abc"))
+            }
+            fn backend_desc(&self) -> crate::agent::llm::BackendDesc {
+                crate::agent::llm::BackendDesc {
+                    backend: "genai".into(),
+                    model: "stub".into(),
+                }
+            }
+        }
+        let mut m = Stub;
+        let cancel = AtomicBool::new(false);
+        let mut deltas = Vec::new();
+        m.complete_streaming(&[], &cancel, &mut |d| deltas.push(d))
+            .unwrap();
+        assert!(matches!(
+            deltas.first(),
+            Some(StreamDelta::Meta {
+                mode: StreamMode::Fallback
+            })
+        ));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -317,6 +366,7 @@ mod tests {
             base_url: String::new(),
             model: String::new(),
             has_api_key: false,
+            ..Default::default()
         };
         // With any local backend up (embedded or Ollama) resolution succeeds
         // (falling back to Ollama's first model); with none it errors.
@@ -349,6 +399,7 @@ mod tests {
             base_url: base.into(),
             model: model.into(),
             has_api_key: false,
+            ..Default::default()
         };
 
         let (_, endpoint_a, model_a, _) =
@@ -378,6 +429,10 @@ mod tests {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4o-mini".into(),
             has_api_key: true,
+            temperature: None,
+            top_p: None,
+            max_tokens: None,
+            n_ctx: None,
         };
         let cfg = profile.to_config();
         assert_eq!(cfg.provider, "openai");

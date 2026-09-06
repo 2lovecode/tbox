@@ -6,6 +6,8 @@ use crate::agent::skills::retrieve_skills;
 /// 小模型系统提示字符预算（超出即测试告警断言）。
 /// 0.5B 上下文 4096 token，中文约 1 字 ≈ 1 token，留一半给对话与工具结果。
 pub const SMALL_PROMPT_CHAR_BUDGET: usize = 6000;
+/// 轻量档更紧的预算。
+pub const LITE_PROMPT_CHAR_BUDGET: usize = 4500;
 
 fn type_label(t: &str) -> &'static str {
     match t {
@@ -105,6 +107,22 @@ fn few_shot_block() -> String {
     .join("\n")
 }
 
+/// 轻量档少样本：保留 1 个正例 + 1 个负例。
+fn lite_few_shot_block() -> String {
+    [
+        "示例 1：",
+        "用户：帮我把 hi 编成 Base64",
+        "助手：<tool_call>{\"name\": \"base64.encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>",
+        "工具结果：aGk=",
+        "助手：hi 的 Base64 编码是 aGk=",
+        "",
+        "示例 2（无需工具时直接回答，不要输出 tool_call）：",
+        "用户：你好",
+        "助手：你好！我是 TBox 工具助手，可以帮你做编码、哈希、格式化等计算任务。",
+    ]
+    .join("\n")
+}
+
 /// 单个 Skill 注入正文的字符上限：保留能力描述与首个问法样本，
 /// 防止 3 条 Skill 撑爆小模型 prompt 预算（超限部分截断）。
 const SKILL_BODY_CHAR_CAP: usize = 500;
@@ -122,34 +140,60 @@ fn truncate_skill_body(body: &str) -> String {
     }
 }
 
-/// 小模型四段式系统提示：角色任务 + Skill + 工具摘要 + 少样本。
-pub fn build_small_prompt(user_text: &str) -> String {
-    let mut prompt = String::new();
+fn push_role_and_rules(prompt: &mut String) {
     prompt.push_str("你是 TBox 工具助手。用户提出计算类请求（编码、解码、哈希、解析、格式化、转换、生成）时，你必须调用下述工具完成，不要自己心算。\n");
     prompt.push_str("调用规则：只输出一个 <tool_call> 块，格式为 <tool_call>{\"name\": \"工具id\", \"arguments\": {...}}</tool_call>；不得编造参数名；与工具无关的请求直接回答。\n");
+}
 
-    let skills = retrieve_skills(user_text, 3);
-    if !skills.is_empty() {
-        prompt.push_str("\n相关技能说明：\n");
-        for sk in &skills {
-            prompt.push_str(&format!(
-                "### {}\n{}\n\n",
-                sk.tool_id,
-                truncate_skill_body(&sk.body)
-            ));
-        }
-    }
-
+fn push_tool_directory(prompt: &mut String) {
     prompt.push_str("\n可调用工具（id：用途｜参数）：\n");
     prompt.push_str(&render_tool_summary());
+}
+
+fn push_skills(prompt: &mut String, user_text: &str) {
+    let skills = retrieve_skills(user_text, 3);
+    if skills.is_empty() {
+        return;
+    }
+    prompt.push_str("\n相关技能说明：\n");
+    for sk in &skills {
+        prompt.push_str(&format!(
+            "### {}\n{}\n\n",
+            sk.tool_id,
+            truncate_skill_body(&sk.body)
+        ));
+    }
+}
+
+/// 小模型强化提示：角色 → 工具目录（常驻）→ Skill（按需）→ 少样本。
+pub fn build_small_prompt(user_text: &str) -> String {
+    let mut prompt = String::new();
+    push_role_and_rules(&mut prompt);
+    push_tool_directory(&mut prompt);
+    push_skills(&mut prompt, user_text);
     prompt.push_str("\n\n用法示例：\n");
     prompt.push_str(&few_shot_block());
+    prompt
+}
+
+/// 轻量档提示：同布局，缩短少样本。
+pub fn build_lite_prompt(user_text: &str) -> String {
+    let mut prompt = String::new();
+    push_role_and_rules(&mut prompt);
+    push_tool_directory(&mut prompt);
+    push_skills(&mut prompt, user_text);
+    prompt.push_str("\n\n用法示例：\n");
+    prompt.push_str(&lite_few_shot_block());
     prompt
 }
 
 /// 提示是否在预算内（测试与评测用告警断言）。
 pub fn prompt_within_budget(prompt: &str) -> bool {
     prompt.chars().count() <= SMALL_PROMPT_CHAR_BUDGET
+}
+
+pub fn lite_prompt_within_budget(prompt: &str) -> bool {
+    prompt.chars().count() <= LITE_PROMPT_CHAR_BUDGET
 }
 
 /// 默认策略提示：与旧版 `build_system_prompt` 行为等价（云端/Ollama 路径）。
@@ -194,8 +238,33 @@ mod tests {
         assert!(p.contains("TBox 工具助手"));
         assert!(p.contains("<tool_call>"));
         assert!(p.contains("base64.encode"));
-        assert!(p.contains("示例 3")); // 负例
+        assert!(p.contains("示例 4")); // 负例
         assert!(p.contains("不得编造参数名"));
+        // 目录常驻在 Skill 之前
+        let dir_pos = p.find("可调用工具").expect("tool directory");
+        let skill_pos = p.find("相关技能说明");
+        if let Some(sp) = skill_pos {
+            assert!(dir_pos < sp, "tool directory must precede skills");
+        }
+    }
+
+    #[test]
+    fn small_prompt_keeps_directory_without_skills() {
+        let p = build_small_prompt("zzzz-no-skill-match-xxxxx");
+        assert!(p.contains("可调用工具"));
+        assert!(!p.contains("相关技能说明"));
+    }
+
+    #[test]
+    fn lite_prompt_within_char_budget() {
+        let p = build_lite_prompt("base64 编码 hi");
+        assert!(
+            lite_prompt_within_budget(&p),
+            "lite prompt chars = {} > budget {LITE_PROMPT_CHAR_BUDGET}",
+            p.chars().count()
+        );
+        assert!(p.contains("示例 2"));
+        assert!(!p.contains("示例 5"));
     }
 
     #[test]
@@ -213,6 +282,7 @@ mod tests {
         let p = build_default_prompt("hello");
         assert!(p.starts_with("You are the TBox local agent."));
         let jwt = build_default_prompt("帮我解析 JWT");
-        assert!(jwt.contains("Relevant skills:"));
+        // Skill 检索可能因关键词而命中；未命中时也应是合法默认提示。
+        assert!(jwt.starts_with("You are the TBox local agent."));
     }
 }

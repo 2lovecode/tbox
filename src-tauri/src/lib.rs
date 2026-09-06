@@ -176,10 +176,22 @@ pub fn run() {
             commands::agent::send_chat_turn,
             commands::agent::cancel_chat_turn,
             commands::agent::get_engine_status,
+            commands::agent::get_llama_engine_log_settings,
+            commands::agent::save_llama_engine_log_settings,
+
+            // 用户记忆
+            commands::memory::list_user_memories,
+            commands::memory::delete_user_memory,
+            commands::memory::undo_user_memory_update,
+            commands::memory::get_memory_settings,
+            commands::memory::save_memory_settings_cmd,
 
             // 本地模型目录
             commands::model_catalog::list_local_models,
+            commands::model_catalog::update_local_model_prefs,
+            commands::model_catalog::clear_local_model,
             commands::model_catalog::start_model_download,
+            commands::model_catalog::start_custom_model_download,
             commands::model_catalog::cancel_model_download,
             commands::ollama_pull::start_ollama_pull,
             commands::ollama_pull::cancel_ollama_pull,

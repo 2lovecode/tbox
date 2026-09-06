@@ -45,11 +45,65 @@ impl Default for EngineStatus {
     }
 }
 
+/// GPU layers to offload. Prefer GPU whenever a backend was linked in.
+pub fn preferred_n_gpu_layers() -> u32 {
+    #[cfg(any(
+        feature = "cuda",
+        feature = "vulkan",
+        all(target_os = "macos", target_arch = "aarch64")
+    ))]
+    {
+        99
+    }
+    #[cfg(not(any(
+        feature = "cuda",
+        feature = "vulkan",
+        all(target_os = "macos", target_arch = "aarch64")
+    )))]
+    {
+        // No GPU backend in this build — keep layers on CPU.
+        0
+    }
+}
+
+/// Compile-time preferred accel backend label for settings / status.
+/// Priority: Metal (Apple Silicon) > CUDA feature > Vulkan feature > CPU.
+pub fn accel_backend_label() -> &'static str {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        "metal"
+    }
+    #[cfg(all(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        feature = "cuda"
+    ))]
+    {
+        "cuda"
+    }
+    #[cfg(all(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        not(feature = "cuda"),
+        feature = "vulkan"
+    ))]
+    {
+        "vulkan"
+    }
+    #[cfg(all(
+        not(all(target_os = "macos", target_arch = "aarch64")),
+        not(feature = "cuda"),
+        not(feature = "vulkan")
+    ))]
+    {
+        "cpu"
+    }
+}
+
 /// Commands sent to the inference thread.
 enum EngineCmd {
     /// Load (or reload) a GGUF. Reply carries the resulting status.
     Load {
         path: PathBuf,
+        n_ctx: u32,
         reply: Sender<Result<(), String>>,
     },
     /// Run one completion over (role, content) messages plus an optional
@@ -59,7 +113,10 @@ enum EngineCmd {
         messages: Vec<(String, String)>,
         tools_prompt: Option<String>,
         grammar: Option<String>,
+        sampling: SamplingParams,
         cancel: Arc<AtomicBool>,
+        /// 可选：逐 piece 推送（真流式 Live）。
+        token_tx: Option<std::sync::mpsc::Sender<String>>,
         reply: Sender<Result<String, String>>,
     },
     /// Tell the inference thread to free the loaded model and the backend
@@ -74,6 +131,38 @@ enum EngineCmd {
     /// `EXC_CRASH (SIGABRT)` reported via `__cxa_finalize_ranges` in the
     /// `tbox-*.ips` captures under `~/Library/Logs/DiagnosticReports/`.
     Shutdown,
+}
+
+/// Sampling / context knobs resolved from the active LLM profile.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SamplingParams {
+    pub temperature: f32,
+    pub top_p: f32,
+    pub max_tokens: u32,
+    pub n_ctx: u32,
+}
+
+impl SamplingParams {
+    pub fn from_config(cfg: &crate::commands::llm::LlmConfig) -> Self {
+        Self {
+            temperature: cfg.effective_temperature(),
+            top_p: cfg.effective_top_p(),
+            max_tokens: cfg.effective_max_tokens(),
+            n_ctx: cfg.effective_n_ctx(),
+        }
+    }
+
+    pub fn defaults() -> Self {
+        use crate::commands::llm::{
+            DEFAULT_MAX_TOKENS, DEFAULT_N_CTX, DEFAULT_TEMPERATURE, DEFAULT_TOP_P,
+        };
+        Self {
+            temperature: DEFAULT_TEMPERATURE,
+            top_p: DEFAULT_TOP_P,
+            max_tokens: DEFAULT_MAX_TOKENS,
+            n_ctx: DEFAULT_N_CTX,
+        }
+    }
 }
 
 /// Owned llama.cpp resources for one loaded GGUF, held on the inference
@@ -147,6 +236,8 @@ pub struct EmbeddedEngine {
     join: Mutex<Option<std::thread::JoinHandle<()>>>,
     /// The model path currently loaded / loading (guards redundant loads).
     loaded_path: Mutex<Option<PathBuf>>,
+    /// Context size used for the currently loaded model.
+    loaded_n_ctx: Mutex<Option<u32>>,
 }
 
 static ENGINE: OnceLock<EmbeddedEngine> = OnceLock::new();
@@ -158,6 +249,7 @@ pub fn engine() -> &'static EmbeddedEngine {
             tx: Mutex::new(None),
             join: Mutex::new(None),
             loaded_path: Mutex::new(None),
+            loaded_n_ctx: Mutex::new(None),
         };
         engine.spawn_thread();
         engine
@@ -171,6 +263,8 @@ impl EmbeddedEngine {
         let handle = std::thread::Builder::new()
             .name("tbox-llm-engine".into())
             .spawn(move || {
+                // 先截获 llama/ggml 日志，再 init backend，避免 load 噪声打到 stderr。
+                super::llama_log::install();
                 let mut backend: Option<LlamaBackend> = LlamaBackend::init().ok();
                 let mut loaded: Option<LoadedModel> = None;
                 while let Ok(cmd) = rx.recv() {
@@ -252,11 +346,12 @@ impl EmbeddedEngine {
         emit_status(&s);
     }
 
-    /// Load a GGUF if not already the loaded model. Returns the model name.
-    pub fn ensure_loaded(&self, path: &PathBuf) -> Result<String, String> {
+    /// Load a GGUF if not already the loaded model with the same n_ctx.
+    pub fn ensure_loaded(&self, path: &PathBuf, n_ctx: u32) -> Result<String, String> {
         {
             let loaded = self.loaded_path.lock().unwrap();
-            if loaded.as_deref() == Some(path.as_path()) {
+            let loaded_n = *self.loaded_n_ctx.lock().unwrap();
+            if loaded.as_deref() == Some(path.as_path()) && loaded_n == Some(n_ctx) {
                 if let EngineStatus::Ready { model } = self.status() {
                     return Ok(model);
                 }
@@ -272,12 +367,14 @@ impl EmbeddedEngine {
         let (reply_tx, reply_rx) = channel();
         let cmd = EngineCmd::Load {
             path: path.clone(),
+            n_ctx,
             reply: reply_tx,
         };
         self.send(cmd)?;
         match reply_rx.recv_timeout(Duration::from_secs(120)) {
             Ok(Ok(())) => {
                 *self.loaded_path.lock().unwrap() = Some(path.clone());
+                *self.loaded_n_ctx.lock().unwrap() = Some(n_ctx);
                 self.set_status(EngineStatus::Ready {
                     model: model_name.clone(),
                 });
@@ -302,19 +399,69 @@ impl EmbeddedEngine {
         messages: Vec<(String, String)>,
         tools_prompt: Option<String>,
         grammar: Option<String>,
+        sampling: SamplingParams,
         cancel: Arc<AtomicBool>,
     ) -> Result<String, String> {
+        self.complete_chat_streaming(messages, tools_prompt, grammar, sampling, cancel, None)
+    }
+
+    /// 与 `complete_chat` 相同，但可通过 `on_token` 接收增量 piece。
+    pub fn complete_chat_streaming(
+        &self,
+        messages: Vec<(String, String)>,
+        tools_prompt: Option<String>,
+        grammar: Option<String>,
+        sampling: SamplingParams,
+        cancel: Arc<AtomicBool>,
+        mut on_token: Option<&mut dyn FnMut(String)>,
+    ) -> Result<String, String> {
         let (reply_tx, reply_rx) = channel();
+        let (token_tx, token_rx) = if on_token.is_some() {
+            let (tx, rx) = std::sync::mpsc::channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
         self.send(EngineCmd::Complete {
             messages,
             tools_prompt,
             grammar,
-            cancel,
+            sampling,
+            cancel: cancel.clone(),
+            token_tx,
             reply: reply_tx,
         })?;
-        match reply_rx.recv_timeout(Duration::from_secs(300)) {
-            Ok(r) => r,
-            Err(_) => Err("engine inference timeout".into()),
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            if let Some(rx) = token_rx.as_ref() {
+                while let Ok(piece) = rx.try_recv() {
+                    if let Some(cb) = on_token.as_mut() {
+                        cb(piece);
+                    }
+                }
+            }
+            match reply_rx.try_recv() {
+                Ok(r) => {
+                    if let Some(rx) = token_rx.as_ref() {
+                        while let Ok(piece) = rx.try_recv() {
+                            if let Some(cb) = on_token.as_mut() {
+                                cb(piece);
+                            }
+                        }
+                    }
+                    return r;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    if std::time::Instant::now() > deadline {
+                        return Err("engine inference timeout".into());
+                    }
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return Err("engine reply channel disconnected".into());
+                }
+            }
         }
     }
 
@@ -331,14 +478,16 @@ impl EmbeddedEngine {
 
 fn handle_cmd(backend: &mut Option<LlamaBackend>, loaded: &mut Option<LoadedModel>, cmd: EngineCmd) {
     match cmd {
-        EngineCmd::Load { path, reply } => {
-            let _ = reply.send(load_model(backend, path, loaded));
+        EngineCmd::Load { path, n_ctx, reply } => {
+            let _ = reply.send(load_model(backend, path, n_ctx, loaded));
         }
         EngineCmd::Complete {
             messages,
             tools_prompt,
             grammar,
+            sampling,
             cancel,
+            token_tx,
             reply,
         } => {
             let res = match loaded.as_mut() {
@@ -348,7 +497,9 @@ fn handle_cmd(backend: &mut Option<LlamaBackend>, loaded: &mut Option<LoadedMode
                     &messages,
                     tools_prompt.as_deref(),
                     grammar.as_deref(),
+                    sampling,
                     cancel.as_ref(),
+                    token_tx.as_ref(),
                 ),
             };
             let _ = reply.send(res);
@@ -373,16 +524,16 @@ fn handle_cmd(backend: &mut Option<LlamaBackend>, loaded: &mut Option<LoadedMode
 fn load_model(
     backend: &Option<LlamaBackend>,
     path: PathBuf,
+    n_ctx: u32,
     loaded: &mut Option<LoadedModel>,
 ) -> Result<(), String> {
     let backend = backend
         .as_ref()
         .ok_or_else(|| "llama backend init failed".to_string())?;
-    // Metal on Apple Silicon when compiled in; harmless elsewhere.
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    let params = LlamaModelParams::default().with_n_gpu_layers(99);
-    #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
-    let params = LlamaModelParams::default();
+    // Prefer GPU when a backend was compiled in: Metal (Apple Silicon),
+    // or optional `cuda` / `vulkan` features on other platforms.
+    let n_gpu = crate::agent::embedded_engine::preferred_n_gpu_layers();
+    let params = LlamaModelParams::default().with_n_gpu_layers(n_gpu);
 
     let model = LlamaModel::load_from_file(backend, &path, &params)
         .map_err(|e| format!("load gguf failed: {e:?}"))?;
@@ -399,9 +550,10 @@ fn load_model(
     let n_threads = std::thread::available_parallelism()
         .map(|n| n.get().saturating_sub(1).max(1) as i32)
         .unwrap_or(4);
+    let ctx_n = n_ctx.max(512);
     let ctx_params = LlamaContextParams::default()
-        .with_n_ctx(std::num::NonZeroU32::new(4096))
-        .with_n_batch(4096) // 与 n_ctx 一致：系统提示（含 Skill）可超过 2048 token
+        .with_n_ctx(std::num::NonZeroU32::new(ctx_n))
+        .with_n_batch(ctx_n) // 与 n_ctx 一致：系统提示（含 Skill）可超过 2048 token
         .with_n_threads(n_threads);
     let ctx = model_ref
         .new_context(backend, ctx_params)
@@ -419,15 +571,15 @@ fn load_model(
 /// 采样链：默认 top-k/top-p/temp；grammar 非空时插入 grammar 过滤器
 /// （仍以 dist 结尾）；grammar 初始化失败降级为默认链（spec：约束解码
 /// 是增强项，可降级，功能不因此不可用）。
-fn build_sampler(model: &LlamaModel, grammar: Option<&str>) -> LlamaSampler {
+fn build_sampler(model: &LlamaModel, grammar: Option<&str>, temperature: f32, top_p: f32) -> LlamaSampler {
     let base = |g: Option<LlamaSampler>| -> LlamaSampler {
         let mut chain = Vec::new();
         if let Some(g) = g {
             chain.push(g);
         }
         chain.push(LlamaSampler::top_k(40));
-        chain.push(LlamaSampler::top_p(0.9, 1));
-        chain.push(LlamaSampler::temp(0.7));
+        chain.push(LlamaSampler::top_p(top_p, 1));
+        chain.push(LlamaSampler::temp(temperature));
         chain.push(LlamaSampler::dist(41));
         LlamaSampler::chain(chain, true)
     };
@@ -445,7 +597,9 @@ fn generate(
     messages: &[(String, String)],
     tools_prompt: Option<&str>,
     grammar: Option<&str>,
+    sampling: SamplingParams,
     cancel: &AtomicBool,
+    token_tx: Option<&std::sync::mpsc::Sender<String>>,
 ) -> Result<String, String> {
     let LoadedModel { ctx, model, n_ctx } = lm;
     let model = model.as_ref();
@@ -499,15 +653,15 @@ fn generate(
     // GGML_ASSERT(n_tokens_all <= cparams.n_batch) failed。
     // 使用保守的 1024 上限，避免与未来 n_batch 调整失配。
     const PROMPT_TOKEN_CAP: usize = 3072;
-    const MAX_NEW_TOKENS: usize = 1024;
+    let max_new_tokens = sampling.max_tokens.max(1) as usize;
     if tokens.len() > PROMPT_TOKEN_CAP {
         // 保留尾部（动态对话与工具结果），丢弃开头过长的系统提示。
         let overflow = tokens.len() - PROMPT_TOKEN_CAP;
         tokens.drain(..overflow);
     }
-    if tokens.len() + MAX_NEW_TOKENS >= *n_ctx as usize {
+    if tokens.len() + max_new_tokens >= *n_ctx as usize {
         // 防止单回合总长超 ctx（罕见：ctx 配得极小）
-        let overflow = tokens.len() + MAX_NEW_TOKENS - *n_ctx as usize + 1;
+        let overflow = tokens.len() + max_new_tokens - *n_ctx as usize + 1;
         if overflow < tokens.len() {
             tokens.drain(..overflow);
         }
@@ -517,7 +671,7 @@ fn generate(
     // top_k/temp only reshape the candidate set; without dist nothing is
     // ever selected and llama_sampler_sample asserts (cur_p.selected).
     // With a grammar the chain becomes [grammar, top_k, top_p, temp, dist].
-    let mut sampler = build_sampler(model, grammar);
+    let mut sampler = build_sampler(model, grammar, sampling.temperature, sampling.top_p);
 
     // The context (and its KV cache) is reused across turns — reset both so
     // the previous conversation's state cannot leak into this completion.
@@ -545,9 +699,9 @@ fn generate(
     // a single-token decode uses batch index 0.
     let mut pos = tokens.len() as i32;
     let mut sample_idx = last; // prompt batch: last index
-    let max_new_tokens = 1024usize; // 与上文 MAX_NEW_TOKENS 保持一致
     let mut gen_batch = LlamaBatch::new(1, 1);
     let mut gen_toks: Vec<LlamaToken> = Vec::with_capacity(max_new_tokens);
+    let mut emitted_utf8 = 0usize;
     for _ in 0..max_new_tokens {
         if cancel.load(Ordering::SeqCst) {
             break;
@@ -565,6 +719,17 @@ fn generate(
             .token_to_piece_bytes(tok, PIECE_BUF, /*special=*/ false, None)
             .map_err(|e| format!("detokenize failed: {e:?}"))?;
         out_bytes.extend_from_slice(&piece);
+        if let Some(tx) = token_tx {
+            let truncated = truncate_incomplete_utf8(out_bytes.clone());
+            if truncated.len() > emitted_utf8 {
+                if let Ok(s) = std::str::from_utf8(&truncated[emitted_utf8..]) {
+                    if !s.is_empty() {
+                        let _ = tx.send(s.to_string());
+                    }
+                    emitted_utf8 = truncated.len();
+                }
+            }
+        }
         gen_toks.push(tok);
         // 小模型退化复读保护：同一 n-gram 连续重复多次即停（如把工具
         // 清单逐项无限复读），避免撞 max tokens 上限才截断。
@@ -690,18 +855,14 @@ impl ChatModel for EmbeddedChatModel {
     }
 
     fn complete(&mut self, msgs: &[ModelMessage]) -> Result<ModelTurn, String> {
-        engine().ensure_loaded(&self.model_path)?;
+        let cfg = crate::commands::llm::get_llm_config();
+        let sampling = SamplingParams::from_config(&cfg);
+        engine().ensure_loaded(&self.model_path, sampling.n_ctx)?;
         self.cancel.store(false, Ordering::SeqCst);
-        // Qwen 文本协议：tool_calls / 工具结果序列化为文本
-        // （<tool_call> 块 / [tool result: name] 前缀）。
         let messages: Vec<(String, String)> = msgs
             .iter()
             .map(|m| (m.role.clone(), m.flatten_content()))
             .collect();
-        // 约束解码：策略默认对小模型档 disabled（design.md D3 + 任务 4.3
-        // 实测：grammar 反让 0.5B 意图命中率从 ~63% 跌至 ~12%）。可通过
-        // 切换 strategy.constrained()=true 或环境变量 `TBOX_DISABLE_TOOL_GRAMMAR=1`
-        // 反向（强制开启）再次评估；解析容错与 reask 仍提供结构保证。
         let grammar = crate::agent::harness::strategy_for(
             &self.backend_desc().backend,
             &self.backend_desc().model,
@@ -710,11 +871,63 @@ impl ChatModel for EmbeddedChatModel {
         .then(|| grammar_if_enabled())
         .flatten();
         let text =
-            engine().complete_chat(messages, None, grammar, self.cancel.clone())?;
+            engine().complete_chat(messages, None, grammar, sampling, self.cancel.clone())?;
         let (calls, rest) = crate::agent::harness::parse::parse_tool_calls(&text);
         if calls.is_empty() {
-            // 小模型无法分离思考 token：reasoning 留空（spec: 后端无思考
-            // 内容时为空不报错）。
+            Ok(ModelTurn::text(rest))
+        } else {
+            Ok(ModelTurn::ToolCalls(calls))
+        }
+    }
+
+    fn complete_streaming(
+        &mut self,
+        msgs: &[ModelMessage],
+        cancel: &AtomicBool,
+        on_delta: &mut dyn FnMut(super::llm::StreamDelta),
+    ) -> Result<ModelTurn, String> {
+        use super::llm::{StreamDelta, StreamMode};
+        let cfg = crate::commands::llm::get_llm_config();
+        let sampling = SamplingParams::from_config(&cfg);
+        engine().ensure_loaded(&self.model_path, sampling.n_ctx)?;
+        self.cancel.store(false, Ordering::SeqCst);
+        // 合并外部 cancel
+        if cancel.load(Ordering::SeqCst) {
+            self.cancel.store(true, Ordering::SeqCst);
+        }
+        let messages: Vec<(String, String)> = msgs
+            .iter()
+            .map(|m| (m.role.clone(), m.flatten_content()))
+            .collect();
+        let grammar = crate::agent::harness::strategy_for(
+            &self.backend_desc().backend,
+            &self.backend_desc().model,
+        )
+        .constrained()
+        .then(|| grammar_if_enabled())
+        .flatten();
+
+        on_delta(StreamDelta::Meta {
+            mode: StreamMode::Live,
+        });
+
+        let cancel_flag = self.cancel.clone();
+        let cancel_mirror = self.cancel.clone();
+        let text = engine().complete_chat_streaming(
+            messages,
+            None,
+            grammar,
+            sampling,
+            cancel_flag,
+            Some(&mut |piece| {
+                if cancel.load(Ordering::SeqCst) {
+                    cancel_mirror.store(true, Ordering::SeqCst);
+                }
+                on_delta(StreamDelta::Text { text: piece });
+            }),
+        )?;
+        let (calls, rest) = crate::agent::harness::parse::parse_tool_calls(&text);
+        if calls.is_empty() {
             Ok(ModelTurn::text(rest))
         } else {
             Ok(ModelTurn::ToolCalls(calls))

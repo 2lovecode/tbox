@@ -90,11 +90,14 @@ const deleteConversation = (id: string, event: Event) => {
   border-radius: var(--border-radius);
   padding: 16px;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-  height: fit-content;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  min-height: 420px;
+  overflow: hidden;
+  align-self: stretch;
 }
 
 .new-chat-btn {
@@ -160,10 +163,11 @@ const deleteConversation = (id: string, event: Event) => {
   margin: 0;
   padding: 0;
   overflow-y: auto;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  max-height: 360px;
 }
 
 .history-item {

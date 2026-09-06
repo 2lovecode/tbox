@@ -6,7 +6,7 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
-use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn, AgentError};
+use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn, AgentError, StreamMode};
 use crate::agent::r#loop::{run_agent, AgentEvent};
 
 pub const AGENT_EVENT: &str = "agent-event";
@@ -36,73 +36,71 @@ pub struct AgentEventPayload {
     pub result: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub count: Option<usize>,
+}
+
+fn empty_payload(conversation_id: String, event_type: &str) -> AgentEventPayload {
+    AgentEventPayload {
+        conversation_id,
+        event_type: event_type.into(),
+        text: None,
+        id: None,
+        args: None,
+        result: None,
+        message: None,
+        mode: None,
+        budget: None,
+        count: None,
+    }
 }
 
 fn wire_event(conversation_id: String, ev: AgentEvent) -> AgentEventPayload {
     match ev {
+        AgentEvent::StreamMeta { mode } => AgentEventPayload {
+            mode: Some(match mode {
+                StreamMode::Live => "live".into(),
+                StreamMode::Fallback => "fallback".into(),
+            }),
+            ..empty_payload(conversation_id, "stream_meta")
+        },
         AgentEvent::Reasoning { text } => AgentEventPayload {
-            conversation_id,
-            event_type: "reasoning".into(),
             text: Some(text),
-            id: None,
-            args: None,
-            result: None,
-            message: None,
+            ..empty_payload(conversation_id, "reasoning")
         },
         AgentEvent::Token { text } => AgentEventPayload {
-            conversation_id,
-            event_type: "token".into(),
             text: Some(text),
-            id: None,
-            args: None,
-            result: None,
-            message: None,
+            ..empty_payload(conversation_id, "token")
         },
         AgentEvent::ToolStart { id, args } => AgentEventPayload {
-            conversation_id,
-            event_type: "tool_start".into(),
-            text: None,
             id: Some(id),
             args: Some(args),
-            result: None,
-            message: None,
+            ..empty_payload(conversation_id, "tool_start")
         },
         AgentEvent::ToolEnd { id, result } => AgentEventPayload {
-            conversation_id,
-            event_type: "tool_end".into(),
-            text: None,
             id: Some(id),
-            args: None,
             result: Some(result),
-            message: None,
+            ..empty_payload(conversation_id, "tool_end")
+        },
+        AgentEvent::ContextBudget { budget } => AgentEventPayload {
+            budget: serde_json::to_value(&budget).ok(),
+            ..empty_payload(conversation_id, "context_budget")
+        },
+        AgentEvent::Compress { message, count } => AgentEventPayload {
+            message: Some(message),
+            count: Some(count),
+            ..empty_payload(conversation_id, "compress")
         },
         AgentEvent::Error { message } => AgentEventPayload {
-            conversation_id,
-            event_type: "error".into(),
-            text: None,
-            id: None,
-            args: None,
-            result: None,
             message: Some(message),
+            ..empty_payload(conversation_id, "error")
         },
-        AgentEvent::Interrupted => AgentEventPayload {
-            conversation_id,
-            event_type: "interrupted".into(),
-            text: None,
-            id: None,
-            args: None,
-            result: None,
-            message: None,
-        },
-        AgentEvent::Done => AgentEventPayload {
-            conversation_id,
-            event_type: "done".into(),
-            text: None,
-            id: None,
-            args: None,
-            result: None,
-            message: None,
-        },
+        AgentEvent::Interrupted => empty_payload(conversation_id, "interrupted"),
+        AgentEvent::Done => empty_payload(conversation_id, "done"),
     }
 }
 
@@ -258,5 +256,19 @@ pub fn get_engine_status() -> serde_json::Value {
     serde_json::json!({
         "engine": crate::agent::embedded_engine::engine().status(),
         "effectiveBackend": backend,
+        "accelBackend": crate::agent::embedded_engine::accel_backend_label(),
     })
+}
+
+#[tauri::command]
+pub fn get_llama_engine_log_settings() -> crate::agent::llama_log::LlamaEngineLogSettingsView {
+    crate::agent::llama_log::settings_view()
+}
+
+#[tauri::command]
+pub fn save_llama_engine_log_settings(
+    settings: crate::agent::llama_log::LlamaEngineLogSettings,
+) -> Result<crate::agent::llama_log::LlamaEngineLogSettingsView, String> {
+    crate::agent::llama_log::save_settings(settings)?;
+    Ok(crate::agent::llama_log::settings_view())
 }

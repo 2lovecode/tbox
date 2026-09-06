@@ -18,6 +18,11 @@ export interface ProfileDraft {
   protocol: LlmProtocolId;
   baseUrl: string;
   model: string;
+  /** 字符串便于清空=回退默认；空串表示未设置。 */
+  temperature: string;
+  topP: string;
+  maxTokens: string;
+  nCtx: string;
 }
 
 function emptyDraft(): ProfileDraft {
@@ -28,7 +33,22 @@ function emptyDraft(): ProfileDraft {
     protocol: 'openai_chat',
     baseUrl: '',
     model: '',
+    temperature: '',
+    topP: '',
+    maxTokens: '',
+    nCtx: '',
   };
+}
+
+function optNum(s: string): number | null {
+  const t = s.trim();
+  if (!t) return null;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : null;
+}
+
+function numToDraft(v: number | null | undefined): string {
+  return v == null ? '' : String(v);
 }
 
 export const useLlmStore = defineStore('llm', {
@@ -146,6 +166,10 @@ export const useLlmStore = defineStore('llm', {
         protocol: profile.protocol ?? 'openai_chat',
         baseUrl: profile.baseUrl,
         model: profile.model,
+        temperature: numToDraft(profile.temperature),
+        topP: numToDraft(profile.topP),
+        maxTokens: numToDraft(profile.maxTokens),
+        nCtx: numToDraft(profile.nCtx),
       };
       this.apiKeyDraft = '';
       this.testResult = null;
@@ -187,6 +211,17 @@ export const useLlmStore = defineStore('llm', {
           baseUrl: this.draft.baseUrl.trim(),
           model: this.draft.model.trim(),
           apiKey: trimmedKey.length > 0 ? trimmedKey : null,
+          temperature: optNum(this.draft.temperature),
+          topP: optNum(this.draft.topP),
+          maxTokens: (() => {
+            const n = optNum(this.draft.maxTokens);
+            return n == null ? null : Math.round(n);
+          })(),
+          nCtx: (() => {
+            if (this.draft.provider !== 'local') return null;
+            const n = optNum(this.draft.nCtx);
+            return n == null ? null : Math.round(n);
+          })(),
         };
         const snapshot = await invoke<LlmProfilesSnapshot>('save_llm_profile', { input });
         this.applySnapshot(snapshot);

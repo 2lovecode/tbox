@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "tbox",
-        "width": 1400,
-        "height": 1050
+        "width": 1200,
+        "height": 780
       }
     ],
     "security": {

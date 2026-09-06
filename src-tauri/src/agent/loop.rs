@@ -1,10 +1,20 @@
 //! Agent tool loop: harness strategy → model → dispatch → feed results;
 //! max 8 tool iterations with a bounded repair-and-reask budget.
 
+use super::compress::{
+    compress_runtime_tool_results, prepare_tool_result_runtime, CompressState,
+};
+use super::context_budget::{
+    budget_from_messages, resolve_context_limit, ContextBudget, DEFAULT_COMPRESS_THRESHOLD,
+};
 use super::harness;
-use super::llm::{ChatModel, ModelMessage, ModelTurn};
+use super::llm::{ChatModel, ModelMessage, ModelTurn, StreamDelta, StreamMode};
+use super::memory::{
+    extract_and_ingest_session_delta, load_memory_settings, memory_token_cap, retrieve_for_inject,
+};
 use super::registry;
-use crate::commands::conversation::{append_assistant_message_on, get_messages_on};
+use super::trajectory::TrajectoryStep;
+use crate::commands::conversation::{append_assistant_message_full, get_messages_on};
 use crate::db::open_connection;
 use rusqlite::Connection;
 use serde_json::Value;
@@ -17,10 +27,13 @@ pub const MAX_TOOL_ITERATIONS: usize = 8;
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AgentEvent {
+    StreamMeta { mode: StreamMode },
     Token { text: String },
     Reasoning { text: String },
     ToolStart { id: String, args: Value },
     ToolEnd { id: String, result: String },
+    ContextBudget { budget: ContextBudget },
+    Compress { message: String, count: usize },
     Error { message: String },
     Interrupted,
     Done,
@@ -62,7 +75,19 @@ pub fn run_agent_on(
     let repair_budget = strategy.repair_budget();
 
     let mut msgs = Vec::new();
-    msgs.push(ModelMessage::system(strategy.build_system_prompt(user_text)));
+    let mut system_prompt = strategy.build_system_prompt(user_text);
+    let mut memory_tokens = 0u32;
+    if load_memory_settings().auto_memory_enabled {
+        let cap = memory_token_cap(resolve_context_limit());
+        if let Ok((block, toks)) = retrieve_for_inject(conn, user_text, 8, cap) {
+            if !block.is_empty() {
+                system_prompt.push_str("\n\n");
+                system_prompt.push_str(&block);
+                memory_tokens = toks;
+            }
+        }
+    }
+    msgs.push(ModelMessage::system(system_prompt));
     msgs.extend(history_to_model_messages(conn, conv_id)?);
 
     let mut tool_iterations = 0usize;
@@ -72,60 +97,177 @@ pub fn run_agent_on(
     /// 连续相同签名调用达到此上限即视为卡住，提前结束回合。
     const STUCK_ROUNDS_LIMIT: usize = 2;
 
+    let mut trajectory: Vec<TrajectoryStep> = Vec::new();
+    let mut tools_for_persist: Vec<Value> = Vec::new();
+    let mut compress_state = CompressState::default();
+
     loop {
         if cancel.load(Ordering::SeqCst) {
-            let _ = append_assistant_message_on(conn, conv_id, "", None, None);
+            persist_partial(conn, conv_id, &trajectory, &tools_for_persist)?;
             emit(AgentEvent::Interrupted);
             return Ok(());
         }
 
-        let turn = match model.complete(&msgs) {
-            Ok(t) => t,
-            Err(e) => {
-                emit(AgentEvent::Error {
-                    message: e.clone(),
+        let budget = budget_from_messages(&msgs, memory_tokens, 0);
+        let _ = crate::commands::conversation::save_context_budget_on(conn, conv_id, &budget);
+        emit(AgentEvent::ContextBudget {
+            budget: budget.clone(),
+        });
+        match compress_runtime_tool_results(
+            &mut msgs,
+            &budget,
+            DEFAULT_COMPRESS_THRESHOLD,
+            &mut compress_state,
+        ) {
+            Ok(n) if n > 0 => {
+                emit(AgentEvent::Compress {
+                    message: format!("已压缩 {n} 条工具结果以控制上下文"),
+                    count: n,
                 });
-                return Err(e);
+                let budget2 = budget_from_messages(&msgs, memory_tokens, 0);
+                let _ = crate::commands::conversation::save_context_budget_on(conn, conv_id, &budget2);
+                emit(AgentEvent::ContextBudget { budget: budget2 });
+            }
+            Ok(_) => {}
+            Err(e) => {
+                emit(AgentEvent::Error { message: e });
+                // Continue without further compress attempts this turn
+            }
+        }
+
+        let mut think = super::llm::ThinkStreamParser::default();
+        let mut tool_filter = harness::parse::ToolCallStreamFilter::default();
+        let mut saw_meta = false;
+        let turn = {
+            let emit_ref = &mut emit;
+            let traj_ref = &mut trajectory;
+            match model.complete_streaming(&msgs, cancel, &mut |delta| {
+                match delta {
+                    StreamDelta::Meta { mode } => {
+                        saw_meta = true;
+                        emit_ref(AgentEvent::StreamMeta { mode });
+                    }
+                    StreamDelta::Reasoning { text } => {
+                        if text.is_empty() {
+                            return;
+                        }
+                        append_reasoning_step(traj_ref, &text);
+                        emit_ref(AgentEvent::Reasoning { text });
+                    }
+                    StreamDelta::Text { text } => {
+                        if text.is_empty() {
+                            return;
+                        }
+                        think.push(&text, &mut |d| match d {
+                            StreamDelta::Reasoning { text } => {
+                                append_reasoning_step(traj_ref, &text);
+                                emit_ref(AgentEvent::Reasoning { text });
+                            }
+                            StreamDelta::Text { text } => {
+                                tool_filter.push(&text, &mut |visible| {
+                                    if visible.is_empty() {
+                                        return;
+                                    }
+                                    append_text_step(traj_ref, &visible);
+                                    emit_ref(AgentEvent::Token { text: visible });
+                                });
+                            }
+                            StreamDelta::Meta { .. } => {}
+                        });
+                    }
+                }
+            }) {
+                Ok(t) => t,
+                Err(e) => {
+                    emit(AgentEvent::Error {
+                        message: e.clone(),
+                    });
+                    return Err(e);
+                }
             }
         };
 
+        if !saw_meta {
+            emit(AgentEvent::StreamMeta {
+                mode: StreamMode::Fallback,
+            });
+        }
+
+        let (parsed_reasoning, parsed_body) = think.finish(&mut |d| match d {
+            StreamDelta::Reasoning { text } => {
+                append_reasoning_step(&mut trajectory, &text);
+                emit(AgentEvent::Reasoning { text });
+            }
+            StreamDelta::Text { text } => {
+                tool_filter.push(&text, &mut |visible| {
+                    if visible.is_empty() {
+                        return;
+                    }
+                    append_text_step(&mut trajectory, &visible);
+                    emit(AgentEvent::Token { text: visible });
+                });
+            }
+            StreamDelta::Meta { .. } => {}
+        });
+        tool_filter.finish(&mut |visible| {
+            if visible.is_empty() {
+                return;
+            }
+            append_text_step(&mut trajectory, &visible);
+            emit(AgentEvent::Token { text: visible });
+        });
+
         match turn {
             ModelTurn::Text { text, reasoning } => {
-                // 内联 <think> 标签（Qwen/DeepSeek 风格）剥离为 reasoning，
-                // 与后端已分离的 reasoning（reasoning_content / thinking 块）合并。
-                let (inline_reasoning, body) = super::llm::split_think_tags(&text);
-                let reasoning = match (
+                let (inline_reasoning, body_from_tags) = super::llm::split_think_tags(&text);
+                let reasoning = merge_reasoning(
                     reasoning.filter(|r| !r.trim().is_empty()),
-                    inline_reasoning,
-                ) {
-                    (Some(a), Some(b)) => Some(format!("{a}\n{b}")),
-                    (r, i) => r.or(i),
+                    inline_reasoning.or(parsed_reasoning),
+                );
+                let mut body = if !parsed_body.is_empty() {
+                    parsed_body
+                } else {
+                    body_from_tags
                 };
+                body = harness::parse::strip_tool_call_markup(&body);
+                scrub_tool_call_text_from_trajectory(&mut trajectory);
 
-                // 分块流式发出：思考先于正文，均按块 emit（spec: Chunked
-                // Streaming Emission）；持久化仍写完整文本。
-                const CHUNK_CHARS: usize = 24;
-                if let Some(r) = reasoning.as_ref() {
-                    for chunk in super::llm::chunk_text(r, CHUNK_CHARS) {
-                        emit(AgentEvent::Reasoning { text: chunk });
+                // 若流式未推送任何正文/思考（极端空回合），按结果补发一次。
+                if trajectory_has_no_content(&trajectory) && (!body.is_empty() || reasoning.is_some())
+                {
+                    if let Some(r) = reasoning.as_ref() {
+                        append_reasoning_step(&mut trajectory, r);
+                        emit(AgentEvent::Reasoning { text: r.clone() });
+                    }
+                    if !body.is_empty() {
+                        append_text_step(&mut trajectory, &body);
+                        emit(AgentEvent::Token { text: body.clone() });
                     }
                 }
-                for chunk in super::llm::chunk_text(&body, CHUNK_CHARS) {
-                    emit(AgentEvent::Token { text: chunk });
-                }
-                append_assistant_message_on(
+
+                let tools_json = if tools_for_persist.is_empty() {
+                    None
+                } else {
+                    Some(serde_json::to_string(&tools_for_persist).unwrap_or_default())
+                };
+                let traj_json = serde_json::to_string(&trajectory).ok();
+                append_assistant_message_full(
                     conn,
                     conv_id,
                     &body,
-                    None,
+                    tools_json.as_deref(),
                     reasoning.as_deref(),
+                    traj_json.as_deref(),
                 )?;
+                // Non-fatal memory extract from this turn's user+assistant text
+                let delta = format!("{user_text}\n{body}");
+                let _ = extract_and_ingest_session_delta(conv_id, &delta);
                 emit(AgentEvent::Done);
                 return Ok(());
             }
             ModelTurn::ToolCalls(calls) => {
-                // 重复调用守卫：连续 N 轮发起相同（按 name+args 签名）的调用
-                // 是小模型「卡住」的明确信号，提前结束比硬撞 8 轮上限更友好。
+                // 工具轮：丢掉已泄漏到轨迹的 tool_call 正文，工具不算对话输出
+                scrub_tool_call_text_from_trajectory(&mut trajectory);
                 let signature = calls
                     .iter()
                     .map(|c| format!("{}:{}", c.name, c.arguments))
@@ -143,6 +285,8 @@ pub fn run_agent_on(
                         conv_id,
                         &calls,
                         "模型重复发起相同的工具调用，疑似陷入循环。已基于最近一次结果给出说明。",
+                        &mut trajectory,
+                        &tools_for_persist,
                         &mut emit,
                     );
                 }
@@ -155,25 +299,22 @@ pub fn run_agent_on(
                         &format!(
                             "已连续发起 {MAX_TOOL_ITERATIONS} 轮工具调用但模型未给出总结回复。基于最近一次结果给出说明。"
                         ),
+                        &mut trajectory,
+                        &tools_for_persist,
                         &mut emit,
                     );
                 }
                 tool_iterations += 1;
 
-                // 协议配对：先回放 assistant 的 tool_calls 消息，再逐个
-                // 回填 role=tool 结果（缺失配对会让模型重复发起调用）。
                 msgs.push(ModelMessage::assistant_tool_calls(calls.clone()));
 
                 let mut any_success = false;
-                let mut last_results: Vec<(String, String)> = Vec::new();
                 for call in &calls {
                     let tool_id = call.name.clone();
                     emit(AgentEvent::ToolStart {
                         id: tool_id.clone(),
                         args: call.arguments.clone(),
                     });
-                    // dispatch 前校验：未注册给出相近工具名建议；参数不合
-                    // schema 不触发底层 command，错误回填进 reask 循环。
                     let result = match harness::parse::validate_call(
                         &call.name,
                         &call.arguments,
@@ -187,21 +328,36 @@ pub fn run_agent_on(
                         Err(e) => e,
                     };
                     emit(AgentEvent::ToolEnd {
-                        id: tool_id,
+                        id: tool_id.clone(),
                         result: result.clone(),
                     });
-                    last_results.push((call.name.clone(), result.clone()));
+                    trajectory.push(TrajectoryStep::Tool {
+                        id: tool_id.clone(),
+                        args: call.arguments.clone(),
+                        result: Some(result.clone()),
+                        status: if any_success && result != "" {
+                            "done".into()
+                        } else {
+                            "done".into()
+                        },
+                    });
+                    tools_for_persist.push(serde_json::json!({
+                        "id": tool_id,
+                        "args": call.arguments,
+                        "result": result,
+                        "status": "done",
+                    }));
+                    // Runtime gets truncated/compressed view; Audit trajectory keeps full result
+                    let runtime_result = prepare_tool_result_runtime(&result);
                     msgs.push(ModelMessage::tool_result(
                         call.id.clone(),
                         call.name.clone(),
-                        result,
+                        runtime_result,
                     ));
                 }
 
                 if !any_success {
                     if repair_rounds >= repair_budget {
-                        // 修复预算耗尽：按既有语义回填最终错误并生成文字
-                        // 说明（spec: Repair-and-reask Loop），应用不崩溃。
                         return finish_with_explanation(
                             conn,
                             conv_id,
@@ -209,6 +365,8 @@ pub fn run_agent_on(
                             &format!(
                                 "工具调用连续失败，修复重试预算（{repair_budget} 次）已耗尽。请检查请求内容或换一种表述后重试。"
                             ),
+                            &mut trajectory,
+                            &tools_for_persist,
                             &mut emit,
                         );
                     }
@@ -219,6 +377,104 @@ pub fn run_agent_on(
     }
 }
 
+fn scrub_tool_call_text_from_trajectory(traj: &mut Vec<TrajectoryStep>) {
+    for step in traj.iter_mut() {
+        if let TrajectoryStep::Text { text } = step {
+            *text = harness::parse::strip_tool_call_markup(text);
+        }
+    }
+    traj.retain(|s| !matches!(s, TrajectoryStep::Text { text } if text.trim().is_empty()));
+}
+
+fn merge_reasoning(a: Option<String>, b: Option<String>) -> Option<String> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(format!("{x}\n{y}")),
+        (r, i) => r.or(i),
+    }
+}
+
+fn append_reasoning_step(traj: &mut Vec<TrajectoryStep>, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(TrajectoryStep::Reasoning { text: t }) = traj.last_mut() {
+        t.push_str(text);
+    } else {
+        traj.push(TrajectoryStep::Reasoning {
+            text: text.to_string(),
+        });
+    }
+}
+
+fn append_text_step(traj: &mut Vec<TrajectoryStep>, text: &str) {
+    if text.is_empty() {
+        return;
+    }
+    if let Some(TrajectoryStep::Text { text: t }) = traj.last_mut() {
+        t.push_str(text);
+    } else {
+        traj.push(TrajectoryStep::Text {
+            text: text.to_string(),
+        });
+    }
+}
+
+fn trajectory_has_no_content(traj: &[TrajectoryStep]) -> bool {
+    !traj.iter().any(|s| {
+        matches!(
+            s,
+            TrajectoryStep::Reasoning { .. } | TrajectoryStep::Text { .. }
+        )
+    })
+}
+
+fn persist_partial(
+    conn: &Connection,
+    conv_id: &str,
+    trajectory: &[TrajectoryStep],
+    tools: &[Value],
+) -> Result<(), String> {
+    let body = trajectory
+        .iter()
+        .filter_map(|s| match s {
+            TrajectoryStep::Text { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("");
+    let reasoning = trajectory
+        .iter()
+        .filter_map(|s| match s {
+            TrajectoryStep::Reasoning { text } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tools_json = if tools.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(tools).unwrap_or_default())
+    };
+    let traj_json = if trajectory.is_empty() {
+        None
+    } else {
+        serde_json::to_string(trajectory).ok()
+    };
+    append_assistant_message_full(
+        conn,
+        conv_id,
+        &body,
+        tools_json.as_deref(),
+        if reasoning.is_empty() {
+            None
+        } else {
+            Some(reasoning.as_str())
+        },
+        traj_json.as_deref(),
+    )?;
+    Ok(())
+}
+
 /// 工具循环在以下情况被调用来「软退出」：超过最大轮次、修复预算耗尽、
 /// 或小模型陷入重复调用循环。把工具结果摘要成一段说明文本，作为
 /// assistant 最终回复持久化（不再只发 Error 事件被前端当 toast 处理）。
@@ -227,6 +483,8 @@ fn finish_with_explanation(
     conv_id: &str,
     calls: &[crate::agent::llm::ToolCall],
     prefix: &str,
+    trajectory: &mut Vec<TrajectoryStep>,
+    tools_for_persist: &[Value],
     emit: &mut dyn FnMut(AgentEvent),
 ) -> Result<(), String> {
     let mut body = prefix.to_string();
@@ -240,8 +498,22 @@ fn finish_with_explanation(
             ));
         }
     }
-    append_assistant_message_on(conn, conv_id, &body, None, None)?;
+    append_text_step(trajectory, &body);
     emit(AgentEvent::Token { text: body.clone() });
+    let tools_json = if tools_for_persist.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_string(tools_for_persist).unwrap_or_default())
+    };
+    let traj_json = serde_json::to_string(trajectory).ok();
+    append_assistant_message_full(
+        conn,
+        conv_id,
+        &body,
+        tools_json.as_deref(),
+        None,
+        traj_json.as_deref(),
+    )?;
     emit(AgentEvent::Done);
     Ok(())
 }
@@ -343,27 +615,33 @@ mod tests {
         let ev = events.lock().unwrap();
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Token { .. })));
         assert!(ev.iter().any(|e| matches!(e, AgentEvent::Done)));
+        assert!(ev.iter().any(|e| {
+            matches!(
+                e,
+                AgentEvent::StreamMeta {
+                    mode: StreamMode::Fallback
+                }
+            )
+        }));
+        assert!(msgs[1].trajectory_json.is_some());
     }
 
-    /// 回归：assistant tool_calls 消息必须与 role=tool 结果配对回填，
-    /// 否则模型看不到自己的调用而重复发起（exceeded max tool iterations）。
-    #[test]
     /// 回归：超过 MAX_TOOL_ITERATIONS 时不再 emit Error 报错，而是把工具
-/// 结果摘要成 assistant 文本回复持久化，让对话有完整收尾。
-#[test]
-fn max_iterations_soft_exit_persists_assistant_message() {
-    let db = test_db();
-    let (conv, _) = append_user_message_on(&db, None, "loop cap").unwrap();
-    let mut model = Scripted::new((0..MAX_TOOL_ITERATIONS + 1).map(|i| {
-        ModelTurn::ToolCalls(vec![ToolCall {
-            id: format!("c{i}"),
-            name: "base64.encode".into(),
-            arguments: json!({"input": format!("x{i}")}),
-        }])
-    }).chain(std::iter::once(ModelTurn::text("never"))).collect());
-    let cancel = AtomicBool::new(false);
-    let (mut emit, events) = collect_events();
-    run_agent_on(&db, &mut model, &conv.id, "loop cap", &cancel, &mut emit).unwrap();
+    /// 结果摘要成 assistant 文本回复持久化，让对话有完整收尾。
+    #[test]
+    fn max_iterations_soft_exit_persists_assistant_message() {
+        let db = test_db();
+        let (conv, _) = append_user_message_on(&db, None, "loop cap").unwrap();
+        let mut model = Scripted::new((0..MAX_TOOL_ITERATIONS + 1).map(|i| {
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: format!("c{i}"),
+                name: "base64.encode".into(),
+                arguments: json!({"input": format!("x{i}")}),
+            }])
+        }).chain(std::iter::once(ModelTurn::text("never"))).collect());
+        let cancel = AtomicBool::new(false);
+        let (mut emit, events) = collect_events();
+        run_agent_on(&db, &mut model, &conv.id, "loop cap", &cancel, &mut emit).unwrap();
 
     let msgs = get_messages_on(&db, &conv.id).unwrap();
     let last = msgs.last().expect("assistant message persisted");
@@ -418,7 +696,8 @@ fn stuck_round_signature_exits_early_with_explanation() {
     assert!(!evs.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
 }
 
-fn tool_call_roundtrip_paired_in_context() {
+    #[test]
+    fn tool_call_roundtrip_paired_in_context() {
         let db = test_db();
         let (conv, _) = append_user_message_on(&db, None, "encode hi").unwrap();
         let mut model = Scripted::new(vec![
@@ -447,6 +726,39 @@ fn tool_call_roundtrip_paired_in_context() {
         assert_eq!(last.role, "tool");
         assert_eq!(last.tool_call_id.as_deref(), Some("call_1"));
         assert_eq!(last.tool_name.as_deref(), Some("base64.encode"));
+    }
+
+    #[test]
+    fn one_tool_call_persists_trajectory_order() {
+        let db = test_db();
+        let user_text = "base64 encode hi";
+        let (conv, _) = append_user_message_on(&db, None, user_text).unwrap();
+        let mut model = Scripted::new(vec![
+            ModelTurn::ToolCalls(vec![ToolCall {
+                id: "c1".into(),
+                name: "base64.encode".into(),
+                arguments: json!({"input": "hi"}),
+            }]),
+            ModelTurn::text("done"),
+        ]);
+        let cancel = AtomicBool::new(false);
+        let (mut emit, _) = collect_events();
+        run_agent_on(&db, &mut model, &conv.id, user_text, &cancel, &mut emit).unwrap();
+        let msgs = get_messages_on(&db, &conv.id).unwrap();
+        let last = msgs.last().unwrap();
+        let traj = last.trajectory_json.as_ref().expect("trajectory stored");
+        let steps: Vec<serde_json::Value> = serde_json::from_str(traj).unwrap();
+        assert!(
+            steps.iter().any(|s| s["type"] == "tool" && s["id"] == "base64.encode"),
+            "tool step in trajectory"
+        );
+        assert!(
+            steps.iter().any(|s| s["type"] == "text"),
+            "text step in trajectory"
+        );
+        let tool_idx = steps.iter().position(|s| s["type"] == "tool").unwrap();
+        let text_idx = steps.iter().position(|s| s["type"] == "text").unwrap();
+        assert!(tool_idx < text_idx, "tool before final text");
     }
 
     #[test]

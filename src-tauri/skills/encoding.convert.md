@@ -5,6 +5,11 @@ keywords: url, URL, encode, decode, percent, 百分号, 编码, 解码, urlencod
 
 # URL 编解码
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 `encoding.convert` 对字符串做 URL percent-encode（非字母数字字符全部转 `%XX`）。
 参数：`input` — 待编码的字符串。
 

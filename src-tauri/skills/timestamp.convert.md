@@ -5,6 +5,11 @@ keywords: timestamp, 时间戳, unix, epoch, 秒, 毫秒, ISO, RFC3339, 转换, 
 
 # 时间戳转换
 
+## 何时使用 / 何时不用
+
+- **用**：用户请求与本工具能力描述一致时
+- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+
 `timestamp.convert` 在 Unix 秒/毫秒时间戳与 ISO-8601 字符串之间互转。
 参数：
 - `input` — Unix 秒/毫秒时间戳数字，或 ISO/RFC3339 时间字符串

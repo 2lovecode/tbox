@@ -17,13 +17,38 @@ export interface ChatMessage {
   tool_calls_json: string | null;
   /** 思考/推理内容（模型未提供则无该字段） */
   reasoning?: string;
+  /** 有序轨迹 JSON（缺省时前端合成） */
+  trajectory_json?: string | null;
   created_at: number;
+}
+
+/** Last persisted context-budget snapshot (camelCase from Rust). */
+export interface ContextBudgetSnapshot {
+  used: number;
+  limit: number;
+  ratio: number;
+  nearLimit?: boolean;
 }
 
 const LAST_ACTIVE_KEY = 'tbox.chat.lastActiveId';
 
 function newDraftId(): string {
   return `draft-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function parseBudget(raw: unknown): ContextBudgetSnapshot | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const b = raw as Record<string, unknown>;
+  const used = Number(b.used);
+  const limit = Number(b.limit);
+  const ratio = Number(b.ratio);
+  if (!Number.isFinite(used) || !Number.isFinite(limit) || limit <= 0) return null;
+  return {
+    used,
+    limit,
+    ratio: Number.isFinite(ratio) ? ratio : used / limit,
+    nearLimit: !!(b.nearLimit ?? b.near_limit),
+  };
 }
 
 /**
@@ -36,6 +61,8 @@ export const useConversationsStore = defineStore('conversations', {
     activeId: null as string | null,
     draftId: null as string | null,
     messages: [] as ChatMessage[],
+    /** Last context budget for the active conversation (from DB snapshot). */
+    contextBudget: null as ContextBudgetSnapshot | null,
     isLoadingList: false,
     isLoadingMessages: false,
     isSending: false,
@@ -50,6 +77,7 @@ export const useConversationsStore = defineStore('conversations', {
       this.draftId = newDraftId();
       this.activeId = null;
       this.messages = [];
+      this.contextBudget = null;
       this.lastError = null;
       try {
         sessionStorage.removeItem(LAST_ACTIVE_KEY);
@@ -76,10 +104,16 @@ export const useConversationsStore = defineStore('conversations', {
       this.lastError = null;
       this.draftId = null;
       this.activeId = id;
+      this.contextBudget = null;
       try {
-        this.messages = await invoke<ChatMessage[]>('get_conversation_messages', {
+        const thread = await invoke<{
+          messages: ChatMessage[];
+          contextBudget?: ContextBudgetSnapshot | null;
+        }>('get_conversation_messages', {
           conversationId: id,
         });
+        this.messages = thread.messages ?? [];
+        this.contextBudget = parseBudget(thread.contextBudget);
         try {
           sessionStorage.setItem(LAST_ACTIVE_KEY, id);
         } catch {
@@ -89,6 +123,7 @@ export const useConversationsStore = defineStore('conversations', {
         console.error('[conversations] open failed:', error);
         this.lastError = error instanceof Error ? error.message : String(error);
         this.messages = [];
+        this.contextBudget = null;
       } finally {
         this.isLoadingMessages = false;
       }
