@@ -160,35 +160,6 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Generate release notes
-        id: notes
-        shell: bash
-        run: |
-          CURRENT="${{ github.ref_name }}"
-          PREV_TAG="$(git tag --sort=-version:refname | grep -vFx "$CURRENT" | head -n 1 || true)"
-
-          if [ -n "$PREV_TAG" ]; then
-            RANGE="$PREV_TAG..$CURRENT"
-            echo "## Changes since $PREV_TAG" > /tmp/notes.md
-          else
-            RANGE="HEAD"
-            echo "## First release" > /tmp/notes.md
-          fi
-
-          echo >> /tmp/notes.md
-          # `git log --pretty=format` omits a trailing newline; without it the
-          # GITHUB_OUTPUT heredoc closer (`EOF`) glues to the last line and fails.
-          {
-            git log --pretty=format:'- %s (%an)' --max-count=100 "$RANGE"
-            printf '\n'
-          } >> /tmp/notes.md
-
-          {
-            echo 'body<<EOF'
-            cat /tmp/notes.md
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
       - name: Build Tauri app + draft release assets
         uses: tauri-apps/tauri-action@v0
         env:
@@ -199,7 +170,8 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'tbox v__VERSION__'
-          releaseBody: ${{ steps.notes.outputs.body }}
+          # Avoid custom GITHUB_OUTPUT heredocs (fragile with git-log newlines).
+          generateReleaseNotes: true
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           args: ${{ matrix.args }}
