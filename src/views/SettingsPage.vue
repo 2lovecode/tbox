@@ -9,6 +9,7 @@ import {
 import LlmSettingsPanel from '@/components/settings/LlmSettingsPanel.vue';
 import GeneralSettingsPanel from '@/components/settings/GeneralSettingsPanel.vue';
 import MemorySettingsPanel from '@/components/settings/MemorySettingsPanel.vue';
+import SkillSettingsPanel from '@/components/settings/SkillSettingsPanel.vue';
 import AboutSettingsPanel from '@/components/settings/AboutSettingsPanel.vue';
 
 const route = useRoute();
@@ -68,6 +69,7 @@ function goBack() {
       <main class="settings-content">
         <LlmSettingsPanel v-if="section === 'llm'" />
         <MemorySettingsPanel v-else-if="section === 'memory'" />
+        <SkillSettingsPanel v-else-if="section === 'skills'" />
         <GeneralSettingsPanel v-else-if="section === 'general'" />
         <AboutSettingsPanel v-else />
       </main>

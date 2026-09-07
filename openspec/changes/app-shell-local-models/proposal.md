@@ -4,7 +4,7 @@
 
 ## What Changes
 
-- 应用壳：窗口内容适应视口，禁止整页滚动；侧栏历史与聊天消息列表等模块内部滚动。
+- 应用壳：窗口内容适应视口，禁止整页滚动；侧栏历史、聊天消息列表与工具箱列表等模块内部滚动。
 - 本地引擎日志设置从 LLM 面板迁到「通用」。
 - 本地已安装模型：可多选「可用」；切换器仅列可用项；清除默认不删文件，可选删盘。
 - 每模型可配显示名与预设 icon；未配时显示名用目录默认，icon 用 local 提供方图标。
@@ -23,5 +23,5 @@
 
 ## Impact
 
-- 前端：`App.vue` 布局、`HomePage`/`SideBar`、`GeneralSettingsPanel`、`LlmSettingsPanel`、`ModelSwitcher`、`ProfileEditorDialog`。
+- 前端：`App.vue` 布局、`HomePage`/`SideBar`、`ToolboxPage`、`GeneralSettingsPanel`、`LlmSettingsPanel`、`ModelSwitcher`、`ProfileEditorDialog`。
 - Rust：`model_catalog` 偏好文件、list/clear/update commands；`enabled_model_path` 尊重启用集与当前选中。

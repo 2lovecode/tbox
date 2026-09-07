@@ -176,14 +176,14 @@ fn create_all_tables(conn: &Connection) -> Result<()> {
         (6, "代码格式化", "美化您的代码，支持多种编程语言，提高代码可读性和规范性。", "fas fa-code", "linear-gradient(135deg, #7209b7, #560bad)"),
         (7, "文件恢复工具", "恢复误删除的文件，支持多种文件系统和存储设备。", "fas fa-undo", "linear-gradient(135deg, #3a0ca3, #4cc9f0)"),
         (8, "网络测速", "测试您的网络下载、上传速度和延迟，提供详细分析报告。", "fas fa-wifi", "linear-gradient(135deg, #4361ee, #3a0ca3)"),
-        (9, "JSON处理工具", "JSON美化、压缩、转义、去转义、验证和信息查看等实用功能。", "fas fa-brackets-curly", "linear-gradient(135deg, #06ffa5, #00d4ff)"),
+        (9, "JSON处理工具", "JSON美化、压缩、转义、去转义、验证和信息查看等实用功能。", "fas fa-code", "linear-gradient(135deg, #06ffa5, #00d4ff)"),
         (10, "Base64工具", "Base64编码和解码工具，支持中文字符和各种格式。", "fas fa-exchange-alt", "linear-gradient(135deg, #ffd60a, #ff9500)"),
         (11, "哈希生成器", "生成MD5、SHA-1、SHA-256等多种哈希值，用于数据校验和安全验证。", "fas fa-hashtag", "linear-gradient(135deg, #7b2cbf, #9d4edd)"),
         // 新增工具
         (12, "JSON转实体类", "将JSON自动转换为Java、C#、Go、Python、TypeScript实体类。", "fas fa-file-code", "linear-gradient(135deg, #4361ee, #4895ef)"),
         (13, "JSON对比工具", "对比两个JSON的差异，高亮显示新增、删除和修改的字段。", "fas fa-not-equal", "linear-gradient(135deg, #f72585, #b5179e)"),
         (14, "JWT工具", "解析和生成JWT Token，支持签名验证。", "fas fa-key", "linear-gradient(135deg, #4cc9f0, #4895ef)"),
-        (15, "正则表达式测试", "实时测试正则表达式，查看匹配结果。", "fas fa-regexp", "linear-gradient(135deg, #7209b7, #560bad)"),
+        (15, "正则表达式测试", "实时测试正则表达式，查看匹配结果。", "fas fa-asterisk", "linear-gradient(135deg, #7209b7, #560bad)"),
         (16, "时间戳转换", "Unix时间戳与日期时间互转，支持多种时间单位。", "fas fa-clock", "linear-gradient(135deg, #ff9e00, #ff5400)"),
         (17, "HTTP请求工具", "发送HTTP请求，支持GET/POST/PUT/DELETE等方法。", "fas fa-paper-plane", "linear-gradient(135deg, #3a0ca3, #4cc9f0)"),
         (18, "文本处理工具", "文本对比、去重、排序、正则替换等文本处理功能。", "fas fa-font", "linear-gradient(135deg, #4361ee, #3a0ca3)"),
@@ -432,7 +432,7 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
                 9,
                 "JSON处理工具",
                 "JSON美化、压缩、转义、去转义、验证和信息查看等实用功能。",
-                "fas fa-brackets-curly",
+                "fas fa-code",
                 "linear-gradient(135deg, #06ffa5, #00d4ff)"
             ],
         )?;
@@ -489,6 +489,16 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    // FontAwesome 7 不再提供早期注册的这两个图标类；对已有库定点迁移
+    conn.execute(
+        "UPDATE tools SET icon = 'fas fa-code' WHERE id = 9 AND icon = 'fas fa-brackets-curly'",
+        [],
+    )?;
+    conn.execute(
+        "UPDATE tools SET icon = 'fas fa-asterisk' WHERE id = 15 AND icon = 'fas fa-regexp'",
+        [],
+    )?;
+
     // 检查工具ID 11（哈希生成器）是否存在
     let mut stmt = conn.prepare("SELECT COUNT(*) FROM tools WHERE id = 11")?;
     let count: i32 = stmt.query_row([], |row| row.get(0))?;
@@ -529,7 +539,7 @@ fn add_missing_tools(conn: &Connection) -> Result<()> {
         (12, "JSON转实体类", "将JSON自动转换为Java、C#、Go、Python、TypeScript实体类。", "fas fa-file-code", "linear-gradient(135deg, #4361ee, #4895ef)", 5, vec![11, 12]),
         (13, "JSON对比工具", "对比两个JSON的差异，高亮显示新增、删除和修改的字段。", "fas fa-not-equal", "linear-gradient(135deg, #f72585, #b5179e)", 5, vec![11, 12]),
         (14, "JWT工具", "解析和生成JWT Token，支持签名验证。", "fas fa-key", "linear-gradient(135deg, #4cc9f0, #4895ef)", 6, vec![5, 6]),
-        (15, "正则表达式测试", "实时测试正则表达式，查看匹配结果。", "fas fa-regexp", "linear-gradient(135deg, #7209b7, #560bad)", 5, vec![11, 12]),
+        (15, "正则表达式测试", "实时测试正则表达式，查看匹配结果。", "fas fa-asterisk", "linear-gradient(135deg, #7209b7, #560bad)", 5, vec![11, 12]),
         (16, "时间戳转换", "Unix时间戳与日期时间互转，支持多种时间单位。", "fas fa-clock", "linear-gradient(135deg, #ff9e00, #ff5400)", 5, vec![11, 12]),
         (17, "HTTP请求工具", "发送HTTP请求，支持GET/POST/PUT/DELETE等方法。", "fas fa-paper-plane", "linear-gradient(135deg, #3a0ca3, #4cc9f0)", 7, vec![14, 11]),
         (18, "文本处理工具", "文本对比、去重、排序、正则替换等文本处理功能。", "fas fa-font", "linear-gradient(135deg, #4361ee, #3a0ca3)", 5, vec![11, 12]),

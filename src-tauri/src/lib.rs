@@ -176,6 +176,12 @@ pub fn run() {
             commands::agent::send_chat_turn,
             commands::agent::cancel_chat_turn,
             commands::agent::get_engine_status,
+            commands::agent::list_skills,
+            commands::agent::set_skill_enabled,
+            commands::agent::create_skill,
+            commands::agent::update_skill,
+            commands::agent::delete_skill,
+            commands::agent::import_skill,
             commands::agent::get_llama_engine_log_settings,
             commands::agent::save_llama_engine_log_settings,
 

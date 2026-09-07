@@ -83,7 +83,7 @@ pub struct LlamaEngineLogSettingsView {
     pub log_path: String,
 }
 
-fn toolbox_dir() -> PathBuf {
+pub(crate) fn toolbox_dir() -> PathBuf {
     let mut dir = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     dir.push(".toolbox");
     dir

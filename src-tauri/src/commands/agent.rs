@@ -261,6 +261,49 @@ pub fn get_engine_status() -> serde_json::Value {
 }
 
 #[tauri::command]
+pub fn list_skills() -> Vec<crate::agent::skills::SkillInfo> {
+    crate::agent::skills::list_skills()
+}
+
+#[tauri::command]
+pub fn set_skill_enabled(skill_id: String, enabled: bool) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::set_skill_enabled(&skill_id, enabled)
+}
+
+#[tauri::command]
+pub fn create_skill(
+    name: String,
+    description: String,
+    keywords: Vec<String>,
+    tool_ids: Vec<String>,
+    body: String,
+) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::create_skill(name, description, keywords, tool_ids, body)
+}
+
+#[tauri::command]
+pub fn update_skill(
+    id: String,
+    name: String,
+    description: String,
+    keywords: Vec<String>,
+    tool_ids: Vec<String>,
+    body: String,
+) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::update_skill(id, name, description, keywords, tool_ids, body)
+}
+
+#[tauri::command]
+pub fn delete_skill(id: String) -> Result<(), String> {
+    crate::agent::skills::delete_skill(id)
+}
+
+#[tauri::command]
+pub fn import_skill(raw: String, name: Option<String>) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::import_skill(raw, name)
+}
+
+#[tauri::command]
 pub fn get_llama_engine_log_settings() -> crate::agent::llama_log::LlamaEngineLogSettingsView {
     crate::agent::llama_log::settings_view()
 }

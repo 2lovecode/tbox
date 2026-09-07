@@ -10,3 +10,7 @@
 #### Scenario: History scrolls inside sidebar
 - **WHEN** 历史会话列表超出侧栏可用高度
 - **THEN** 仅侧栏历史区域滚动，不撑破整页
+
+#### Scenario: Toolbox list scrolls below fixed categories
+- **WHEN** 工具箱中的工具、推荐内容或搜索结果超出主区可视高度
+- **THEN** 仅分类筛选下方的工具箱列表区域滚动，分类筛选不随其滚动

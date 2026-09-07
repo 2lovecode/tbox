@@ -80,26 +80,6 @@ const clearSearch = () => {
   router.push({ path: '/toolbox' });
 };
 
-// 推荐工具数据
-const featuredTools = ref([
-  {
-    id: 101,
-    name: '系统清理大师',
-    description: '一键清理系统垃圾文件、注册表错误和无效快捷方式，释放磁盘空间，提升系统运行速度。',
-    icon: 'fas fa-sync-alt',
-    tags: ['系统优化', '清理'],
-    gradient: 'linear-gradient(135deg, #4cc9f0, #4895ef)'
-  },
-  {
-    id: 102,
-    name: '隐私保护工具',
-    description: '深度清理浏览痕迹、临时文件和隐私数据，保护您的个人隐私不被泄露。',
-    icon: 'fas fa-shield-alt',
-    tags: ['安全工具', '隐私'],
-    gradient: 'linear-gradient(135deg, #f72585, #b5179e)'
-  }
-]);
-
 const routerMap: Record<number, string> = {
   1: 'image-compression',
   2: 'video-converter',
@@ -207,6 +187,7 @@ const toast = useToast();
           </button>
         </div>
 
+        <div class="toolbox-scroll">
         <!-- 搜索结果提示 -->
         <div v-if="showSearchResults" class="search-results-header">
           <div class="search-info">
@@ -286,48 +267,25 @@ const toast = useToast();
           </button>
         </div>
 
-        <!-- 视图切换和推荐工具 -->
-        <template v-if="!showSearchResults">
-            <div class="view-toggle">
-                <button
-                    class="toggle-btn"
-                    :class="{ active: !isCompactView }"
-                    @click="isCompactView = false"
-                    title="网格视图"
-                >
-                    <i class="fas fa-th-large"></i>
-                </button>
-                <button
-                    class="toggle-btn"
-                    :class="{ active: isCompactView }"
-                    @click="isCompactView = true"
-                    title="紧凑视图"
-                >
-                    <i class="fas fa-th"></i>
-                </button>
-            </div>
-
-            <div class="section-header featured-header" v-if="!showSearchResults">
-                <h2 class="section-title">推荐工具</h2>
-            </div>
-
-            <div class="featured-tools" v-if="!showSearchResults">
-                <div
-                v-for="featured in featuredTools"
-                :key="featured.id"
-                class="featured-card"
-                >
-                <div class="featured-icon" :style="`background: ${featured.gradient};`">
-                    <i :class="featured.icon"></i>
-                </div>
-                <div class="featured-content">
-                    <h3>{{ featured.name }}</h3>
-                    <p>{{ featured.description }}</p>
-                    <button class="featured-btn" @click="openTool(featured)">立即使用</button>
-                </div>
-                </div>
-            </div>
-        </template>
+        <div class="view-toggle" v-if="!showSearchResults">
+          <button
+            class="toggle-btn"
+            :class="{ active: !isCompactView }"
+            @click="isCompactView = false"
+            title="网格视图"
+          >
+            <i class="fas fa-th-large"></i>
+          </button>
+          <button
+            class="toggle-btn"
+            :class="{ active: isCompactView }"
+            @click="isCompactView = true"
+            title="紧凑视图"
+          >
+            <i class="fas fa-th"></i>
+          </button>
+        </div>
+        </div>
     </main>
 </template>
 <style scoped> 
@@ -338,6 +296,18 @@ const toast = useToast();
     gap: 20px;
     width: 100%;
     max-width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .toolbox-scroll {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    overflow-y: auto;
+    padding-right: 6px;
   }
 
   .category-filters {
@@ -419,11 +389,9 @@ const toast = useToast();
     justify-content: flex-end;
   }
 
-  /* 视图切换按钮 */
   .view-toggle {
     display: flex;
     gap: 8px;
-    margin-bottom: 5px;
   }
 
   .toggle-btn {
@@ -576,76 +544,6 @@ const toast = useToast();
     border-radius: 4px;
     font-size: 11px;
     font-weight: 500;
-  }
-
-  /* 推荐工具区域 */
-  .featured-header {
-    margin-top: 10px;
-  }
-
-  .featured-tools {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 18px;
-  }
-
-  .featured-card {
-    background: white;
-    border-radius: 10px;
-    display: flex;
-    overflow: hidden;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-    transition: var(--transition);
-    cursor: pointer;
-  }
-
-  .featured-card:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
-  }
-
-  .featured-icon {
-    width: 100px;
-    background: linear-gradient(135deg, #4cc9f0, #4895ef);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 32px;
-    color: white;
-  }
-
-  .featured-content {
-    padding: 18px;
-    flex: 1;
-  }
-
-  .featured-content h3 {
-    font-size: 17px;
-    margin-bottom: 6px;
-    color: var(--dark);
-  }
-
-  .featured-content p {
-    color: var(--gray);
-    font-size: 13px;
-    line-height: 1.5;
-    margin-bottom: 12px;
-  }
-
-  .featured-btn {
-    background: var(--primary);
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 6px;
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: var(--transition);
-  }
-
-  .featured-btn:hover {
-    background: var(--secondary);
   }
 
   /* 搜索结果样式 */
