@@ -62,8 +62,11 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
     vec![
         tool(
             "json.format",
-            "JSON 格式化",
-            required_string_props(&[("input", "待格式化的 JSON 字符串")]),
+            "JSON 格式化/转义/反转义（美化缩进）",
+            required_string_props(&[(
+                "input",
+                "待格式化或反转义的 JSON 字符串（可为 {\\\"a\\\":1} 形态）",
+            )]),
         ),
         tool(
             "base64.encode",
@@ -99,17 +102,17 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
         ),
         tool(
             "timestamp.convert",
-            "时间戳转换",
+            "时间戳转换；也可取当前时刻（input=now）",
             json!({
                 "type": "object",
                 "properties": {
                     "input": {
                         "type": "string",
-                        "description": "Unix 秒/毫秒时间戳，或 ISO-8601 时间字符串"
+                        "description": "Unix 秒/毫秒时间戳、ISO-8601 时间字符串，或 now/当前/现在（取本机当前 UTC 时刻）"
                     },
                     "unit": {
                         "type": "string",
-                        "description": "输入单位：seconds、millis，或 iso（默认自动推断）",
+                        "description": "输入单位：seconds、millis，或 iso（默认自动推断；input 为 now 时可省略）",
                         "enum": ["seconds", "millis", "iso"]
                     }
                 },
@@ -162,9 +165,9 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
         ),
         tool(
             "charset.convert",
-            "字符集标签校验",
+            "字符集标签校验（不是 JSON 转义）",
             required_string_props(&[
-                ("input", "文本内容"),
+                ("input", "待校验的文本内容"),
                 ("charset", "字符集标签，例如 UTF-8"),
             ]),
         ),
@@ -225,6 +228,11 @@ pub fn tools_as_openai_json() -> Value {
         })
         .collect();
     Value::Array(tools)
+}
+
+/// 已注册工具的 id 列表（事件日志 / 调试用）。
+pub fn tool_ids() -> Vec<String> {
+    TOOLS.iter().map(|t| t.id.to_string()).collect()
 }
 
 /// 校验 args 是否满足工具 schema 的必填字段与基本类型（手写，无 jsonschema 依赖）。
@@ -305,6 +313,15 @@ pub fn dispatch(tool_id: &str, args: &Value) -> Result<String, String> {
         format!("未注册的工具: {tool_id}（unknown tool）")
     })?;
 
+    // 小模型常把 JSON 对象直接塞进 input（未先 stringify）；先归一成字符串再校验。
+    let coerced;
+    let args = if tool_id == "json.format" {
+        coerced = coerce_json_format_input(args);
+        &coerced
+    } else {
+        args
+    };
+
     validate_args(spec, args)?;
 
     match tool_id {
@@ -351,6 +368,23 @@ pub fn dispatch(tool_id: &str, args: &Value) -> Result<String, String> {
         }
         _ => Err(format!("未注册的工具: {tool_id}（unknown tool）")),
     }
+}
+
+/// 若 `input` 已是 object/array，压成紧凑 JSON 字符串，便于走统一的 format 路径。
+fn coerce_json_format_input(args: &Value) -> Value {
+    let mut out = args.clone();
+    let Some(obj) = out.as_object_mut() else {
+        return out;
+    };
+    match obj.get("input") {
+        Some(v) if v.is_object() || v.is_array() => {
+            if let Ok(s) = serde_json::to_string(v) {
+                obj.insert("input".into(), Value::String(s));
+            }
+        }
+        _ => {}
+    }
+    out
 }
 
 fn dispatch_json_format(args: &Value) -> Result<String, String> {
@@ -421,8 +455,15 @@ fn dispatch_timestamp(args: &Value) -> Result<String, String> {
         .and_then(|v| v.as_str())
         .unwrap_or("auto");
 
-    let dt: DateTime<Utc> = if unit == "iso"
-        || (!input.chars().all(|c| c.is_ascii_digit() || c == '-') && input.contains(|c: char| c == 'T' || c == '-' || c == ':'))
+    let input_lower = input.to_ascii_lowercase();
+    let is_now = matches!(input_lower.as_str(), "now" | "current")
+        || matches!(input, "当前" | "现在" | "此刻");
+
+    let dt: DateTime<Utc> = if is_now {
+        Utc::now()
+    } else if unit == "iso"
+        || (!input.chars().all(|c| c.is_ascii_digit() || c == '-')
+            && input.contains(|c: char| c == 'T' || c == '-' || c == ':'))
     {
         DateTime::parse_from_rfc3339(input)
             .map(|d| d.with_timezone(&Utc))
@@ -611,6 +652,60 @@ mod tests {
 
         let form = dispatch("form.parse", &json!({"input": "a=1&a=2"})).unwrap();
         assert!(form.contains(r#""a":["1","2"]"#), "got: {form}");
+    }
+
+    #[test]
+    fn timestamp_now_returns_current_instant() {
+        use chrono::Utc;
+        let before = Utc::now().timestamp();
+        let raw = dispatch("timestamp.convert", &json!({"input": "now"})).unwrap();
+        let after = Utc::now().timestamp();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let secs = v["unix_seconds"].as_i64().expect("unix_seconds");
+        assert!(
+            secs >= before - 1 && secs <= after + 1,
+            "secs={secs} before={before} after={after} raw={raw}"
+        );
+        assert!(v["iso"].as_str().unwrap_or("").contains('T'));
+        assert!(v["unix_millis"].as_i64().unwrap() >= secs * 1000);
+    }
+
+    #[test]
+    fn json_format_accepts_object_input() {
+        let out = dispatch(
+            "json.format",
+            &json!({"input": {"query": {"x": 1}, "size": 10}}),
+        )
+        .unwrap();
+        assert!(out.contains("\"query\""), "got: {out}");
+        assert!(out.contains("\"size\": 10"), "got: {out}");
+    }
+
+    #[test]
+    fn json_format_accepts_escaped_string_input() {
+        let out = dispatch(
+            "json.format",
+            &json!({"input": r#"{\"query\":{\"x\":1}}"#}),
+        )
+        .unwrap();
+        assert!(out.contains("\"query\""), "got: {out}");
+    }
+
+    #[test]
+    fn timestamp_chinese_now_alias() {
+        use chrono::Utc;
+        let before = Utc::now().timestamp();
+        let raw = dispatch("timestamp.convert", &json!({"input": "当前"})).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let secs = v["unix_seconds"].as_i64().unwrap();
+        assert!((secs - before).abs() <= 2, "raw={raw}");
+    }
+
+    #[test]
+    fn timestamp_numeric_unchanged() {
+        let raw = dispatch("timestamp.convert", &json!({"input": "1700000000"})).unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        assert_eq!(v["unix_seconds"], 1700000000);
     }
 
     #[test]

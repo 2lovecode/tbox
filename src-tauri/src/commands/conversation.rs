@@ -2,6 +2,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::{params, Connection};
 use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 use uuid::Uuid;
 
 use crate::db::open_connection;
@@ -11,6 +12,13 @@ pub struct Conversation {
     pub id: String,
     pub title: String,
     pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationTitleEvent {
+    pub id: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -48,12 +56,15 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 ";
 
+const TITLE_MAX_CHARS: usize = 40;
+
 pub fn ensure_conversation_schema(conn: &Connection) -> Result<(), rusqlite::Error> {
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
     conn.execute_batch(SCHEMA_SQL)?;
     migrate_add_reasoning(conn)?;
     migrate_add_trajectory(conn)?;
     migrate_add_context_budget(conn)?;
+    migrate_add_title_locked(conn)?;
     Ok(())
 }
 
@@ -88,6 +99,13 @@ fn migrate_add_context_budget(conn: &Connection) -> Result<(), rusqlite::Error> 
     )
 }
 
+fn migrate_add_title_locked(conn: &Connection) -> Result<(), rusqlite::Error> {
+    migrate_add_column(
+        conn,
+        "ALTER TABLE conversations ADD COLUMN title_locked INTEGER NOT NULL DEFAULT 0",
+    )
+}
+
 fn now_ts() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -96,7 +114,25 @@ fn now_ts() -> i64 {
 }
 
 fn truncate_title(content: &str) -> String {
-    content.chars().take(40).collect()
+    // Placeholder uses the same first-sentence core as the summarizer seed.
+    let seed = crate::agent::title_summarizer::extract_title_seed(content);
+    if seed.is_empty() {
+        content.chars().take(TITLE_MAX_CHARS).collect()
+    } else {
+        seed.chars().take(TITLE_MAX_CHARS).collect()
+    }
+}
+
+fn normalize_title(raw: &str) -> Result<String, String> {
+    let t = raw.trim();
+    if t.is_empty() {
+        return Err("标题不能为空".into());
+    }
+    let title: String = t.chars().take(TITLE_MAX_CHARS).collect();
+    if title.is_empty() {
+        return Err("标题不能为空".into());
+    }
+    Ok(title)
 }
 
 fn row_to_conversation(row: &rusqlite::Row<'_>) -> rusqlite::Result<Conversation> {
@@ -128,6 +164,78 @@ fn row_to_message(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChatMessage> {
         },
         created_at: row.get(5)?,
     })
+}
+
+pub fn rename_conversation_on(
+    conn: &Connection,
+    conversation_id: &str,
+    title: &str,
+) -> Result<Conversation, String> {
+    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+    let title = normalize_title(title)?;
+    let ts = now_ts();
+    let changed = conn
+        .execute(
+            "UPDATE conversations SET title = ?1, title_locked = 1, updated_at = ?2 WHERE id = ?3",
+            params![title, ts, conversation_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err(format!("会话不存在: {conversation_id}"));
+    }
+    Ok(Conversation {
+        id: conversation_id.to_string(),
+        title,
+        updated_at: ts,
+    })
+}
+
+/// Apply async summarizer title only when `title_locked = 0`.
+/// Returns true if the row was updated.
+pub fn apply_summarized_title_on(
+    conn: &Connection,
+    conversation_id: &str,
+    title: &str,
+) -> Result<bool, String> {
+    ensure_conversation_schema(conn).map_err(|e| e.to_string())?;
+    let title = normalize_title(title)?;
+    let ts = now_ts();
+    let changed = conn
+        .execute(
+            "UPDATE conversations SET title = ?1, updated_at = ?2
+             WHERE id = ?3 AND title_locked = 0",
+            params![title, ts, conversation_id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed > 0)
+}
+
+fn spawn_title_summarizer(app: AppHandle, conversation_id: String, first_message: String) {
+    // Short first-sentence core is already written as the placeholder title —
+    // no LLM round-trip and no redundant UPDATE.
+    if crate::agent::title_summarizer::is_short_title_seed(&first_message) {
+        return;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(title) = crate::agent::title_summarizer::summarize_title(&first_message) else {
+            return;
+        };
+        let Ok(conn) = open_connection() else {
+            return;
+        };
+        match apply_summarized_title_on(&conn, &conversation_id, &title) {
+            Ok(true) => {
+                let _ = app.emit(
+                    "conversation:title",
+                    ConversationTitleEvent {
+                        id: conversation_id,
+                        title,
+                    },
+                );
+            }
+            _ => {}
+        }
+    });
 }
 
 pub fn append_user_message_on(
@@ -380,11 +488,27 @@ pub fn delete_conversation_on(conn: &Connection, conversation_id: &str) -> Resul
 #[tauri::command]
 #[allow(non_snake_case)]
 pub fn append_user_message(
+    app: AppHandle,
     conversationId: Option<String>,
     content: String,
 ) -> Result<(Conversation, ChatMessage), String> {
+    let is_new = conversationId.is_none();
     let conn = open_connection()?;
-    append_user_message_on(&conn, conversationId, &content)
+    let result = append_user_message_on(&conn, conversationId, &content)?;
+    if is_new {
+        spawn_title_summarizer(app, result.0.id.clone(), content);
+    }
+    Ok(result)
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn rename_conversation(
+    conversationId: String,
+    title: String,
+) -> Result<Conversation, String> {
+    let conn = open_connection()?;
+    rename_conversation_on(&conn, &conversationId, &title)
 }
 
 #[tauri::command]
@@ -417,6 +541,15 @@ pub fn delete_conversation(conversationId: String) -> Result<(), String> {
     delete_conversation_on(&conn, &conversationId)
 }
 
+/// 返回某会话的 SessionEvent 列表（按 seq 升序）。空列表表示无日志
+/// （旧库或尚未触发 Agent 循环）——前端 MUST 回退到 `trajectory_json` 推导。
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn list_session_events(conversationId: String) -> Result<Vec<crate::agent::session_log::SessionEvent>, String> {
+    let conn = open_connection()?;
+    crate::agent::session_log::list_events_on(&conn, &conversationId)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +578,26 @@ mod tests {
         assert!(conv.title.contains("Base64") || conv.title.contains("hello"));
         assert_eq!(msg.role, "user");
         assert_eq!(list_conversations_on(&db).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn rename_locks_title_against_summarizer() {
+        let db = test_db();
+        let (conv, _) = append_user_message_on(&db, None, "原始消息很长很长").unwrap();
+        let renamed = rename_conversation_on(&db, &conv.id, "我改的标题").unwrap();
+        assert_eq!(renamed.title, "我改的标题");
+        assert!(!apply_summarized_title_on(&db, &conv.id, "总结标题").unwrap());
+        let listed = list_conversations_on(&db).unwrap();
+        assert_eq!(listed[0].title, "我改的标题");
+    }
+
+    #[test]
+    fn summarizer_updates_when_unlocked() {
+        let db = test_db();
+        let (conv, _) = append_user_message_on(&db, None, "原始消息").unwrap();
+        assert!(apply_summarized_title_on(&db, &conv.id, "总结标题").unwrap());
+        let listed = list_conversations_on(&db).unwrap();
+        assert_eq!(listed[0].title, "总结标题");
     }
 
     #[test]

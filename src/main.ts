@@ -8,6 +8,9 @@ import {router} from "./router/main";
 // 这两个根本用不到的字体文件打进包。
 import "@fortawesome/fontawesome-free/css/fontawesome.min.css";
 import "@fortawesome/fontawesome-free/css/solid.min.css";
+import "highlight.js/styles/atom-one-dark.css";
+// 代码块复制按钮的全局事件委托（幂等）
+import { setupMarkdownCodeCopy } from "@/utils/markdown";
 import App from "./App.vue";
 
 const pinia = createPinia()
@@ -17,6 +20,8 @@ const app = createApp(App)
 
 app.use(router);
 app.use(pinia);
+
+setupMarkdownCodeCopy();
 
 // Global error handler — a single broken tool page shouldn't take the
 // whole renderer down. Surface uncaught errors and unhandled promise

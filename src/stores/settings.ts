@@ -6,9 +6,9 @@ export const SETTINGS_SECTIONS: {
   label: string;
   icon: string;
 }[] = [
-  { id: 'llm', label: 'LLM 配置', icon: 'fa-wand-magic-sparkles' },
+  { id: 'llm', label: '模型', icon: 'fa-wand-magic-sparkles' },
   { id: 'memory', label: '记忆', icon: 'fa-brain' },
-  { id: 'skills', label: 'Skill 管理', icon: 'fa-layer-group' },
+  { id: 'skills', label: '技能', icon: 'fa-layer-group' },
   { id: 'general', label: '通用', icon: 'fa-sliders' },
   { id: 'about', label: '关于', icon: 'fa-circle-info' },
 ];

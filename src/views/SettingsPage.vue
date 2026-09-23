@@ -82,9 +82,9 @@ function goBack() {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 1100px;
-  margin: 0 auto;
-  padding: 4px 4px 12px;
+  max-width: none;
+  margin: 0;
+  padding: var(--shell-gutter, 16px);
   width: 100%;
   height: 100%;
   max-height: 100%;
@@ -104,24 +104,24 @@ function goBack() {
   gap: 8px;
   height: 32px;
   padding: 0 10px;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.12));
-  background: var(--bg-primary, #fff);
+  border: 1px solid var(--shell-divider, var(--border-color, rgba(0, 0, 0, 0.12)));
+  background: transparent;
   color: var(--text-secondary, #6c757d);
-  border-radius: 8px;
+  border-radius: var(--control-radius, 8px);
   cursor: pointer;
   font-family: inherit;
   font-size: 12px;
 }
 
 .back-btn:hover {
-  background: var(--bg-secondary, #f5f7fa);
+  background: color-mix(in srgb, var(--bg-tertiary) 35%, transparent);
   color: var(--text-primary, #212529);
 }
 
 .settings-layout {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr);
-  gap: 16px;
+  gap: var(--shell-gutter, 16px);
   align-items: stretch;
   flex: 1;
   min-height: 0;
@@ -132,12 +132,12 @@ function goBack() {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 8px;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
-  border-radius: 12px;
-  background: var(--bg-primary, #fff);
-  position: sticky;
-  top: 8px;
+  padding: 0 calc(var(--shell-gutter, 16px) * 0.75) 0 0;
+  border: none;
+  border-right: 1px solid var(--shell-divider, var(--border-color, rgba(0, 0, 0, 0.08)));
+  border-radius: 0;
+  background: transparent;
+  position: static;
 }
 
 .nav-item {
@@ -147,7 +147,7 @@ function goBack() {
   width: 100%;
   padding: 10px 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--control-radius, 8px);
   background: transparent;
   color: var(--text-secondary, #6c757d);
   font-family: inherit;
@@ -165,20 +165,20 @@ function goBack() {
 }
 
 .nav-item:hover {
-  background: var(--bg-secondary, #f5f7fa);
+  background: color-mix(in srgb, var(--bg-tertiary) 35%, transparent);
   color: var(--text-primary, #212529);
 }
 
 .nav-item.active {
-  background: rgba(67, 97, 238, 0.1);
+  background: color-mix(in srgb, var(--primary, #4361ee) 12%, transparent);
   color: var(--primary, #4361ee);
 }
 
 .settings-content {
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
-  border-radius: 12px;
-  background: var(--bg-primary, #fff);
-  padding: 20px 24px 24px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0 0 0 4px;
   min-height: 0;
   height: 100%;
   overflow-y: auto;
@@ -192,11 +192,17 @@ function goBack() {
   .settings-nav {
     flex-direction: row;
     flex-wrap: wrap;
-    position: static;
+    border-right: none;
+    border-bottom: 1px solid var(--shell-divider, var(--border-color, rgba(0, 0, 0, 0.08)));
+    padding: 0 0 8px;
   }
 
   .nav-item {
     width: auto;
+  }
+
+  .settings-content {
+    padding: 8px 0 0;
   }
 }
 </style>

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { renderMarkdown } from '@/utils/markdown';
+import { stripToolResultEcho } from '@/utils/jsonDisplay';
 import type { TrajectoryStep } from '@/utils/trajectory';
+import {
+  formatTrajectoryDuration,
+  trajectoryMsg,
+} from '@/utils/trajectoryLocale';
 import CopyIconButton from '@/components/CopyIconButton.vue';
 
 const props = withDefaults(
@@ -9,24 +14,61 @@ const props = withDefaults(
     steps: TrajectoryStep[];
     streaming?: boolean;
     streamMode?: 'live' | 'fallback' | null;
+    durationSeconds?: number | null;
   }>(),
   {
     streaming: false,
     streamMode: null,
+    durationSeconds: null,
   },
 );
 
 const md = (src: string) => renderMarkdown(src);
+const t = trajectoryMsg;
 
-/** Keys of steps the user manually toggled (session-local). */
-const manual = ref(new Map<number, boolean>());
+const processOpen = ref(false);
+const detailOpen = ref(new Map<number, boolean>());
+const summaryListEl = ref<HTMLElement | null>(null);
+
+const startedAt = ref<number | null>(null);
+const endedAt = ref<number | null>(null);
+const nowTick = ref(Date.now());
+let tickTimer: number | null = null;
+
+function clearTick() {
+  if (tickTimer != null) {
+    window.clearInterval(tickTimer);
+    tickTimer = null;
+  }
+}
 
 watch(
   () => props.streaming,
-  (s) => {
-    if (!s) manual.value = new Map();
+  (s, was) => {
+    if (s) {
+      if (!was) {
+        startedAt.value = Date.now();
+        endedAt.value = null;
+        processOpen.value = true;
+        detailOpen.value = new Map();
+        clearTick();
+        tickTimer = window.setInterval(() => {
+          nowTick.value = Date.now();
+        }, 200);
+      }
+      return;
+    }
+    if (was) {
+      endedAt.value = Date.now();
+      detailOpen.value = new Map();
+      processOpen.value = false;
+    }
+    clearTick();
   },
+  { immediate: true },
 );
+
+onBeforeUnmount(() => clearTick());
 
 const processSteps = computed(() =>
   props.steps
@@ -34,37 +76,273 @@ const processSteps = computed(() =>
     .filter(({ step }) => step.type === 'reasoning' || step.type === 'tool'),
 );
 
-const textSteps = computed(() =>
-  props.steps
-    .map((step, index) => ({ step, index }))
-    .filter(
-      (item): item is { step: Extract<TrajectoryStep, { type: 'text' }>; index: number } =>
-        item.step.type === 'text',
-    ),
+/** 用户可见正文：有工具步骤时，只展示最后一个工具之后的文本；去掉工具结果回声前缀。 */
+const textSteps = computed(() => {
+  const indexed = props.steps
+    .map((step, index) => {
+      if (step.type !== 'text') return null;
+      const cleaned = stripToolResultEcho(step.text).trim();
+      if (!cleaned) return null;
+      return {
+        index,
+        step: { ...step, text: cleaned } as Extract<TrajectoryStep, { type: 'text' }>,
+      };
+    })
+    .filter((item): item is { index: number; step: Extract<TrajectoryStep, { type: 'text' }> } =>
+      Boolean(item),
+    );
+  let lastToolIdx = -1;
+  for (let i = 0; i < props.steps.length; i++) {
+    if (props.steps[i]?.type === 'tool') lastToolIdx = i;
+  }
+  if (lastToolIdx < 0) return indexed;
+  return indexed.filter((item) => item.index > lastToolIdx);
+});
+
+const showProcessChip = computed(
+  () => props.streaming || processSteps.value.length > 0,
 );
 
-function isExpanded(index: number, step: TrajectoryStep): boolean {
-  if (manual.value.has(index)) {
-    return manual.value.get(index)!;
+const measuredSeconds = computed(() => {
+  if (startedAt.value == null) return null;
+  const end = endedAt.value ?? (props.streaming ? nowTick.value : null);
+  if (end == null) return null;
+  return (end - startedAt.value) / 1000;
+});
+
+const workedForLabel = computed(() => {
+  const measured = measuredSeconds.value;
+  if (measured != null && !props.streaming) {
+    return t.value.workedFor(formatTrajectoryDuration(measured));
   }
-  if (props.streaming) return true;
-  return step.type === 'text';
+  if (props.durationSeconds != null && props.durationSeconds > 0) {
+    return t.value.workedFor(formatTrajectoryDuration(props.durationSeconds));
+  }
+  return t.value.workedForUnknown;
+});
+
+function toggleProcess() {
+  processOpen.value = !processOpen.value;
 }
 
-function toggle(index: number) {
-  const step = props.steps[index];
-  if (!step || step.type === 'text') return;
-  const next = new Map(manual.value);
-  next.set(index, !isExpanded(index, step));
-  manual.value = next;
+function isDetailOpen(index: number): boolean {
+  return detailOpen.value.get(index) === true;
 }
 
 function formatArgs(args: unknown): string {
   try {
-    return JSON.stringify(args, null, 2) ?? '';
+    return JSON.stringify(args) ?? '';
   } catch {
     return String(args);
   }
+}
+
+function toolLabel(id: string): string {
+  const name = id.trim();
+  if (!name) return 'tool';
+  const short = name.includes('.') ? name.split('.').pop()! : name;
+  return short || name;
+}
+
+function truncateStatusTarget(raw: string, max = 40): string {
+  const cleaned = raw.replace(/\s+/g, ' ').trim();
+  if (!cleaned) return '';
+  const base = cleaned.includes('/') || cleaned.includes('\\')
+    ? cleaned.split(/[/\\]/).filter(Boolean).pop() || cleaned
+    : cleaned;
+  return base.length > max ? `${base.slice(0, max)}…` : base;
+}
+
+function toolStatusTarget(args: unknown): string {
+  if (!args || typeof args !== 'object') return '';
+  const rec = args as Record<string, unknown>;
+  for (const key of ['path', 'file', 'filename', 'url', 'query', 'command', 'input', 'text', 'prompt']) {
+    const v = rec[key];
+    if (typeof v === 'string' && v.trim()) return truncateStatusTarget(v);
+  }
+  return '';
+}
+
+/** 过程摘要行（随 locale 变化） */
+function stepSummaryLine(
+  step: Extract<TrajectoryStep, { type: 'reasoning' | 'tool' }>,
+): string {
+  const msg = t.value;
+  if (step.type === 'reasoning') {
+    const len = step.text.trim().length;
+    if (!len || len < 80) return props.streaming ? msg.thinking : msg.thoughtBriefly;
+    return props.streaming ? msg.thinking : msg.thoughtABit;
+  }
+
+  const id = step.id.toLowerCase();
+  const label = toolLabel(step.id);
+  const target = toolStatusTarget(step.args);
+  const running = step.status === 'running';
+  const subject = target || label;
+
+  if (/format/.test(id)) {
+    return running ? msg.formatting(subject) : msg.formatted(subject);
+  }
+  if (/parse|read|explain|lookup|search|get|fetch|list|inspect|jwt|url|form/.test(id)) {
+    return running ? msg.reading(subject) : msg.read(subject);
+  }
+  if (/convert|encode|decode|flatten/.test(id)) {
+    return running ? msg.converting(subject) : msg.converted(subject);
+  }
+  if (/digest|hash/.test(id)) {
+    return running ? msg.computingHash : msg.computedHash;
+  }
+  if (/generate|uuid/.test(id)) {
+    return running ? msg.generating : msg.generated(label);
+  }
+  return running ? msg.running(label, target || undefined) : msg.ran(label, target || undefined);
+}
+
+function toolLiveStatus(step: Extract<TrajectoryStep, { type: 'tool' }>): string {
+  return stepSummaryLine(step);
+}
+
+const liveStatus = computed(() => {
+  if (!props.streaming) return '';
+  const msg = t.value;
+  const steps = props.steps;
+  if (!steps.length) return msg.thinking;
+
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const s = steps[i];
+    if (s.type === 'tool' && s.status === 'running') return toolLiveStatus(s);
+  }
+
+  const last = steps[steps.length - 1];
+  if (last.type === 'reasoning') return msg.thinking;
+  if (last.type === 'text') return last.text.trim() ? msg.writing : msg.thinking;
+  if (last.type === 'tool') return msg.thinking;
+  return msg.thinking;
+});
+
+type SummaryGroup = {
+  key: string;
+  indices: number[];
+  line: string;
+  steps: Extract<TrajectoryStep, { type: 'reasoning' | 'tool' }>[];
+  hasDetail: boolean;
+};
+
+function toolKind(id: string): 'explore' | 'edit' | 'read' | 'other' {
+  const n = id.toLowerCase();
+  if (/search|list|inspect|lookup|explore|glob|grep|find/.test(n)) return 'explore';
+  if (/write|edit|patch|update|create|format|convert|encode|decode|flatten|digest|hash|generate|uuid/.test(n))
+    return 'edit';
+  if (/parse|read|explain|get|fetch|jwt|url|form/.test(n)) return 'read';
+  return 'other';
+}
+
+/** 将连续同类步骤聚合成摘要行 */
+const summaryLines = computed((): SummaryGroup[] => {
+  const items = processSteps.value;
+  const groups: SummaryGroup[] = [];
+  const msg = t.value;
+
+  let i = 0;
+  while (i < items.length) {
+    const { step, index } = items[i];
+
+    if (step.type === 'reasoning') {
+      groups.push({
+        key: `r-${index}`,
+        indices: [index],
+        line: stepSummaryLine(step),
+        steps: [step],
+        hasDetail: step.text.trim().length > 0,
+      });
+      i += 1;
+      continue;
+    }
+
+    const kind = toolKind(step.id);
+    if (kind === 'other') {
+      groups.push({
+        key: `t-${index}`,
+        indices: [index],
+        line: stepSummaryLine(step),
+        steps: [step],
+        hasDetail: step.args != null || !!(step.result && step.result.trim()),
+      });
+      i += 1;
+      continue;
+    }
+
+    const batch: typeof items = [items[i]];
+    let j = i + 1;
+    while (j < items.length) {
+      const next = items[j];
+      if (next.step.type !== 'tool' || toolKind(next.step.id) !== kind) break;
+      batch.push(next);
+      j += 1;
+    }
+
+    if (batch.length === 1) {
+      const only = batch[0];
+      groups.push({
+        key: `t-${only.index}`,
+        indices: [only.index],
+        line: stepSummaryLine(only.step),
+        steps: [only.step],
+        hasDetail: only.step.args != null || !!(only.step.result && only.step.result.trim()),
+      });
+    } else {
+      const n = batch.length;
+      const anyRunning = batch.some((b) => b.step.type === 'tool' && b.step.status === 'running');
+      let line: string;
+      if (kind === 'explore') {
+        line = anyRunning ? msg.exploringN(n) : msg.exploredN(n);
+      } else if (kind === 'edit') {
+        line = anyRunning ? msg.editingN(n) : msg.editedN(n);
+      } else {
+        line = anyRunning ? msg.readingN(n) : msg.readN(n);
+      }
+      groups.push({
+        key: `g-${batch[0].index}-${n}`,
+        indices: batch.map((b) => b.index),
+        line,
+        steps: batch.map((b) => b.step),
+        hasDetail: batch.some(
+          (b) =>
+            b.step.type === 'tool' &&
+            (b.step.args != null || !!(b.step.result && b.step.result.trim())),
+        ),
+      });
+    }
+    i = j;
+  }
+
+  return groups;
+});
+
+/** streaming 时列表增长 → 滚到最新（仅当已接近底部，避免打断上滚阅读） */
+watch(
+  () => summaryLines.value.length,
+  async (len, prev) => {
+    if (!props.streaming || !processOpen.value || len <= (prev ?? 0)) return;
+    await nextTick();
+    const el = summaryListEl.value;
+    if (!el) return;
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+    if (!nearBottom && prev != null && prev > 0) return;
+    const last = el.querySelector('.summary-item:last-child');
+    last?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  },
+);
+
+function groupDetailOpen(indices: number[]): boolean {
+  return indices.some((idx) => isDetailOpen(idx));
+}
+
+function toggleGroupDetail(indices: number[]) {
+  const next = new Map(detailOpen.value);
+  const open = !groupDetailOpen(indices);
+  for (const idx of indices) next.set(idx, open);
+  detailOpen.value = next;
 }
 </script>
 
@@ -73,90 +351,94 @@ function formatArgs(args: unknown): string {
     <span
       v-if="streamMode === 'fallback'"
       class="fallback-badge"
-      title="当前后端整段生成后再分块推送"
+      :title="t.fallbackTitle"
     >
-      整段生成
+      {{ t.fallbackBadge }}
     </span>
 
-    <div v-if="processSteps.length" class="process-rail" aria-label="执行过程">
-      <template v-for="{ step, index: i } in processSteps" :key="`p-${i}`">
-        <div v-if="step.type === 'reasoning'" class="process-item reasoning">
-          <button
-            type="button"
-            class="process-toggle"
-            :aria-expanded="isExpanded(i, step)"
-            @click="toggle(i)"
-          >
-            <i
-              class="fas chevron"
-              :class="isExpanded(i, step) ? 'fa-chevron-down' : 'fa-chevron-right'"
-            ></i>
-            <span class="process-label">
-              {{ streaming && isExpanded(i, step) ? '思考中' : '思考过程' }}
-            </span>
-            <span
-              v-if="streaming && isExpanded(i, step)"
-              class="typing-dots"
-              aria-hidden="true"
-            >
-              <i></i><i></i><i></i>
-            </span>
-            <span v-else class="process-hint">{{ isExpanded(i, step) ? '收起' : '展开' }}</span>
-          </button>
-          <div v-show="isExpanded(i, step)" class="reasoning-body md-content">
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-html="md(step.text)"></div>
-          </div>
-        </div>
+    <div v-if="showProcessChip" class="process-block">
+      <button
+        type="button"
+        class="worked-toggle"
+        :class="{ live: streaming, open: processOpen }"
+        :aria-expanded="processOpen"
+        @click="toggleProcess"
+      >
+        <span v-if="streaming" class="live-status">
+          <span class="live-shimmer" aria-hidden="true"></span>
+          <span class="live-text">{{ liveStatus }}</span>
+        </span>
+        <span v-else class="worked-label">{{ workedForLabel }}</span>
+        <i
+          class="fas worked-chevron"
+          :class="processOpen ? 'fa-chevron-down' : 'fa-chevron-right'"
+          aria-hidden="true"
+        ></i>
+      </button>
 
-        <div v-else-if="step.type === 'tool'" class="process-item tool">
+      <ul
+        v-show="processOpen"
+        ref="summaryListEl"
+        class="summary-list"
+        :class="{ live: streaming }"
+        :aria-label="t.processAria"
+      >
+        <li v-for="item in summaryLines" :key="item.key" class="summary-item">
           <button
             type="button"
-            class="process-toggle tool"
-            :aria-expanded="isExpanded(i, step)"
-            @click="toggle(i)"
+            class="summary-line"
+            :class="{
+              active: groupDetailOpen(item.indices),
+              muted: !item.hasDetail,
+            }"
+            :disabled="!item.hasDetail"
+            @click.stop="item.hasDetail && toggleGroupDetail(item.indices)"
           >
-            <i
-              class="fas chevron"
-              :class="isExpanded(i, step) ? 'fa-chevron-down' : 'fa-chevron-right'"
-            ></i>
-            <i class="fas fa-wrench tool-ico" aria-hidden="true"></i>
-            <span class="tool-name">{{ step.id }}</span>
-            <span class="tool-status" :class="step.status">
-              <i
-                v-if="step.status === 'running'"
-                class="fas fa-spinner fa-spin"
-                aria-hidden="true"
-              ></i>
-              {{ step.status === 'running' ? '运行中' : '已完成' }}
-            </span>
+            {{ item.line }}
           </button>
-          <div v-show="isExpanded(i, step)" class="tool-details">
-            <div v-if="step.args != null" class="tool-block copy-host">
-              <div class="tool-block-header">
-                <span class="tool-block-label">参数</span>
-                <CopyIconButton
-                  :text="() => formatArgs(step.args)"
-                  label="复制参数"
-                  visibility="always"
-                />
-              </div>
-              <pre>{{ formatArgs(step.args) }}</pre>
-            </div>
-            <div v-if="step.result" class="tool-block copy-host">
-              <div class="tool-block-header">
-                <span class="tool-block-label">结果</span>
-                <CopyIconButton
-                  :text="step.result"
-                  label="复制结果"
-                  visibility="always"
-                />
-              </div>
-              <pre>{{ step.result }}</pre>
-            </div>
+          <div v-if="groupDetailOpen(item.indices)" class="summary-detail">
+            <template v-for="(step, si) in item.steps" :key="`${item.key}-d-${si}`">
+              <template v-if="step.type === 'reasoning'">
+                <div class="reasoning-body md-content">
+                  <!-- eslint-disable-next-line vue/no-v-html -->
+                  <div v-html="md(step.text)"></div>
+                </div>
+              </template>
+              <template v-else-if="step.type === 'tool'">
+                <div v-if="step.args != null" class="tool-block copy-host">
+                  <div class="tool-block-header">
+                    <span class="tool-block-label">{{ t.argsLabel(toolLabel(step.id)) }}</span>
+                  </div>
+                  <pre>{{ formatArgs(step.args) }}</pre>
+                  <div class="msg-actions">
+                    <CopyIconButton
+                      :text="() => formatArgs(step.args)"
+                      label="复制参数"
+                      visibility="always"
+                    />
+                  </div>
+                </div>
+                <div v-if="step.result" class="tool-block copy-host">
+                  <div class="tool-block-header">
+                    <span class="tool-block-label">{{ t.resultLabel(toolLabel(step.id)) }}</span>
+                  </div>
+                  <pre>{{ step.result }}</pre>
+                  <div class="msg-actions">
+                    <CopyIconButton
+                      :text="step.result"
+                      label="复制结果"
+                      visibility="always"
+                    />
+                  </div>
+                </div>
+              </template>
+            </template>
           </div>
-        </div>
-      </template>
+        </li>
+        <li v-if="!summaryLines.length && streaming" class="summary-item">
+          <span class="summary-line muted">{{ t.waiting }}</span>
+        </li>
+      </ul>
     </div>
 
     <template v-for="item in textSteps" :key="`t-${item.index}`">
@@ -164,7 +446,6 @@ function formatArgs(args: unknown): string {
         <div class="message-body md-content">
           <!-- eslint-disable-next-line vue/no-v-html -->
           <div v-html="md(item.step.text)"></div>
-          <span v-if="streaming" class="stream-cursor" aria-hidden="true"></span>
         </div>
         <div v-if="item.step.text.trim() && !streaming" class="msg-actions">
           <CopyIconButton :text="item.step.text" label="复制消息" />
@@ -178,7 +459,7 @@ function formatArgs(args: unknown): string {
 .trajectory {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
+  gap: 0.45rem;
   position: relative;
   min-width: 0;
   max-width: 100%;
@@ -186,130 +467,203 @@ function formatArgs(args: unknown): string {
   box-sizing: border-box;
 }
 
+.process-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  align-self: stretch;
+}
+
+/* 纯文字 + 箭头，无按钮/pill 样式 */
+.worked-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-start;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 13px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.worked-toggle:hover {
+  color: var(--text-primary, #d1d5db);
+}
+
+.worked-label {
+  font-weight: 400;
+  letter-spacing: 0.01em;
+}
+
+.worked-chevron {
+  font-size: 9px;
+  opacity: 0.7;
+  transition: transform 0.12s ease;
+}
+
+.live-status {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: min(100%, 28rem);
+  overflow: hidden;
+}
+
+.live-text {
+  position: relative;
+  z-index: 1;
+  font-size: 13px;
+  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(100%, 28rem);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--text-secondary) 70%, transparent) 0%,
+    color-mix(in srgb, var(--text-secondary) 70%, transparent) 35%,
+    var(--text-primary) 50%,
+    color-mix(in srgb, var(--text-secondary) 70%, transparent) 65%,
+    color-mix(in srgb, var(--text-secondary) 70%, transparent) 100%
+  );
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: status-marquee 2s linear infinite;
+}
+
+.live-shimmer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--primary) 12%, transparent) 50%,
+    transparent 100%
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: status-sweep 1.8s ease-in-out infinite;
+}
+
+@keyframes status-marquee {
+  0% {
+    background-position: 100% 0;
+  }
+  100% {
+    background-position: -100% 0;
+  }
+}
+
+@keyframes status-sweep {
+  0% {
+    background-position: -40% 0;
+  }
+  100% {
+    background-position: 140% 0;
+  }
+}
+
+.summary-list {
+  list-style: none;
+  margin: 0.15rem 0 0.25rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.05rem;
+}
+
+.summary-list.live {
+  max-height: min(9.5rem, 28vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+.summary-item {
+  min-width: 0;
+}
+
+.summary-line {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0.12rem 0;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-line:hover:not(:disabled) {
+  color: var(--text-primary, #d1d5db);
+}
+
+.summary-line.active {
+  color: var(--text-primary, #d1d5db);
+}
+
+.summary-line.muted,
+.summary-line:disabled {
+  cursor: default;
+  opacity: 0.85;
+}
+
+.summary-detail {
+  margin: 0.15rem 0 0.35rem;
+  padding-left: 0;
+}
+
 .fallback-badge {
   align-self: flex-start;
   font-size: 0.65rem;
-  color: var(--text-muted, #9ca3af);
+  color: var(--text-secondary, #9ca3af);
   border: 1px solid color-mix(in srgb, var(--border-color, #e5e7eb) 80%, transparent);
   border-radius: 4px;
   padding: 0.05rem 0.35rem;
 }
 
-.process-rail {
-  padding: 0.15rem 0 0.15rem 0.65rem;
-  border-left: 2px solid color-mix(in srgb, var(--border-color, #e5e7eb) 70%, transparent);
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  min-width: 0;
-  max-width: 100%;
-  box-sizing: border-box;
-}
-
-.process-item {
-  min-width: 0;
-}
-
-.process-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  background: transparent;
-  border: none;
-  color: #9ca3af;
-  cursor: pointer;
-  padding: 0.15rem 0;
-  font-size: 0.72rem;
-  line-height: 1.3;
-  max-width: 100%;
-}
-
-.process-toggle:hover {
-  color: #6b7280;
-}
-
-.process-toggle .chevron {
-  font-size: 0.55rem;
-  width: 0.7rem;
-  opacity: 0.75;
-}
-
-.process-label {
-  font-weight: 400;
-  letter-spacing: 0.01em;
-}
-
-.process-hint {
-  font-size: 0.65rem;
-  opacity: 0.65;
-}
-
 .reasoning-body {
-  margin: 0.15rem 0 0.35rem 1rem;
-  padding: 0;
-  font-size: 0.72rem;
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.78rem;
   line-height: 1.45;
-  color: #9ca3af;
-}
-
-.reasoning-body :deep(p) {
-  margin: 0.25em 0;
-  color: inherit;
-}
-
-.reasoning-body :deep(code),
-.reasoning-body :deep(pre) {
-  font-size: 0.68rem;
-  color: #9ca3af;
-  background: transparent;
-}
-
-.tool-ico {
-  font-size: 0.65rem;
-  opacity: 0.8;
-}
-
-.tool-name {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-weight: 500;
-  font-size: 0.72rem;
-  color: #9ca3af;
-}
-
-.tool-status {
-  font-size: 0.65rem;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.2rem;
-  color: #b0b5bd;
-}
-
-.tool-status.done {
-  color: #a3a3a3;
-}
-
-.tool-status.running {
-  color: #9ca3af;
-}
-
-.tool-details {
-  margin: 0.15rem 0 0.35rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  color: var(--text-secondary, #9ca3af);
+  background: var(--code-bg, color-mix(in srgb, var(--bg-secondary, #f3f4f6) 70%, transparent));
+  border: 1px solid var(--code-border, transparent);
+  border-radius: var(--control-radius, 6px);
+  max-height: 12rem;
+  overflow: auto;
 }
 
 .tool-block-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.35rem;
   margin-bottom: 0.1rem;
 }
 
 .tool-block-label {
   font-size: 0.62rem;
-  color: #c0c4cc;
+  color: var(--text-secondary, #6b7280);
+  opacity: 0.8;
 }
 
 .tool-block pre {
@@ -321,16 +675,20 @@ function formatArgs(args: unknown): string {
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #9ca3af;
-  background: color-mix(in srgb, var(--bg-secondary, #f3f4f6) 60%, transparent);
-  border-radius: 4px;
-  border: none;
+  color: var(--code-fg, var(--text-secondary, #9ca3af));
+  background: var(--code-bg, color-mix(in srgb, var(--bg-secondary, #f3f4f6) 70%, transparent));
+  border-radius: var(--control-radius, 4px);
+  border: 1px solid var(--code-border, transparent);
+}
+
+.tool-block + .tool-block {
+  margin-top: 0.25rem;
 }
 
 .reply-block {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
   gap: 0.3rem;
   min-width: 0;
   max-width: 100%;
@@ -353,73 +711,8 @@ function formatArgs(args: unknown): string {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  align-self: flex-end;
+  width: 100%;
   min-height: 26px;
-}
-
-.stream-cursor {
-  display: inline-block;
-  width: 0.5ch;
-  height: 1em;
-  margin-left: 1px;
-  background: currentColor;
-  animation: blink 1s step-end infinite;
-  vertical-align: text-bottom;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-.typing-dots {
-  display: inline-flex;
-  gap: 2px;
-}
-.typing-dots > i {
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: bounce 1.2s infinite ease-in-out;
-}
-.typing-dots > i:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.typing-dots > i:nth-child(3) {
-  animation-delay: 0.3s;
-}
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    opacity: 0.3;
-    transform: translateY(0);
-  }
-  40% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
-}
-
-:global(.dark-mode) .process-toggle,
-:global(.dark-mode) .reasoning-body,
-:global(.dark-mode) .tool-name,
-:global(.dark-mode) .tool-status,
-:global(.dark-mode) .tool-block pre {
-  color: #6b7280;
-}
-
-:global(.dark-mode) .process-toggle:hover {
-  color: #9ca3af;
-}
-
-:global(.dark-mode) .process-rail {
-  border-left-color: rgba(75, 85, 99, 0.5);
-}
-
-:global(.dark-mode) .tool-block-label {
-  color: #4b5563;
+  margin-top: 0.15rem;
 }
 </style>

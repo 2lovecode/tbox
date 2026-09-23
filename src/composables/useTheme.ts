@@ -32,6 +32,7 @@ export function useTheme() {
 
     if (typeof document !== "undefined") {
       document.documentElement.classList.toggle("dark", isDark.value);
+      document.documentElement.classList.toggle("dark-mode", isDark.value);
     }
   };
 
@@ -59,9 +60,8 @@ export function useTheme() {
   }
 
   function toggleTheme() {
-    if (theme.value === "light") setTheme("dark");
-    else if (theme.value === "dark") setTheme("system");
-    else setTheme("light");
+    // 按当前实际观感切换，避免 system→light 在浅色系统下「点了没反应」
+    setTheme(isDark.value ? "light" : "dark");
   }
 
   return { theme, isDark, setTheme, toggleTheme };

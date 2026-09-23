@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
+use serde_json;
 use uuid::Uuid;
 
 use crate::agent::context_budget::estimate_tokens;
@@ -133,6 +134,87 @@ fn normalize_key(text: &str) -> Option<String> {
     None
 }
 
+const MEMORY_EXTRACT_SYSTEM: &str = r#"You extract durable user memories from a short conversation delta.
+Return ONLY a JSON array (max 8 items). Each item: {"text":"...","key":"optional.dot.key"}.
+Rules:
+- Selective: only stable preferences, identity, lasting constraints the user clearly stated.
+- Abstract: generalize one-off details into long-term facts when appropriate.
+- Structured: short factual Chinese or English sentences in "text".
+- Do NOT include tool raw output, secrets, API keys, passwords, tokens, or one-off trip details.
+- If nothing worth remembering, return [].
+No markdown fences, no commentary."#;
+
+const MAX_EXTRACT_CANDIDATES: usize = 8;
+const MAX_DELTA_CHARS: usize = 6000;
+
+/// Strip optional ``` / ```json fences and trim.
+pub fn strip_json_fences(raw: &str) -> String {
+    let t = raw.trim();
+    let t = t
+        .strip_prefix("```json")
+        .or_else(|| t.strip_prefix("```JSON"))
+        .or_else(|| t.strip_prefix("```"))
+        .unwrap_or(t);
+    let t = t.strip_suffix("```").unwrap_or(t);
+    t.trim().to_string()
+}
+
+/// Parse LLM memory-extract JSON into (key, text) candidates.
+pub fn parse_memory_candidates_json(raw: &str) -> Result<Vec<(Option<String>, String)>, String> {
+    let cleaned = strip_json_fences(raw);
+    if cleaned.is_empty() || cleaned == "[]" {
+        return Ok(Vec::new());
+    }
+    let value: serde_json::Value =
+        serde_json::from_str(&cleaned).map_err(|e| format!("memory extract json: {e}"))?;
+    let arr = if let Some(a) = value.as_array() {
+        a.clone()
+    } else if let Some(a) = value.get("memories").and_then(|v| v.as_array()) {
+        a.clone()
+    } else if let Some(a) = value.get("candidates").and_then(|v| v.as_array()) {
+        a.clone()
+    } else {
+        return Err("memory extract json: expected array".into());
+    };
+    let mut out = Vec::new();
+    for item in arr {
+        let text = item
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let Some(text) = text else {
+            continue;
+        };
+        if looks_like_secret(&text) {
+            continue;
+        }
+        let key = item
+            .get("key")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        out.push((key, text));
+        if out.len() >= MAX_EXTRACT_CANDIDATES {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Prefer non-empty LLM candidates; otherwise heuristic fallback.
+pub fn resolve_extract_candidates(
+    delta_text: &str,
+    llm_result: Result<Vec<(Option<String>, String)>, String>,
+) -> Vec<(Option<String>, String)> {
+    match llm_result {
+        Ok(c) if !c.is_empty() => c,
+        _ => extract_candidates_heuristic(delta_text),
+    }
+}
+
 /// Heuristic candidate extraction for tests / LLM fallback.
 pub fn extract_candidates_heuristic(user_and_assistant: &str) -> Vec<(Option<String>, String)> {
     let mut out = Vec::new();
@@ -162,6 +244,37 @@ pub fn extract_candidates_heuristic(user_and_assistant: &str) -> Vec<(Option<Str
         ));
     }
     out
+}
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect()
+}
+
+/// One-shot LLM extract (no tools). Caller supplies the active chat model.
+pub fn extract_candidates_via_llm(
+    model: &mut dyn crate::agent::llm::ChatModel,
+    delta_text: &str,
+) -> Result<Vec<(Option<String>, String)>, String> {
+    use crate::agent::llm::{ModelMessage, ModelTurn};
+    let clipped = truncate_chars(delta_text.trim(), MAX_DELTA_CHARS);
+    if clipped.is_empty() {
+        return Ok(Vec::new());
+    }
+    let msgs = vec![
+        ModelMessage::system(MEMORY_EXTRACT_SYSTEM),
+        ModelMessage::user(format!("Conversation delta:\n{clipped}")),
+    ];
+    let turn = model.complete(&msgs)?;
+    let text = match turn {
+        ModelTurn::Text { text, .. } => text,
+        ModelTurn::ToolCalls(_) => {
+            return Err("memory extract: unexpected tool_calls".into());
+        }
+    };
+    parse_memory_candidates_json(&text)
 }
 
 fn similarity(a: &str, b: &str) -> f64 {
@@ -488,7 +601,9 @@ pub fn memory_token_cap(context_limit: u32) -> u32 {
     five_pct.max(64).min(512)
 }
 
-/// Run heuristic extract+ingest after a turn (non-fatal).
+/// Run extract+ingest after a turn (non-fatal). Uses current LLM config via
+/// `build_model_from_disk` (does not reuse the agent-turn model, so scripted
+/// / in-flight backends are not consumed). Falls back to heuristic on failure.
 pub fn extract_and_ingest_session_delta(
     conversation_id: &str,
     delta_text: &str,
@@ -496,7 +611,11 @@ pub fn extract_and_ingest_session_delta(
     if !load_memory_settings().auto_memory_enabled {
         return Ok(0);
     }
-    let candidates = extract_candidates_heuristic(delta_text);
+    let llm_result = match crate::agent::llm::build_model_from_disk() {
+        Ok(mut m) => extract_candidates_via_llm(m.as_mut(), delta_text),
+        Err(e) => Err(format!("llm unavailable: {e:?}")),
+    };
+    let candidates = resolve_extract_candidates(delta_text, llm_result);
     if candidates.is_empty() {
         return Ok(0);
     }
@@ -620,5 +739,71 @@ mod tests {
         assert!(!c1.is_empty());
         let c2 = extract_candidates_heuristic("以后请用英文回答 use english");
         assert!(c2.iter().any(|(_, t)| t.contains("英文")));
+    }
+
+    #[test]
+    fn parse_candidates_json_array() {
+        let raw = r#"[{"text":"用户是后端工程师","key":"note.role"},{"text":"偏好简洁"}]"#;
+        let c = parse_memory_candidates_json(raw).unwrap();
+        assert_eq!(c.len(), 2);
+        assert_eq!(c[0].0.as_deref(), Some("note.role"));
+        assert!(c[1].0.is_none());
+    }
+
+    #[test]
+    fn parse_candidates_accepts_fence_and_wrapper() {
+        let raw = "```json\n{\"memories\":[{\"text\":\"用户偏好：中文\"}]}\n```";
+        let c = parse_memory_candidates_json(raw).unwrap();
+        assert_eq!(c.len(), 1);
+        assert!(c[0].1.contains("中文"));
+    }
+
+    #[test]
+    fn parse_candidates_rejects_invalid() {
+        assert!(parse_memory_candidates_json("not json").is_err());
+        assert!(parse_memory_candidates_json("{\"foo\":1}").is_err());
+    }
+
+    #[test]
+    fn parse_skips_secrets() {
+        let raw = r#"[{"text":"api_key sk-abcdefghijklmnopqrstuvwxyz"},{"text":"偏好简洁"}]"#;
+        let c = parse_memory_candidates_json(raw).unwrap();
+        assert_eq!(c.len(), 1);
+        assert!(c[0].1.contains("简洁"));
+    }
+
+    #[test]
+    fn resolve_prefers_non_empty_llm() {
+        let llm = Ok(vec![(Some("note.role".into()), "用户是后端工程师".into())]);
+        let c = resolve_extract_candidates("请用中文简洁回答", llm);
+        assert_eq!(c.len(), 1);
+        assert!(c[0].1.contains("后端"));
+    }
+
+    #[test]
+    fn resolve_falls_back_on_llm_err_or_empty() {
+        let c = resolve_extract_candidates("请用中文简洁回答", Err("boom".into()));
+        assert!(!c.is_empty());
+        let c2 = resolve_extract_candidates("请用中文简洁回答", Ok(vec![]));
+        assert!(!c2.is_empty());
+    }
+
+    #[test]
+    fn inject_independent_of_auto_memory_setting_logic() {
+        // retrieve_for_inject must work with stored memories regardless of settings gate
+        // (loop no longer wraps inject in auto_memory_enabled).
+        let conn = mem_db();
+        apply_action(
+            &conn,
+            MemoryAction::Add,
+            Some("preference.language_style".into()),
+            "用户偏好：中文简洁回答",
+            Some("c1"),
+            None,
+        )
+        .unwrap();
+        let (block, toks) = retrieve_for_inject(&conn, "你好", 8, 200).unwrap();
+        assert!(toks > 0);
+        assert!(block.contains("中文"));
     }
 }

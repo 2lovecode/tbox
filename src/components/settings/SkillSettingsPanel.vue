@@ -146,9 +146,9 @@ onMounted(() => {
 
 <template>
   <section class="skills-panel">
-    <h2>Skill 管理</h2>
+    <h2>技能</h2>
     <p class="lead">
-      内置 Skill 是 Agent 可按需查阅的工具说明书。禁用后不再注入 Agent 上下文，但工具箱页面和工具注册表不受影响。
+      内置技能是 Agent 可按需查阅的工具说明书。禁用后不再注入 Agent 上下文，但工具箱页面和工具注册表不受影响。
     </p>
 
     <div class="toolbar">
@@ -160,7 +160,7 @@ onMounted(() => {
     </div>
 
     <div class="management-actions">
-      <button type="button" class="btn primary" @click="openCreate"><i class="fas fa-plus"></i> 新建 Skill</button>
+      <button type="button" class="btn primary" @click="openCreate"><i class="fas fa-plus"></i> 新建技能</button>
       <button type="button" class="btn" @click="importSkill"><i class="fas fa-file-import"></i> 导入 Markdown</button>
     </div>
 
@@ -190,11 +190,11 @@ onMounted(() => {
       </article>
     </div>
 
-    <p v-if="!loading && !filteredSkills.length" class="empty">没有匹配的内置 Skill。</p>
+    <p v-if="!loading && !filteredSkills.length" class="empty">没有匹配的内置技能。</p>
 
     <dialog v-if="showDialog" class="skill-dialog" open @click.self="showDialog = false">
       <form class="dialog-form" @submit.prevent="saveSkill">
-        <h3>{{ form.id ? '编辑 Skill' : '新建 Skill' }}</h3>
+        <h3>{{ form.id ? '编辑技能' : '新建技能' }}</h3>
         <label><span>名称</span><input v-model="form.name" required /></label>
         <label><span>描述</span><input v-model="form.description" required /></label>
         <label><span>触发关键词</span><input v-model="form.keywords" placeholder="用英文逗号分隔" /></label>
@@ -209,8 +209,8 @@ onMounted(() => {
 
     <dialog v-if="showDeleteConfirm" class="skill-dialog confirm" open @click.self="showDeleteConfirm = null">
       <div class="dialog-form">
-        <h3>删除 Skill</h3>
-        <p>确定删除该用户 Skill？此操作不可撤销。</p>
+        <h3>删除技能</h3>
+        <p>确定删除该用户技能？此操作不可撤销。</p>
         <div class="dialog-actions">
           <button type="button" class="btn" @click="showDeleteConfirm = null">取消</button>
           <button type="button" class="btn danger" @click="deleteSkill(skills.find(skill => skill.id === showDeleteConfirm)!)">删除</button>
@@ -271,7 +271,7 @@ h2 {
   padding: 8px 12px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 8px;
-  background: var(--bg-primary, #fff);
+  background: var(--surface-2, var(--bg-secondary, #fff));
   color: var(--text-primary, #111827);
   font-size: 12px;
   cursor: pointer;
@@ -365,7 +365,7 @@ h2 {
   max-height: min(85vh, 860px);
   overflow: auto;
   border-radius: 12px;
-  background: var(--bg-primary, #fff);
+  background: var(--surface-2, var(--bg-secondary, #fff));
   padding: 20px;
   box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
 }
@@ -420,7 +420,7 @@ h2 {
   padding: 12px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 10px;
-  background: var(--bg-primary, #fff);
+  background: var(--surface-2, var(--bg-secondary, #fff));
 }
 
 .skill-card.disabled {

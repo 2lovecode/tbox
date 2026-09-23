@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -24,9 +24,7 @@ pub struct JsonUnescapeResult {
 pub fn format_json_pretty(json_str: String, indent_size: Option<usize>) -> Result<JsonFormatResult, String> {
     let indent_size = indent_size.unwrap_or(2);
 
-    // 解析JSON
-    let value: Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("JSON解析错误: {}", e))?;
+    let value = parse_json_value_lenient(&json_str)?;
 
     // 格式化输出（默认使用2个空格缩进）
     let formatted = serde_json::to_string_pretty(&value)
@@ -54,6 +52,65 @@ pub fn format_json_pretty(json_str: String, indent_size: Option<usize>) -> Resul
         formatted,
         is_valid: true,
     })
+}
+
+/// 宽松解析：合法 JSON、JSON 字符串包裹、已转义 / 多重转义均可；
+/// 小模型多写的尾部字符（如多余 `}`）会被忽略，只取第一个完整值。
+pub fn parse_json_value_lenient(input: &str) -> Result<Value, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("JSON解析错误: 输入为空".to_string());
+    }
+
+    let mut last_err = String::new();
+    let mut candidate = trimmed.to_string();
+    // 小模型常在 tool args 里对用户原文再套 1～3 层 `\`；每轮失败后剥一层。
+    for _ in 0..8 {
+        match parse_first_json_value(&candidate) {
+            Ok(Value::String(s)) => {
+                let st = s.trim();
+                if st.starts_with('{') || st.starts_with('[') {
+                    if let Ok(inner) = parse_first_json_value(st) {
+                        return Ok(inner);
+                    }
+                }
+                return Ok(Value::String(s));
+            }
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last_err = e;
+                let next = unescape_json_text(&candidate);
+                if next == candidate {
+                    break;
+                }
+                candidate = next;
+            }
+        }
+    }
+    let hint = if trimmed.contains('\\') {
+        "；若这是用户粘贴的转义 JSON，请把原文原样放入 input，不要再多写反斜杠"
+    } else {
+        ""
+    };
+    Err(format!("JSON解析错误: {last_err}{hint}"))
+}
+
+/// 只反序列化第一个 JSON 值，允许其后有多余字符（LLM 常见多括号/尾巴）。
+fn parse_first_json_value(input: &str) -> Result<Value, String> {
+    let mut de = serde_json::Deserializer::from_str(input.trim());
+    match Value::deserialize(&mut de) {
+        Ok(v) => Ok(v),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn unescape_json_text(escaped: &str) -> String {
+    escaped
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t")
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
 }
 
 /// 压缩JSON（去除所有空格和换行）
@@ -566,5 +623,69 @@ mod dispatch_tests {
         let out = url_parse_dispatch("https://x.com/?k=hi%20world").unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["query"]["k"], "hi world");
+    }
+
+    #[test]
+    fn format_pretty_accepts_escaped_json() {
+        let escaped = r#"{\"a\":1,\"b\":\"x\"}"#;
+        let result = format_json_pretty(escaped.to_string(), None).unwrap();
+        assert!(result.formatted.contains("\"a\": 1"), "got: {}", result.formatted);
+    }
+
+    #[test]
+    fn format_pretty_accepts_double_escaped_json() {
+        // 模型在 tool args 里再套一层 escape 后的常见形态
+        let double = r#"{\\\"query\\\":{\\\"x\\\":1}}"#;
+        let result = format_json_pretty(double.to_string(), None).unwrap();
+        assert!(result.formatted.contains("\"query\""), "got: {}", result.formatted);
+    }
+
+    #[test]
+    fn format_pretty_accepts_triple_escaped_json() {
+        // 小模型失败重试时再套一层 → 相对用户转义原文再 double 两次
+        let once = r#"{\"query\":{\"x\":1}}"#;
+        let double: String = once
+            .chars()
+            .flat_map(|c| if c == '\\' { vec!['\\', '\\'] } else { vec![c] })
+            .collect();
+        let triple: String = double
+            .chars()
+            .flat_map(|c| if c == '\\' { vec!['\\', '\\'] } else { vec![c] })
+            .collect();
+        let result = format_json_pretty(triple, None).unwrap();
+        assert!(result.formatted.contains("\"query\""), "got: {}", result.formatted);
+    }
+
+    #[test]
+    fn format_pretty_accepts_escaped_es_query_like_run() {
+        let escaped = r#"{\"query\":{\"function_score\":{\"boost_mode\":\"replace\",\"functions\":[{\"filter\":{\"term\":{\"keywd\":\"将台\"}},\"weight\":3},{\"filter\":{\"bool\":{\"minimum_should_match\":\"1\",\"should\":{\"prefix\":{\"keywd.keyword\":\"将台\"}}}},\"weight\":2},{\"filter\":{\"bool\":{\"minimum_should_match\":\"1\",\"should\":{\"wildcard\":{\"keywd.keyword\":{\"wildcard\":\"*将台*\"}}}}},\"weight\":1},{\"filter\":{\"match_all\":{}},\"weight\":0}],\"query\":{\"bool\":{\"filter\":{\"term\":{\"is_del\":0}},\"minimum_should_match\":\"1\",\"must_not\":{\"term\":{\"manual_weight\":0}},\"should\":{\"term\":{\"synonym_wd\":\"将台\"}}}},\"score_mode\":\"first\"}},\"size\":10,\"sort\":[{\"_score\":{\"order\":\"desc\"}},{\"manual_weight\":{\"missing\":2,\"order\":\"desc\"}},{\"type_weight\":{\"order\":\"desc\"}},{\"house_counts\":{\"order\":\"desc\"}},{\"hits_counts\":{\"order\":\"desc\"}},{\"length\":{\"order\":\"asc\"}},{\"id\":{\"order\":\"asc\"}}]}"#;
+        let result = format_json_pretty(escaped.to_string(), None).unwrap();
+        assert!(result.formatted.contains("function_score"), "got: {}", result.formatted);
+        assert!(result.formatted.contains("将台"), "got: {}", result.formatted);
+    }
+
+    #[test]
+    fn parse_lenient_unwraps_json_string() {
+        let wrapped = r#""{\"a\":1}""#;
+        let v = parse_json_value_lenient(wrapped).unwrap();
+        assert_eq!(v["a"], 1);
+    }
+
+    #[test]
+    fn parse_lenient_ignores_trailing_braces() {
+        // 小模型在 tool args 末尾多写一个 }
+        let with_trail = r#"{"query":{"x":1}}}"#;
+        let v = parse_json_value_lenient(with_trail).unwrap();
+        assert_eq!(v["query"]["x"], 1);
+    }
+
+    #[test]
+    fn format_pretty_ignores_trailing_chars_like_run() {
+        let mut body = String::from(
+            r#"{"query":{"function_score":{"boost_mode":"replace","functions":[{"filter":{"term":{"keywd":"朝阳"}},"weight":3}],"query":{"bool":{"must":{"regexp":{"keywd.keyword":{"value":"朝"}}}}}},"size":10,"sort":[{"_score":{"order":"desc"}}]}"#,
+        );
+        body.push('}'); // 多余尾括号，对应本次轨迹 trailing characters
+        let result = format_json_pretty(body, None).unwrap();
+        assert!(result.formatted.contains("function_score"), "got: {}", result.formatted);
     }
 }

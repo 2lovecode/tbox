@@ -1,37 +1,21 @@
 ---
 tool_id: json.format
-keywords: 格式化, 美化, pretty, format, 缩进, 排版 JSON
-avoid_keywords: 平铺, flatten, 展平, query string, URL 参数, 转成 query, form
+keywords: 格式化, 美化, pretty, format, 缩进, 排版 JSON, 转义, 反转义, 去转义, unescape, escape, 转义一下, 转义下
+avoid_keywords: 字符集, charset, UTF-8, GBK, 乱码
 ---
 
 # JSON 格式化
 
 ## 何时使用 / 何时不用
 
-- **用**：用户请求与本工具能力描述一致时
-- **不用**：请求属于其它近邻工具或纯闲聊时，勿强行调用
+- **用**：「转义 / 反转义 / 去转义 / 格式化 / 美化」JSON（含 `{\"a\":1}`）
+- **不用**：字符集/乱码 → `charset.convert`；转 query → `json.to_query`
+- **禁止**：把「转义」当成 `charset.convert` 或 URL 编码
 
-`json.format` 把 JSON 字符串格式化为带缩进的可读形式。参数：`input` — 待格式化的 JSON 字符串。
+本工具 = 反转义 + 缩进美化（无单独 unescape）。回复直接展示工具返回的缩进 JSON。
 
-## 典型应用场景
+**用户**：转义下 `{\"a\":1}`
+**调用**：`<tool_call>{"name":"json.format","arguments":{"input":"{\"a\":1}"}}</tool_call>`
+**禁止**：`{\\\"a\\\":1}`（多套反斜杠）；禁止改调 `charset.convert`
 
-- 接口响应 / 配置文件可视化
-- 排查 JSON 错误前先对齐格式
-- 与 `json.to_query` / `json.flatten` 串联：先格式化看清结构再转换
-
-## 用户问法 → 工具调用样本
-
-**用户**：格式化这段 JSON `{"a":1}`
-**工具调用**：`<tool_call>{"name": "json.format", "arguments": {"input": "{\"a\":1}"}}</tool_call>`
-**预期输出**：
-```
-{
-  "a": 1
-}
-```
-
-**用户**：pretty print this json: `[1,2,3]`
-**工具调用**：`<tool_call>{"name": "json.format", "arguments": {"input": "[1,2,3]"}}</tool_call>`
-**预期输出**：带缩进的数组形式
-
-边界：非法 JSON 报错并给出原因。
+规则：用户原文原样进 input；报错仍用原文重试。

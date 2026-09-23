@@ -1,6 +1,7 @@
 ---
 tool_id: url.parse
-keywords: url, URL, 解析, parse, 拆解, scheme, host, port, path, query, fragment, 域名
+keywords: url, URL, 解析 URL, parse URL, 拆解, scheme, host, port, path, fragment, 域名
+avoid_keywords: 转义, 反转义, 格式化, query string, 转成 query
 ---
 
 # URL 拆解

@@ -89,7 +89,8 @@ onMounted(() => {
   <section class="memory-panel">
     <h2>用户记忆</h2>
     <p class="lead">
-      对话结束后自动抽取稳定偏好；冲突时以 UPDATE 覆盖，旧值可撤销。密钥类内容不会入库。
+      对话结束后用当前模型自动抽取稳定偏好；冲突时以 UPDATE 覆盖，旧值可撤销。密钥类内容不会入库。
+      关闭「自动抽取」后不再写入新记忆，但已有生效记忆仍会注入新对话。
     </p>
 
     <div class="card">
@@ -97,6 +98,7 @@ onMounted(() => {
         <input v-model="settings.autoMemoryEnabled" type="checkbox" @change="saveSettings" />
         <span>自动从对话抽取记忆</span>
       </label>
+      <p class="hint muted-hint">关闭后仍会在上下文中使用已保存的记忆；可在下方删除或撤销。</p>
       <p v-if="feedback" class="hint">{{ feedback }}</p>
     </div>
 
@@ -142,9 +144,9 @@ onMounted(() => {
 }
 .card {
   padding: 14px 16px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--shell-divider, var(--border-color, #e5e7eb));
   border-radius: 12px;
-  background: var(--bg-primary, #fff);
+  background: var(--surface-2, var(--bg-secondary, #fff));
 }
 .check-row {
   display: flex;
@@ -156,6 +158,9 @@ onMounted(() => {
   margin: 8px 0 0;
   font-size: 13px;
   color: var(--text-secondary, #6b7280);
+}
+.muted-hint {
+  margin-top: 8px;
 }
 .list-head {
   display: flex;

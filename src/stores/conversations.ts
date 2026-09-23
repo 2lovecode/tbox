@@ -129,17 +129,56 @@ export const useConversationsStore = defineStore('conversations', {
       }
     },
 
-    async deleteConversation(id: string) {
+    async deleteConversation(id: string): Promise<boolean> {
       this.lastError = null;
       try {
+        const { useAgentRunsStore } = await import('@/stores/agentRuns');
+        const runs = useAgentRunsStore();
+        if (runs.isRunning(id)) {
+          try {
+            await invoke('cancel_chat_turn', { conversationId: id });
+          } catch {
+            /* best-effort */
+          }
+        }
         await invoke('delete_conversation', { conversationId: id });
+        runs.clearConversation(id);
         if (this.activeId === id) {
           this.newChat();
         }
         await this.loadList();
+        return true;
       } catch (error) {
         console.error('[conversations] delete failed:', error);
         this.lastError = error instanceof Error ? error.message : String(error);
+        return false;
+      }
+    },
+
+    async renameConversation(id: string, title: string) {
+      const trimmed = title.trim();
+      if (!trimmed) {
+        this.lastError = '标题不能为空';
+        return;
+      }
+      this.lastError = null;
+      try {
+        const conv = await invoke<Conversation>('rename_conversation', {
+          conversationId: id,
+          title: trimmed,
+        });
+        this.applyTitle(conv.id, conv.title);
+      } catch (error) {
+        console.error('[conversations] rename failed:', error);
+        this.lastError = error instanceof Error ? error.message : String(error);
+        throw error;
+      }
+    },
+
+    applyTitle(id: string, title: string) {
+      const idx = this.items.findIndex((c) => c.id === id);
+      if (idx >= 0) {
+        this.items[idx] = { ...this.items[idx], title };
       }
     },
 

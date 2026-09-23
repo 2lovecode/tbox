@@ -1,6 +1,5 @@
 //! Tauri commands that drive one agent chat turn and stream events to the UI.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -8,16 +7,26 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::agent::llm::{ChatModel, ModelMessage, ModelTurn, AgentError, StreamMode};
 use crate::agent::r#loop::{run_agent, AgentEvent};
+use crate::agent::run_registry::RunRegistry;
 
 pub const AGENT_EVENT: &str = "agent-event";
+pub const AGENT_RUN_STATUS: &str = "agent-run-status";
 
-/// Shared cancel flag for the in-flight agent turn.
-pub struct AgentCancel(pub Arc<AtomicBool>);
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRunStatusPayload {
+    pub conversation_id: String,
+    pub status: String, // "running" | "idle"
+}
 
-impl Default for AgentCancel {
-    fn default() -> Self {
-        Self(Arc::new(AtomicBool::new(false)))
-    }
+fn emit_run_status(app: &AppHandle, conversation_id: &str, status: &str) {
+    let _ = app.emit(
+        AGENT_RUN_STATUS,
+        AgentRunStatusPayload {
+            conversation_id: conversation_id.to_string(),
+            status: status.to_string(),
+        },
+    );
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -170,23 +179,26 @@ pub fn check_llm_ready() -> Result<bool, String> {
 #[allow(non_snake_case)]
 pub async fn send_chat_turn(
     app: AppHandle,
-    cancel_state: State<'_, AgentCancel>,
+    registry: State<'_, Arc<RunRegistry>>,
     conversationId: String,
     content: String,
 ) -> Result<(), String> {
     llm_is_ready()?;
 
-    cancel_state.0.store(false, Ordering::SeqCst);
-    let cancel = Arc::clone(&cancel_state.0);
+    let registry = Arc::clone(&registry);
+    let cancel = registry.try_begin(&conversationId)?;
+    emit_run_status(&app, &conversationId, "running");
+
     let conv_id = conversationId.clone();
     let user_text = content;
     let use_mock = mock_agent_enabled();
+    let app_for_worker = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
         let cancel_flag = cancel;
         let emit = |ev: AgentEvent| {
             let payload = wire_event(conv_id.clone(), ev);
-            let _ = app.emit(AGENT_EVENT, payload);
+            let _ = app_for_worker.emit(AGENT_EVENT, payload);
         };
 
         let result = if use_mock {
@@ -209,14 +221,15 @@ pub async fn send_chat_turn(
                     &user_text,
                     cancel_flag.as_ref(),
                     emit,
-                ),                Err(AgentError::LlmUnavailable) => {
+                ),
+                Err(AgentError::LlmUnavailable) => {
                     let payload = wire_event(
                         conv_id.clone(),
                         AgentEvent::Error {
                             message: LLM_UNAVAILABLE.into(),
                         },
                     );
-                    let _ = app.emit(AGENT_EVENT, payload);
+                    let _ = app_for_worker.emit(AGENT_EVENT, payload);
                     Err(LLM_UNAVAILABLE.into())
                 }
                 Err(AgentError::Other(e)) => Err(e),
@@ -224,17 +237,24 @@ pub async fn send_chat_turn(
         };
 
         if let Err(e) = result {
-            let payload = wire_event(conv_id, AgentEvent::Error { message: e });
-            let _ = app.emit(AGENT_EVENT, &payload);
+            let payload = wire_event(conv_id.clone(), AgentEvent::Error { message: e });
+            let _ = app_for_worker.emit(AGENT_EVENT, &payload);
         }
+
+        registry.finish(&conv_id);
+        emit_run_status(&app_for_worker, &conv_id, "idle");
     });
 
     Ok(())
 }
 
 #[tauri::command]
-pub fn cancel_chat_turn(cancel_state: State<'_, AgentCancel>) -> Result<(), String> {
-    cancel_state.0.store(true, Ordering::SeqCst);
+#[allow(non_snake_case)]
+pub fn cancel_chat_turn(
+    registry: State<'_, Arc<RunRegistry>>,
+    conversationId: String,
+) -> Result<(), String> {
+    registry.cancel(&conversationId);
     Ok(())
 }
 

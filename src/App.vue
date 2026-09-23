@@ -17,6 +17,7 @@ import { useOnlineStatus } from "@/composables/useOnlineStatus";
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts";
 import { formatShortcut } from "@/composables/useKeyboardShortcuts";
 import { detectPlatform } from "@/utils/platform";
+import { useSidebarWidth } from "@/composables/useSidebarWidth";
 
 const store  = useToolStore()
 const searchStore = useSearchStore()
@@ -118,8 +119,25 @@ onMounted(async () => {
   }
 })
 
-// 对话首页与工具箱页显示侧栏；设置页与具体工具页不显示
-const showSidebar = computed(() => route.path === '/' || route.path === '/toolbox')
+// 仅对话相关页显示会话侧栏；工具箱 / 设置 / 具体工具页不显示
+const showSidebar = computed(
+  () =>
+    route.path === '/' ||
+    route.path.startsWith('/agent-runs/'),
+)
+
+const {
+  cssWidth: sidebarCssWidth,
+  dragging: sidebarDragging,
+  startResize: startSidebarResize,
+  ariaValue: sidebarAria,
+} = useSidebarWidth(showSidebar)
+
+const containerStyle = computed(() =>
+  showSidebar.value
+    ? ({ '--sidebar-width': sidebarCssWidth.value } as Record<string, string>)
+    : undefined,
+)
 
 // Detect platform once for the keyboard-shortcut hint in the header.
 const isMac = detectPlatform() === 'mac';
@@ -137,13 +155,21 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-      <div class="container" :class="{ 'no-sidebar': !showSidebar, 'dark-mode': isDark }">
+      <div
+        class="container"
+        :class="{
+          'no-sidebar': !showSidebar,
+          'dark-mode': isDark,
+          'sidebar-dragging': sidebarDragging,
+        }"
+        :style="containerStyle"
+      >
         <header>
           <div class="logo" @click="$router.push('/')" style="cursor: pointer;">
             <div class="logo-icon">
               <i class="fas fa-toolbox"></i>
             </div>
-            <div class="logo-text">万能<span>工具箱</span></div>
+            <div class="logo-text">T<span>Box</span></div>
           </div>
           <div class="header-actions">
             <span
@@ -166,6 +192,16 @@ onBeforeUnmount(() => {
               <span class="spotlight-trigger-label">搜索工具…</span>
               <kbd class="spotlight-trigger-kbd">{{ spotlightHint }}</kbd>
             </button>
+            <button
+              type="button"
+              class="theme-toggle toolbox-toggle"
+              :class="{ active: route.path === '/toolbox' }"
+              title="工具箱"
+              aria-label="打开工具箱"
+              @click="router.push('/toolbox')"
+            >
+              <i class="fas fa-th-large"></i>
+            </button>
             <button @click="toggleTheme" class="theme-toggle" :title="isDark ? '切换到浅色模式' : '切换到深色模式'">
               <i :class="isDark ? 'fas fa-sun' : 'fas fa-moon'"></i>
             </button>
@@ -180,7 +216,18 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </header>
-      <SideBar v-if="showSidebar"></SideBar>      
+      <SideBar v-if="showSidebar" />
+      <div
+        v-if="showSidebar"
+        class="sidebar-resizer"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整侧栏宽度"
+        :aria-valuenow="sidebarAria.now"
+        :aria-valuemin="sidebarAria.min"
+        :aria-valuemax="sidebarAria.max"
+        @pointerdown="startSidebarResize"
+      ></div>
       <div class="main-wrapper">
         <Transition name="fade" mode="out-in">
           <RouterView v-if="!isLoading" v-slot="{ Component }">
@@ -194,9 +241,6 @@ onBeforeUnmount(() => {
           </div>
         </Transition>
       </div>
-      <footer>
-        <p>© 2025 万能工具箱 | 版本: 3.0.0 | 已收录 {{ tools.length }} 个实用工具</p>
-        </footer>
         <Toast />
         <SpotlightSearch />
         <ShortcutHints />
@@ -228,19 +272,137 @@ onBeforeUnmount(() => {
     --bg-primary: #ffffff;
     --bg-secondary: #f5f7fa;
     --bg-tertiary: #e4edf5;
+    --surface-1: #ffffff;
+    --surface-2: #f8fafc;
+    --surface-elevated: #ffffff;
     --text-primary: #212529;
     --text-secondary: #6c757d;
     --border-color: rgba(0, 0, 0, 0.1);
+    /* 壳层统一：柔和分隔线 + 水平 gutter */
+    --shell-divider: color-mix(in srgb, var(--border-color) 72%, transparent);
+    --shell-gutter: 16px;
+    --control-radius: 8px;
+    /* 侧栏 / 聊天列：相对视口自适应；侧栏实际宽度由拖拽写入 --sidebar-width */
+    --sidebar-width-min: max(180px, 12vw);
+    --sidebar-width-max: min(300px, 24vw);
+    --sidebar-width: clamp(var(--sidebar-width-min), 15vw, var(--sidebar-width-max));
+    --chat-width-min: max(280px, 28vw);
+    --chat-width-max: min(840px, 62vw);
+    --header-control-h: 32px;
+    /* 聊天底栏与侧栏工具箱共用，保证顶部分隔线对齐 */
+    --chat-dock-pad-top: 10px;
+    --chat-dock-pad-bottom: 12px;
+    --chat-dock-control-h: 40px;
+    /* 代码块：随主题抬升一层，避免全黑卡片 */
+    --code-bg: color-mix(in srgb, var(--bg-tertiary) 42%, var(--bg-primary));
+    --code-fg: var(--text-primary);
+    --code-muted: var(--text-secondary);
+    --code-border: var(--shell-divider);
+    --warning: #b45309;
+    --danger: #dc2626;
+    --success: #16a34a;
   }
 
+  /* ---- Markdown 代码块（随主题，聊天与轨迹页共用） ---- */
+  .md-content .md-code-block {
+    position: relative;
+    margin: 8px 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 28px 12px 12px;
+    border-radius: var(--control-radius, 8px);
+    background: var(--code-bg);
+    overflow-x: auto;
+    border: 1px solid var(--code-border);
+  }
+
+  .md-content .md-code-block code {
+    background: transparent;
+    padding: 0;
+    color: var(--code-fg);
+    font-size: 12.5px;
+    line-height: 1.55;
+    display: block;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .md-content .md-code-lang {
+    position: absolute;
+    top: 8px;
+    left: 12px;
+    right: auto;
+    font-size: 10.5px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--code-muted);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    pointer-events: none;
+  }
+
+  .md-content .md-code-block .hljs {
+    background: transparent !important;
+    padding: 0;
+    color: var(--code-fg);
+  }
+
+  /* 代码块复制按钮：固定右上角 */
+  .md-content .md-code-copy {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    left: auto;
+    z-index: 2;
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+    color: var(--code-muted);
+    font-size: 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 1;
+    transition: background 0.15s ease, color 0.15s ease;
+    padding: 0;
+  }
+
+  .md-content .md-code-copy:hover,
+  .md-content .md-code-copy:focus-visible {
+    background: color-mix(in srgb, var(--text-secondary) 22%, transparent);
+    color: var(--code-fg);
+  }
+
+  .md-content .md-code-copy.copied {
+    color: var(--success);
+  }
+
+  /* html.dark 与 .dark-mode 同步，保证 body / 弹层 / 各页共用同一套 token */
+  html.dark,
+  html.dark-mode,
   .dark-mode {
-    --bg-primary: #1a1a2e;
-    --bg-secondary: #16213e;
-    --bg-tertiary: #0f3460;
-    --text-primary: #e4e4e7;
-    --text-secondary: #a1a1aa;
-    --border-color: rgba(255, 255, 255, 0.1);
-    --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    --bg-primary: #0f1115;
+    --bg-secondary: #151820;
+    --bg-tertiary: #1c2029;
+    --surface-1: #151820;
+    --surface-2: #1c2029;
+    --surface-elevated: #222733;
+    --text-primary: #e8eaed;
+    --text-secondary: #9aa0a6;
+    --border-color: rgba(255, 255, 255, 0.08);
+    --shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    --shell-divider: color-mix(in srgb, var(--border-color) 85%, transparent);
+    --code-bg: #1a1d26;
+    --code-fg: #d7dbe3;
+    --code-muted: #8b919a;
+    --code-border: var(--shell-divider);
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --success: #4ade80;
+    color-scheme: dark;
   }
 
   html,
@@ -251,11 +413,11 @@ onBeforeUnmount(() => {
   }
 
   body {
-    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+    background: var(--bg-primary);
     color: var(--text-primary);
     height: 100%;
     overflow: hidden;
-    padding: 16px 20px;
+    padding: 0;
     transition: background 0.3s ease, color 0.3s ease;
   }
 
@@ -287,15 +449,16 @@ onBeforeUnmount(() => {
   }
   
   .container {
-    max-width: 1400px;
-    margin: 0 auto;
+    max-width: none;
+    width: 100%;
+    margin: 0;
     height: 100%;
     max-height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: 210px 1fr;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 16px 20px;
+    grid-template-columns: var(--sidebar-width) 5px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0;
     overflow: hidden;
   }
 
@@ -305,26 +468,85 @@ onBeforeUnmount(() => {
 
   .container.no-sidebar .main-wrapper {
     grid-column: 1;
+    grid-row: 2;
     max-width: 100%;
   }
 
   .container > aside {
+    grid-column: 1;
+    grid-row: 2;
     min-height: 0;
     overflow: hidden;
+    position: relative;
   }
 
   .main-wrapper {
+    grid-column: 3;
+    grid-row: 2;
     min-height: 0;
     height: 100%;
     overflow: hidden;
     background: transparent;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* 侧栏拖拽分隔条 */
+  .sidebar-resizer {
+    grid-row: 2;
+    grid-column: 2;
+    position: relative;
+    z-index: 6;
+    width: 100%;
+    height: 100%;
+    cursor: col-resize;
+    touch-action: none;
+    user-select: none;
+    background: transparent;
+  }
+
+  .sidebar-resizer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-50%);
+    background: var(--shell-divider);
+    pointer-events: none;
+    transition: background 0.12s ease, width 0.12s ease;
+  }
+
+  .sidebar-resizer:hover::after,
+  .sidebar-resizer:focus-visible::after,
+  .container.sidebar-dragging .sidebar-resizer::after {
+    width: 2px;
+    background: color-mix(in srgb, var(--primary) 55%, var(--shell-divider));
+  }
+
+  .container.sidebar-dragging {
+    cursor: col-resize;
+  }
+
+  .container.sidebar-dragging .main-wrapper {
+    pointer-events: none;
   }
 
   .main-wrapper > * {
     min-height: 0;
     flex: 1;
+    min-width: 0;
+  }
+
+  /* 对话页：列宽受限并在主区水平居中，两侧留白 */
+  .main-wrapper > .chat-home {
+    width: min(100%, var(--chat-width-max));
+    min-width: min(100%, var(--chat-width-min));
+    max-width: var(--chat-width-max);
+    align-self: center;
+    margin-inline: auto;
   }
 
   .loading-container {
@@ -333,9 +555,9 @@ onBeforeUnmount(() => {
     align-items: center;
     justify-content: center;
     padding: 100px 20px;
-    background: white;
-    border-radius: var(--border-radius);
-    box-shadow: var(--shadow);
+    background: var(--bg-primary);
+    border-radius: 0;
+    box-shadow: none;
   }
 
   .loading-spinner {
@@ -358,39 +580,43 @@ onBeforeUnmount(() => {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 8px 0 12px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+    padding: 10px var(--shell-gutter);
+    border-bottom: 1px solid var(--shell-divider);
     flex-shrink: 0;
+    background: var(--bg-primary);
+    min-height: calc(var(--header-control-h, 32px) + 20px);
   }
   
   .logo {
     display: flex;
     align-items: center;
-    gap: 15px;
-    transition: var(--transition);
+    gap: 10px;
+    transition: opacity 0.15s ease;
   }
 
   .logo:hover {
-    transform: scale(1.02);
+    transform: none;
+    opacity: 0.85;
   }
   
   .logo-icon {
-    width: 48px;
-    height: 48px;
+    width: var(--header-control-h, 32px);
+    height: var(--header-control-h, 32px);
     background: linear-gradient(135deg, var(--primary), var(--secondary));
-    border-radius: 14px;
+    border-radius: var(--control-radius);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 24px;
-    box-shadow: var(--shadow);
+    font-size: 14px;
+    box-shadow: none;
   }
   
   .logo-text {
-    font-size: 28px;
-    font-weight: 700;
-    color: var(--dark);
+    font-size: 17px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
   }
   
   .logo-text span {
@@ -401,33 +627,41 @@ onBeforeUnmount(() => {
   .header-actions {
     display: flex;
     align-items: center;
-    gap: 20px;
+    gap: 8px;
   }
 
   /* 主题切换按钮 */
   .theme-toggle {
-    width: 45px;
-    height: 45px;
-    border-radius: 12px;
-    border: none;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-size: 18px;
+    width: var(--header-control-h, 32px);
+    height: var(--header-control-h, 32px);
+    border-radius: var(--control-radius);
+    border: 1px solid var(--shell-divider);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 13px;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: var(--transition);
-    box-shadow: var(--shadow);
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+    box-shadow: none;
   }
 
   .theme-toggle:hover {
-    transform: scale(1.1);
-    box-shadow: 0 6px 25px rgba(67, 97, 238, 0.3);
+    transform: none;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+    box-shadow: none;
   }
 
   .settings-toggle {
-    font-size: 16px;
+    font-size: 13px;
+  }
+
+  .toolbox-toggle.active {
+    color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--shell-divider));
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
   }
 
   .settings-toggle:hover {
@@ -439,11 +673,11 @@ onBeforeUnmount(() => {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    background: rgba(244, 67, 54, 0.12);
+    padding: 4px 8px;
+    border-radius: var(--control-radius);
+    background: rgba(244, 67, 54, 0.1);
     color: #c62828;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
     line-height: 1;
   }
@@ -463,58 +697,61 @@ onBeforeUnmount(() => {
   .spotlight-trigger {
     display: inline-flex;
     align-items: center;
-    gap: 10px;
-    min-width: 240px;
-    padding: 10px 16px;
-    background: var(--bg-primary);
+    gap: 8px;
+    min-width: 180px;
+    height: var(--header-control-h, 32px);
+    padding: 0 10px;
+    background: transparent;
     color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
+    border: 1px solid var(--shell-divider);
+    border-radius: var(--control-radius);
     cursor: pointer;
     font-family: inherit;
-    font-size: 14px;
-    box-shadow: var(--shadow);
-    transition: var(--transition);
+    font-size: 13px;
+    box-shadow: none;
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+    box-sizing: border-box;
   }
   .spotlight-trigger:hover {
-    border-color: var(--primary);
+    border-color: color-mix(in srgb, var(--primary) 40%, var(--shell-divider));
     color: var(--primary);
-    transform: translateY(-1px);
-    box-shadow: 0 6px 25px rgba(67, 97, 238, 0.2);
+    background: color-mix(in srgb, var(--primary) 5%, transparent);
+    transform: none;
+    box-shadow: none;
   }
   .spotlight-trigger:focus-visible {
     outline: none;
     border-color: var(--primary);
-    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.2);
+    box-shadow: 0 0 0 3px rgba(67, 97, 238, 0.15);
   }
   .spotlight-trigger > i {
-    font-size: 15px;
+    font-size: 13px;
   }
   .spotlight-trigger-label {
     flex: 1;
     text-align: left;
-    color: var(--text-secondary);
-    font-size: 15px;
+    color: inherit;
+    font-size: 12.5px;
   }
   .spotlight-trigger-kbd {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-width: 48px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 8px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
+    min-width: 36px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 5px;
+    background: color-mix(in srgb, var(--text-secondary) 8%, transparent);
+    border: 1px solid var(--shell-divider);
+    color: var(--text-secondary);
     font-family: 'SF Mono', 'Menlo', 'Consolas', monospace;
-    font-size: 14px;
+    font-size: 11px;
     font-weight: 600;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
   }
   .spotlight-trigger:hover .spotlight-trigger-kbd {
-    background: rgba(67, 97, 238, 0.12);
-    border-color: rgba(67, 97, 238, 0.35);
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+    border-color: color-mix(in srgb, var(--primary) 28%, transparent);
     color: var(--primary);
   }
 
@@ -580,18 +817,6 @@ onBeforeUnmount(() => {
     font-size: 18px;
   }
   
-  /* 底部信息 */
-  footer {
-    grid-column: 1 / -1;
-    text-align: center;
-    padding: 12px 0 4px;
-    color: var(--gray);
-    font-size: 13px;
-    border-top: 1px solid rgba(0, 0, 0, 0.05);
-    margin-top: 0;
-    flex-shrink: 0;
-  }
-  
   /* 窄屏：单列并隐藏侧栏。断点须低于默认窗口宽，避免启动即乱版。
      用 .container > aside 提高优先级，压过 SideBar scoped 样式。 */
   @media (max-width: 900px) {
@@ -599,8 +824,14 @@ onBeforeUnmount(() => {
       grid-template-columns: 1fr;
     }
 
-    .container > aside {
+    .container > aside,
+    .sidebar-resizer {
       display: none;
+    }
+
+    .container .main-wrapper {
+      grid-column: 1;
+      grid-row: 2;
     }
 
     .featured-tools {

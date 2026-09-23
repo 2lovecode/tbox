@@ -25,23 +25,23 @@
   background: rgba(108, 117, 125, 0.18);
   color: var(--text-secondary, #6c757d);
 }
-.status-pill.ok { background: rgba(76, 175, 80, 0.18); color: #2e7d32; }
-.status-pill.warn { background: rgba(255, 152, 0, 0.18); color: #ef6c00; }
-.status-pill.muted { background: rgba(108, 117, 125, 0.18); color: var(--text-secondary, #6c757d); }
+.status-pill.ok { background: color-mix(in srgb, var(--success) 18%, transparent); color: var(--success); }
+.status-pill.warn { background: color-mix(in srgb, var(--warning) 18%, transparent); color: var(--warning); }
+.status-pill.muted { background: color-mix(in srgb, var(--text-secondary) 18%, transparent); color: var(--text-secondary, #6c757d); }
 .status-pill.inline { font-size: 10px; padding: 1px 6px; }
 
 .state-line {
   padding: 16px;
   border-radius: 10px;
-  background: var(--bg-secondary, #f5f7fa);
+  background: var(--surface-2, var(--bg-secondary, #f5f7fa));
   color: var(--text-secondary, #6c757d);
   font-size: 13px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
-.state-line.error { background: rgba(244, 67, 54, 0.08); color: #c62828; }
-.state-line.ok { color: #15803d; }
+.state-line.error { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.state-line.ok { color: var(--success); }
 
 .muted { color: var(--text-secondary, #6c757d); }
 
@@ -73,14 +73,14 @@
   justify-content: space-between;
   gap: 12px;
   padding: 10px 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--shell-divider, var(--border-color, #e5e7eb));
   border-radius: 8px;
-  background: var(--surface-2, #f8fafc);
+  background: var(--surface-2, var(--bg-secondary, #f8fafc));
 }
 
 .profile-row.active {
   border-color: var(--primary, #4361ee);
-  background: rgba(67, 97, 238, 0.06);
+  background: color-mix(in srgb, var(--primary) 12%, var(--surface-2, transparent));
 }
 
 .profile-meta {
@@ -158,9 +158,9 @@
   font-family: inherit;
   font-size: 13px;
   padding: 9px 12px;
-  border: 1px solid var(--border-color, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--shell-divider, var(--border-color, rgba(0, 0, 0, 0.15)));
   border-radius: 8px;
-  background: var(--bg-primary, #ffffff);
+  background: var(--surface-elevated, var(--bg-primary, #ffffff));
   color: var(--text-primary, #212529);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
   width: 100%;
@@ -213,7 +213,7 @@ select.field-input {
   padding: 10px 12px;
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 8px;
-  background: var(--surface-2, #f8fafc);
+  background: var(--surface-2, var(--bg-secondary, #f8fafc));
 }
 
 .model-meta {

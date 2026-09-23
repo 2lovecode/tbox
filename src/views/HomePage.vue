@@ -3,25 +3,41 @@ import { ref, computed, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useConversationsStore, type ChatMessage } from '@/stores/conversations';
+import { useAgentRunsStore } from '@/stores/agentRuns';
 import { useRouter } from 'vue-router';
 import ModelSwitcher from '@/components/ModelSwitcher.vue';
 import AssistantTrajectory from '@/components/AssistantTrajectory.vue';
 import CopyIconButton from '@/components/CopyIconButton.vue';
 import {
-  appendReasoning,
-  appendText,
+  flattenTrajectoryEvents,
   resolveTrajectory,
-  type StreamMode,
   type TrajectoryStep,
 } from '@/utils/trajectory';
 
 const conversations = useConversationsStore();
+const agentRuns = useAgentRunsStore();
 const router = useRouter();
 const draft = ref('');
+const composerInputEl = ref<HTMLTextAreaElement | null>(null);
+const COMPOSER_INPUT_MAX_PX = 168;
+
+function syncComposerHeight() {
+  const el = composerInputEl.value;
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = `${Math.min(el.scrollHeight, COMPOSER_INPUT_MAX_PX)}px`;
+}
+
+watch(draft, () => {
+  void nextTick(syncComposerHeight);
+});
 const llmReady = ref(true);
-const activeTrajectory = ref<TrajectoryStep[]>([]);
-const streamMode = ref<StreamMode | null>(null);
-const turnBusy = ref(false);
+const activeTrajectory = computed(() => agentRuns.liveSteps(conversations.activeId));
+const streamMode = computed(() => agentRuns.streamMode(conversations.activeId));
+const turnBusy = computed(() => agentRuns.isRunning(conversations.activeId));
+const turnStartedAt = ref<number | null>(null);
+/** 本会话内刚结束的助手回合耗时（秒），按 message id 索引 */
+const turnDurations = ref(new Map<string, number>());
 const contextBudget = ref<{
   used: number;
   limit: number;
@@ -89,6 +105,8 @@ const canSend = computed(
 );
 
 let unlisten: UnlistenFn | null = null;
+let unlistenTitle: UnlistenFn | null = null;
+let unlistenRunStatus: UnlistenFn | null = null;
 
 // ---------------------------------------------------------------------------
 // 滚动收敛：消息列表是唯一滚动容器（spec: Message List Scroll Containment）
@@ -96,12 +114,16 @@ let unlisten: UnlistenFn | null = null;
 const rootEl = ref<HTMLElement | null>(null);
 const messageListEl = ref<HTMLElement | null>(null);
 const atBottom = ref(true);
+const showJumpBottom = ref(false);
 const NEAR_BOTTOM_PX = 40;
+const JUMP_BOTTOM_PX = 120;
 
 function onListScroll() {
   const el = messageListEl.value;
   if (!el) return;
-  atBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
+  const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+  atBottom.value = dist < NEAR_BOTTOM_PX;
+  showJumpBottom.value = dist > JUMP_BOTTOM_PX && el.scrollHeight > el.clientHeight + 8;
 }
 
 async function followIfAtBottom() {
@@ -111,6 +133,14 @@ async function followIfAtBottom() {
   el.scrollTop = el.scrollHeight;
 }
 
+function scrollToBottom() {
+  const el = messageListEl.value;
+  if (!el) return;
+  el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  atBottom.value = true;
+  showJumpBottom.value = false;
+}
+
 watch(activeTrajectory, followIfAtBottom, { deep: true });
 watch(() => conversations.messages.length, followIfAtBottom);
 
@@ -118,6 +148,8 @@ watch(
   () => conversations.activeId,
   (id) => {
     compressHint.value = null;
+    showJumpBottom.value = false;
+    atBottom.value = true;
     if (!id) contextBudget.value = null;
   },
 );
@@ -144,26 +176,103 @@ function fitHeight() {
   const el = rootEl.value;
   if (!el) return;
   const top = el.getBoundingClientRect().top;
-  const footer = document.querySelector('footer');
-  const footerH = footer ? footer.getBoundingClientRect().height + 20 : 0;
-  const height = Math.max(window.innerHeight - top - footerH - 20, 320);
+  const height = Math.max(window.innerHeight - top, 320);
   el.style.height = `${height}px`;
 }
 
+const chromeTitle = computed(() => {
+  if (conversations.isDraft || !conversations.activeId) return '新对话';
+  const item = conversations.items.find((c) => c.id === conversations.activeId);
+  return item?.title?.trim() || '新对话';
+});
+
+const editingTitle = ref(false);
+const titleDraft = ref('');
+const titleInputEl = ref<HTMLInputElement | null>(null);
+
+function startEditTitle() {
+  if (!conversations.activeId) return;
+  titleDraft.value = chromeTitle.value === '新对话' ? '' : chromeTitle.value;
+  editingTitle.value = true;
+  nextTick(() => {
+    titleInputEl.value?.focus();
+    titleInputEl.value?.select();
+  });
+}
+
+async function commitTitle() {
+  if (!editingTitle.value) return;
+  editingTitle.value = false;
+  const id = conversations.activeId;
+  if (!id) return;
+  const next = titleDraft.value.trim();
+  if (!next || next === chromeTitle.value) return;
+  try {
+    await conversations.renameConversation(id, next);
+  } catch {
+    /* lastError set in store */
+  }
+}
+
+function cancelEditTitle() {
+  editingTitle.value = false;
+}
+
+function onTitleKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter') {
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    void commitTitle();
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    cancelEditTitle();
+  }
+}
+
+const canOpenTrajectory = computed(
+  () => !!(conversations.activeId && conversations.hasMessages),
+);
+
 function messageSteps(msg: ChatMessage): TrajectoryStep[] {
   if (msg.role !== 'assistant') return [];
-  return resolveTrajectory(
+  // Chat uses the legacy flat timeline (reasoning/tool/text). The persisted
+  // flat event list is flattened here — interaction boundaries are dropped
+  // on purpose; the dedicated /agent-runs/:id page renders the event form.
+  const events = resolveTrajectory(
     msg.trajectory_json,
     msg.reasoning,
     msg.tool_calls_json,
     msg.content,
   );
+  return flattenTrajectoryEvents(events);
+}
+
+/** 优先用本轮实测耗时；否则用 user→assistant created_at 估算。 */
+function assistantDurationSeconds(msg: ChatMessage): number | null {
+  const measured = turnDurations.value.get(msg.id);
+  if (measured != null && measured > 0) return measured;
+  const list = conversations.messages;
+  const idx = list.findIndex((m) => m.id === msg.id);
+  if (idx < 0) return null;
+  for (let i = idx - 1; i >= 0; i--) {
+    if (list[i].role === 'user') {
+      const start = list[i].created_at;
+      const end = msg.created_at;
+      if (typeof start === 'number' && typeof end === 'number' && end >= start) {
+        const sec = end - start;
+        return sec > 0 ? sec : 0.5;
+      }
+      break;
+    }
+  }
+  return null;
 }
 
 onMounted(async () => {
   void conversations.restoreLastActive();
   window.addEventListener('resize', fitHeight);
   fitHeight();
+  void nextTick(syncComposerHeight);
   try {
     llmReady.value = await invoke<boolean>('check_llm_ready');
   } catch {
@@ -178,15 +287,20 @@ onMounted(async () => {
       kind?: string;
     };
     const convId = p.conversationId ?? p.conversation_id;
-    if (convId && conversations.activeId && convId !== conversations.activeId) {
-      return;
-    }
+    if (!convId) return;
     const type = (p.type ?? (p as { kind?: string }).kind) as AgentEventPayload['type'];
+    const isActive = convId === conversations.activeId;
+
     switch (type) {
       case 'stream_meta':
-        streamMode.value = p.mode === 'live' ? 'live' : 'fallback';
+      case 'reasoning':
+      case 'token':
+      case 'tool_start':
+      case 'tool_end':
+        agentRuns.applyAgentEvent(convId, type, p);
         break;
       case 'context_budget': {
+        if (!isActive) break;
         const b = p.budget;
         if (b) {
           const snap = {
@@ -201,52 +315,42 @@ onMounted(async () => {
         break;
       }
       case 'compress':
-        compressHint.value = p.message ?? `已压缩 ${p.count ?? 0} 条工具结果`;
-        break;
-      case 'reasoning':
-        activeTrajectory.value = appendReasoning(activeTrajectory.value, p.text ?? '');
-        break;
-      case 'token':
-        activeTrajectory.value = appendText(activeTrajectory.value, p.text ?? '');
-        break;
-      case 'tool_start':
-        activeTrajectory.value = [
-          ...activeTrajectory.value,
-          {
-            type: 'tool',
-            id: p.id ?? 'tool',
-            args: p.args,
-            status: 'running',
-          },
-        ];
-        break;
-      case 'tool_end': {
-        const steps = [...activeTrajectory.value];
-        for (let i = steps.length - 1; i >= 0; i--) {
-          const s = steps[i];
-          if (s.type === 'tool' && s.id === p.id && s.status === 'running') {
-            steps[i] = { ...s, result: p.result, status: 'done' };
-            break;
-          }
+        if (isActive) {
+          compressHint.value = p.message ?? `已压缩 ${p.count ?? 0} 条工具结果`;
         }
-        activeTrajectory.value = steps;
         break;
-      }
       case 'error':
-        conversations.lastError = p.message ?? 'Agent 出错';
-        turnBusy.value = false;
+        if (isActive) {
+          conversations.lastError = p.message ?? 'Agent 出错';
+          turnStartedAt.value = null;
+        }
+        agentRuns.clearLive(convId);
         break;
       case 'interrupted':
-        turnBusy.value = false;
-        finalizeStreaming('（已中断）');
+        finalizeStreaming(convId, '（已中断）');
         break;
       case 'done':
-        turnBusy.value = false;
-        finalizeStreaming();
+        finalizeStreaming(convId);
         break;
       default:
         break;
     }
+  });
+
+  unlistenRunStatus = await listen<{
+    conversationId?: string;
+    conversation_id?: string;
+    status: string;
+  }>('agent-run-status', (event) => {
+    const p = event.payload ?? {};
+    const id = p.conversationId ?? p.conversation_id;
+    if (!id) return;
+    agentRuns.setStatus(id, p.status === 'running' ? 'running' : 'idle');
+  });
+
+  unlistenTitle = await listen<{ id: string; title: string }>('conversation:title', (event) => {
+    const { id, title } = event.payload ?? {};
+    if (id && title) conversations.applyTitle(id, title);
   });
 });
 
@@ -255,48 +359,56 @@ onBeforeUnmount(() => {
     unlisten();
     unlisten = null;
   }
+  if (unlistenRunStatus) {
+    unlistenRunStatus();
+    unlistenRunStatus = null;
+  }
+  if (unlistenTitle) {
+    unlistenTitle();
+    unlistenTitle = null;
+  }
   window.removeEventListener('resize', fitHeight);
 });
 
-function finalizeStreaming(suffix?: string) {
-  let steps = activeTrajectory.value;
-  if (suffix) {
-    steps = appendText(steps, suffix);
+function finalizeStreaming(convId: string, _suffix?: string) {
+  const isActive = convId === conversations.activeId;
+
+  if (isActive && turnStartedAt.value != null) {
+    const sec = (Date.now() - turnStartedAt.value) / 1000;
+    const pendingKey = `__pending_${convId}`;
+    turnDurations.value.set(pendingKey, Math.max(sec, 0.1));
+    turnStartedAt.value = null;
+  } else if (isActive) {
+    turnStartedAt.value = null;
   }
-  const text = steps
-    .filter((s): s is Extract<TrajectoryStep, { type: 'text' }> => s.type === 'text')
-    .map((s) => s.text)
-    .join('')
-    .trim();
-  const reasoning = steps
-    .filter((s): s is Extract<TrajectoryStep, { type: 'reasoning' }> => s.type === 'reasoning')
-    .map((s) => s.text)
-    .join('\n')
-    .trim();
-  const tools = steps.filter((s) => s.type === 'tool');
-  if (text || reasoning || tools.length) {
-    const msg: ChatMessage = {
-      id: `local-${Date.now()}`,
-      conversation_id: conversations.activeId ?? '',
-      role: 'assistant',
-      content: text,
-      tool_calls_json: tools.length ? JSON.stringify(tools) : null,
-      ...(reasoning ? { reasoning } : {}),
-      trajectory_json: JSON.stringify(steps),
-      created_at: Math.floor(Date.now() / 1000),
-    };
-    // 仅有工具/思考、尚无正文时仍写入轨迹，但 UI 不把工具当对话气泡展示
-    conversations.messages = [...conversations.messages, msg];
-  }
-  activeTrajectory.value = [];
-  streamMode.value = null;
-  if (conversations.activeId) {
-    void conversations.openConversation(conversations.activeId);
+
+  agentRuns.clearLive(convId);
+
+  if (isActive) {
+    void conversations.openConversation(convId).then(() => {
+      const pendingKey = `__pending_${convId}`;
+      const measured = turnDurations.value.get(pendingKey);
+      if (measured == null) return;
+      turnDurations.value.delete(pendingKey);
+      const msgs = conversations.messages;
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === 'assistant') {
+          turnDurations.value.set(msgs[i].id, measured);
+          break;
+        }
+      }
+    });
   }
 }
 
 const openLlmSettings = () => {
   void router.push('/settings/llm');
+};
+
+const goAgentRunDetail = () => {
+  const id = conversations.activeId;
+  if (!id) return;
+  router.push({ path: `/agent-runs/${id}` });
 };
 
 const send = async () => {
@@ -316,6 +428,7 @@ const send = async () => {
     draft.value = text;
     conversations.lastError =
       '尚未配置可用的 LLM。请下载本地模型或配置云端，也可设置环境变量 TBOX_AGENT_MOCK=1 进入开发模式。';
+    void nextTick(syncComposerHeight);
     return;
   }
 
@@ -323,24 +436,31 @@ const send = async () => {
     await conversations.appendUser(text);
   } catch {
     draft.value = text;
+    void nextTick(syncComposerHeight);
     return;
   }
+  void nextTick(syncComposerHeight);
 
   const conversationId = conversations.activeId;
   if (!conversationId) return;
 
-  turnBusy.value = true;
-  activeTrajectory.value = [];
-  streamMode.value = null;
+  agentRuns.setStatus(conversationId, 'running');
+  agentRuns.resetLive(conversationId);
+  turnStartedAt.value = Date.now();
   try {
     await invoke('send_chat_turn', { conversationId, content: text });
   } catch (error) {
-    turnBusy.value = false;
+    agentRuns.setStatus(conversationId, 'idle');
+    agentRuns.clearLive(conversationId);
+    turnStartedAt.value = null;
     const msg = error instanceof Error ? error.message : String(error);
     if (msg.includes('llm_unavailable')) {
       llmReady.value = false;
       conversations.lastError =
         '尚未配置可用的 LLM。请前往设置下载本地模型或配置云端。';
+    } else if (msg.includes('turn_in_progress')) {
+      conversations.lastError = '该会话正在生成中，请稍候或先停止。';
+      agentRuns.setStatus(conversationId, 'running');
     } else {
       conversations.lastError = msg;
     }
@@ -348,23 +468,61 @@ const send = async () => {
 };
 
 const cancel = async () => {
+  const id = conversations.activeId;
+  if (!id) return;
   try {
-    await invoke('cancel_chat_turn');
+    await invoke('cancel_chat_turn', { conversationId: id });
   } catch (error) {
     console.error('[chat] cancel failed:', error);
   }
 };
 
 const onKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
-    event.preventDefault();
-    void send();
-  }
+  if (event.key !== 'Enter' || event.shiftKey) return;
+  // 输入法组字中：回车用于上屏候选，不发送
+  if (event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  void send();
 };
 </script>
 
 <template>
   <main ref="rootEl" class="chat-home">
+    <div class="chat-chrome" role="banner">
+      <div class="chrome-title">
+        <input
+          v-if="editingTitle"
+          ref="titleInputEl"
+          v-model="titleDraft"
+          class="title-input"
+          maxlength="40"
+          aria-label="会话标题"
+          @keydown="onTitleKeydown"
+          @blur="commitTitle"
+        />
+        <button
+          v-else
+          type="button"
+          class="title-btn"
+          :disabled="!conversations.activeId"
+          :title="conversations.activeId ? '点击修改标题' : ''"
+          @click="startEditTitle"
+        >
+          {{ chromeTitle }}
+        </button>
+      </div>
+      <button
+        type="button"
+        class="chrome-trajectory"
+        :disabled="!canOpenTrajectory"
+        title="查看本会话完整交互轨迹（可导出）"
+        @click="goAgentRunDetail"
+      >
+        <i class="fas fa-route" aria-hidden="true"></i>
+        轨迹
+      </button>
+    </div>
+
     <div v-if="!llmReady" class="llm-banner" role="status">
       <div>
         <strong>需要配置模型</strong>
@@ -373,40 +531,60 @@ const onKeydown = (event: KeyboardEvent) => {
       <button type="button" class="banner-btn" @click="openLlmSettings">打开设置</button>
     </div>
 
-    <div ref="messageListEl" class="message-list" role="log" aria-live="polite" @scroll="onListScroll">
-      <div v-if="!conversations.hasMessages && !activeTrajectory.length" class="chat-empty">
-        <div class="welcome-icon" aria-hidden="true">
-          <i class="fas fa-comments"></i>
+    <div class="message-list-wrap">
+      <div ref="messageListEl" class="message-list" role="log" aria-live="polite" @scroll="onListScroll">
+        <div class="message-list-inner">
+        <div v-if="!conversations.hasMessages && !turnBusy" class="chat-empty">
+          <div class="welcome-icon" aria-hidden="true">
+            <i class="fas fa-comments"></i>
+          </div>
+          <h1 class="welcome-title">有什么可以帮你？</h1>
+          <p class="welcome-subtitle">用自然语言提问，或从顶部打开工具箱浏览全部工具。</p>
         </div>
-        <h1 class="welcome-title">有什么可以帮你？</h1>
-        <p class="welcome-subtitle">用自然语言提问，或从侧栏打开工具箱浏览全部工具。</p>
-      </div>
 
-      <template v-for="msg in conversations.messages" :key="msg.id">
-        <div v-if="msg.role === 'user'" class="message user">
-          <div class="bubble-col copy-host">
-            <div class="message-body user-bubble">{{ msg.content }}</div>
-            <div class="msg-actions">
-              <CopyIconButton :text="msg.content" label="复制消息" />
+        <template v-for="msg in conversations.messages" :key="msg.id">
+          <div v-if="msg.role === 'user'" class="message user">
+            <div class="bubble-col copy-host">
+              <div class="message-body user-bubble">{{ msg.content }}</div>
+              <div class="msg-actions">
+                <CopyIconButton :text="msg.content" label="复制消息" />
+              </div>
             </div>
           </div>
-        </div>
-        <div
-          v-else-if="messageSteps(msg).length"
-          class="message assistant"
-        >
-          <AssistantTrajectory :steps="messageSteps(msg)" />
-        </div>
-      </template>
+          <div
+            v-else-if="messageSteps(msg).length"
+            class="message assistant"
+          >
+            <AssistantTrajectory
+              :steps="messageSteps(msg)"
+              :duration-seconds="assistantDurationSeconds(msg)"
+            />
+          </div>
+        </template>
 
-      <!-- 流式中的助手轨迹 -->
-      <div v-if="activeTrajectory.length" class="message assistant streaming">
-        <AssistantTrajectory
-          :steps="activeTrajectory"
-          streaming
-          :stream-mode="streamMode"
-        />
+        <!-- 流式中的助手轨迹（含尚无事件时的 Thinking） -->
+        <div v-if="turnBusy" class="message assistant streaming">
+          <AssistantTrajectory
+            :steps="activeTrajectory"
+            streaming
+            :stream-mode="streamMode"
+          />
+        </div>
+        </div>
       </div>
+
+      <Transition name="jump-fade">
+        <button
+          v-if="showJumpBottom"
+          type="button"
+          class="scroll-bottom-btn"
+          title="回到底部"
+          aria-label="滚动到最新消息"
+          @click="scrollToBottom"
+        >
+          <i class="fas fa-arrow-down" aria-hidden="true"></i>
+        </button>
+      </Transition>
     </div>
 
     <p v-if="conversations.lastError" class="chat-error" role="alert">
@@ -422,51 +600,55 @@ const onKeydown = (event: KeyboardEvent) => {
       </button>
     </p>
 
-    <form class="composer" @submit.prevent="send">
-      <textarea
-        v-model="draft"
-        class="composer-input"
-        rows="1"
-        placeholder="输入消息…"
-        aria-label="对话输入"
-        :disabled="conversations.isSending || turnBusy"
-        @keydown="onKeydown"
-      />
-      <div class="composer-actions">
-        <div
-          v-if="budgetLabel"
-          class="context-ring"
-          :class="{ near: budgetLabel.near }"
-          role="img"
-          :aria-label="budgetTooltip"
-          :title="budgetTooltip"
-        >
-          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-            <circle class="context-ring-track" cx="10" cy="10" r="7" />
-            <circle
-              class="context-ring-fill"
-              cx="10"
-              cy="10"
-              r="7"
-              :stroke-dasharray="RING_C"
-              :stroke-dashoffset="budgetRingOffset"
-              transform="rotate(-90 10 10)"
-            />
-          </svg>
+    <form class="composer-dock" @submit.prevent="send">
+      <div class="composer">
+        <textarea
+          ref="composerInputEl"
+          v-model="draft"
+          class="composer-input"
+          rows="1"
+          placeholder="输入消息…"
+          aria-label="对话输入"
+          :disabled="conversations.isSending || turnBusy"
+          @keydown="onKeydown"
+          @input="syncComposerHeight"
+        />
+        <div class="composer-actions">
+          <div
+            v-if="budgetLabel"
+            class="context-ring"
+            :class="{ near: budgetLabel.near }"
+            role="img"
+            :aria-label="budgetTooltip"
+            :title="budgetTooltip"
+          >
+            <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
+              <circle class="context-ring-track" cx="10" cy="10" r="7" />
+              <circle
+                class="context-ring-fill"
+                cx="10"
+                cy="10"
+                r="7"
+                :stroke-dasharray="RING_C"
+                :stroke-dashoffset="budgetRingOffset"
+                transform="rotate(-90 10 10)"
+              />
+            </svg>
+          </div>
+          <ModelSwitcher />
+          <button
+            type="button"
+            class="composer-send"
+            :class="{ busy: turnBusy }"
+            :disabled="!turnBusy && !canSend"
+            :title="turnBusy ? '停止生成' : canSend ? '发送' : '输入消息后发送'"
+            :aria-label="turnBusy ? '停止生成' : '发送'"
+            @click="turnBusy ? cancel() : send()"
+          >
+            <i v-if="turnBusy" class="fas fa-stop" aria-hidden="true"></i>
+            <i v-else class="fas fa-paper-plane" aria-hidden="true"></i>
+          </button>
         </div>
-        <ModelSwitcher />
-        <button
-          type="button"
-          class="composer-send"
-          :class="{ busy: turnBusy }"
-          :disabled="!turnBusy && !canSend"
-          :title="turnBusy ? '停止生成' : canSend ? '发送' : '输入消息后发送'"
-          :aria-label="turnBusy ? '停止生成' : '发送'"
-          @click="turnBusy ? cancel() : send()"
-        >
-          <i v-if="turnBusy" class="fas fa-stop" aria-hidden="true"></i>
-          <i v-else class="fas fa-paper-plane" aria-hidden="true"></i>
-        </button>
       </div>
     </form>
   </main>
@@ -476,46 +658,208 @@ const onKeydown = (event: KeyboardEvent) => {
 .chat-home {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
   width: 100%;
-  max-width: 860px;
+  max-width: var(--chat-width-max);
+  min-width: 0;
   margin: 0 auto;
-  padding: 20px 12px 12px;
+  padding: 0;
   overflow: hidden;
   height: 100%;
   max-height: 100%;
   box-sizing: border-box;
+  position: relative;
 }
 
-/* 消息列表：唯一滚动容器；略区分于壳层背景，对比保持克制 */
+/* 固定顶栏：标题 + 轨迹，不占用消息滚动区域 */
+.chat-chrome {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 6px var(--shell-gutter, 16px);
+  border: none;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.chrome-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.title-btn {
+  display: block;
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 6px;
+  border: none;
+  border-radius: var(--control-radius, 8px);
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--bg-tertiary) 40%, transparent);
+}
+
+.title-btn:disabled {
+  cursor: default;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.title-input {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--shell-divider));
+  border-radius: var(--control-radius, 8px);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.chrome-trajectory {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.chrome-trajectory:hover:not(:disabled) {
+  color: var(--primary, #4361ee);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+}
+
+.chrome-trajectory:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* 消息列表：唯一滚动容器；滚动条贴右且低调 */
+.message-list-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .message-list {
   flex: 1;
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border-radius: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-secondary) 18%, transparent) transparent;
+}
+
+.message-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+.message-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.message-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-secondary) 16%, transparent);
+  border-radius: 999px;
+}
+
+.message-list::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--text-secondary) 32%, transparent);
+}
+
+.scroll-bottom-btn {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 4;
+  transform: translateX(-50%);
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--shell-divider, var(--border-color));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-tertiary));
+  color: var(--text-primary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.14);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.scroll-bottom-btn:hover {
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--shell-divider));
+  background: var(--bg-primary);
+}
+
+.jump-fade-enter-active,
+.jump-fade-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+
+.jump-fade-enter-from,
+.jump-fade-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(6px);
+}
+
+.message-list-inner {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 22px;
-  padding: 16px 16px 20px;
-  scrollbar-gutter: stable;
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-primary, #fff) 82%, var(--bg-tertiary, #e4edf5));
-  border: 1px solid color-mix(in srgb, var(--border-color, rgba(0, 0, 0, 0.1)) 55%, transparent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--bg-primary, #fff) 70%, transparent);
+  gap: 16px;
+  padding: 12px var(--shell-gutter, 16px) 20px;
+  box-sizing: border-box;
+  min-width: 0;
 }
 
 .llm-banner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 16px;
-  margin-bottom: 14px;
-  border-radius: 14px;
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(249, 115, 22, 0.08));
-  border: 1px solid rgba(245, 158, 11, 0.35);
+  gap: 12px;
+  padding: 10px var(--shell-gutter, 16px);
+  margin: 0;
+  border-radius: 0;
+  background: color-mix(in srgb, #f59e0b 10%, transparent);
+  border: none;
+  border-bottom: 1px solid color-mix(in srgb, #f59e0b 28%, transparent);
   flex-shrink: 0;
 }
 
@@ -534,20 +878,21 @@ const onKeydown = (event: KeyboardEvent) => {
 
 .banner-btn {
   flex-shrink: 0;
-  padding: 8px 16px;
-  border: none;
-  border-radius: 10px;
-  background: linear-gradient(135deg, #f59e0b, #f97316);
-  color: white;
-  font-size: 13px;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, #f59e0b 45%, transparent);
+  border-radius: var(--control-radius, 8px);
+  background: transparent;
+  color: #b45309;
+  font-size: 12.5px;
   font-weight: 600;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition: background 0.15s ease;
 }
 
 .banner-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+  transform: none;
+  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  box-shadow: none;
 }
 
 .chat-empty {
@@ -557,40 +902,40 @@ const onKeydown = (event: KeyboardEvent) => {
   align-items: center;
   justify-content: center;
   text-align: center;
-  gap: 12px;
-  padding: 48px 16px;
+  gap: 10px;
+  padding: 40px 16px;
 }
 
 .welcome-icon {
-  width: 80px;
-  height: 80px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, rgba(67, 97, 238, 0.14), rgba(72, 149, 239, 0.14));
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
 }
 
 .welcome-icon i {
-  font-size: 34px;
+  font-size: 22px;
   color: var(--primary);
 }
 
 .welcome-title {
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 650;
   color: var(--text-primary);
   margin: 0;
-  letter-spacing: -0.5px;
+  letter-spacing: -0.03em;
 }
 
 .welcome-subtitle {
-  font-size: 15px;
+  font-size: 14px;
   color: var(--text-secondary);
   margin: 0;
-  max-width: 440px;
-  line-height: 1.6;
+  max-width: 420px;
+  line-height: 1.55;
 }
 
 /* ---------- 消息 ---------- */
@@ -598,7 +943,8 @@ const onKeydown = (event: KeyboardEvent) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: min(92%, 100%);
+  max-width: 100%;
+  width: 100%;
   min-width: 0;
   box-sizing: border-box;
   animation: msg-in 0.22s ease;
@@ -610,17 +956,15 @@ const onKeydown = (event: KeyboardEvent) => {
 }
 
 .message.user {
-  align-self: flex-end;
-  align-items: flex-end;
+  align-self: stretch;
+  align-items: stretch;
 }
 
 .message.assistant,
 .message.tool {
   align-self: stretch;
   align-items: stretch;
-  max-width: 100%;
-  width: 100%;
-  padding-right: 8px;
+  padding-right: 0;
 }
 
 .message.assistant :deep(.trajectory) {
@@ -641,16 +985,19 @@ const onKeydown = (event: KeyboardEvent) => {
 .bubble-col {
   display: flex;
   flex-direction: column;
-  align-items: flex-end;
+  align-items: stretch;
   gap: 0.3rem;
   min-width: 0;
-  max-width: min(100%, 36rem);
+  width: 100%;
+  max-width: 100%;
 }
 
 .msg-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.25rem;
+  width: 100%;
   min-height: 26px;
 }
 
@@ -661,13 +1008,14 @@ const onKeydown = (event: KeyboardEvent) => {
   word-break: break-word;
 }
 
+/* 用户消息：无气泡框，与助手同宽、同平面 */
 .message-body.user-bubble {
-  padding: 10px 14px;
-  border-radius: 14px;
-  border-bottom-right-radius: 5px;
-  background: color-mix(in srgb, var(--primary, #4361ee) 8%, var(--bg-primary, #fff));
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--text-primary);
-  border: 1px solid color-mix(in srgb, var(--primary, #4361ee) 18%, var(--border-color, #e5e7eb));
+  border: none;
+  font-weight: 500;
 }
 
 .message.assistant .message-body:empty {
@@ -821,28 +1169,14 @@ const onKeydown = (event: KeyboardEvent) => {
 }
 
 /* ---------- 深色模式微调 ---------- */
-:global(.dark-mode) .llm-banner strong { color: #fbbf24; }
-:global(.dark-mode) .llm-banner p { color: #fcd34d; }
-:global(.dark-mode) .chat-error { color: #f87171; }
-:global(.dark-mode) .reasoning-icon { color: #fbbf24; }
-:global(.dark-mode) .streaming-icon { color: #fbbf24; }
-:global(.dark-mode) .tool-status.done { color: #4ade80; }
+:global(.dark-mode) .llm-banner strong { color: var(--warning); }
+:global(.dark-mode) .llm-banner p { color: var(--warning); }
+:global(.dark-mode) .chat-error { color: var(--danger); }
+:global(.dark-mode) .reasoning-icon { color: var(--warning); }
+:global(.dark-mode) .streaming-icon { color: var(--warning); }
+:global(.dark-mode) .tool-status.done { color: var(--success); }
 
-/* ---------- 流式指示 ---------- */
-.stream-cursor {
-  display: inline-block;
-  width: 7px;
-  height: 15px;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: var(--primary);
-  animation: blink 1s steps(2) infinite;
-}
-
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
+/* ---------- 流式指示（状态跑马灯在 AssistantTrajectory） ---------- */
 .typing-dots {
   display: inline-flex;
   gap: 3px;
@@ -867,13 +1201,14 @@ const onKeydown = (event: KeyboardEvent) => {
 /* ---------- 错误条（固定输入区上方） ---------- */
 .chat-error {
   flex-shrink: 0;
-  margin: 0 0 10px;
-  padding: 10px 14px;
-  border-radius: 12px;
-  background: rgba(239, 68, 68, 0.08);
-  border: 1px solid rgba(239, 68, 68, 0.28);
+  margin: 0;
+  padding: 8px var(--shell-gutter, 16px);
+  border-radius: 0;
+  background: color-mix(in srgb, #ef4444 7%, transparent);
+  border: none;
+  border-top: 1px solid color-mix(in srgb, #ef4444 22%, transparent);
   color: #b91c1c;
-  font-size: 13px;
+  font-size: 12.5px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -939,52 +1274,64 @@ const onKeydown = (event: KeyboardEvent) => {
   stroke: #d97706;
 }
 
-/* ---------- 输入区 ---------- */
-.composer {
+/* ---------- 输入区：与聊天列等宽，圆角边框容器，随内容增高 ---------- */
+.composer-dock {
   flex-shrink: 0;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px var(--shell-gutter, 16px) 14px;
+  margin: 0;
+  background: transparent;
+}
+
+.composer {
   display: flex;
-  align-items: flex-end;
-  gap: 10px;
-  padding: 10px 14px 12px;
-  background: var(--bg-primary);
-  border-radius: 18px;
-  box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.05),
-    0 8px 24px rgba(0, 0, 0, 0.07);
-  border: 1px solid var(--border-color);
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px 8px;
+  margin: 0;
+  background: color-mix(in srgb, var(--bg-tertiary) 55%, var(--bg-primary));
+  border: 1px solid var(--shell-divider, var(--border-color));
+  border-radius: 16px;
+  box-shadow: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .composer:focus-within {
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border-color));
-  box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.05),
-    0 8px 28px rgba(0, 0, 0, 0.08),
-    0 0 0 3px color-mix(in srgb, var(--primary) 12%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 42%, var(--shell-divider));
+  background: color-mix(in srgb, var(--bg-tertiary) 40%, var(--bg-primary));
 }
 
 .composer-actions {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
   flex-shrink: 0;
-  padding-bottom: 2px;
+  min-height: 34px;
 }
 
 .composer-input {
-  flex: 1;
+  display: block;
+  width: 100%;
   min-width: 0;
   border: none;
   outline: none;
   resize: none;
-  font-size: 15px;
+  font-size: 14.5px;
   line-height: 1.5;
-  padding: 8px 4px;
+  padding: 2px 2px 0;
   background: transparent;
   color: var(--text-primary);
-  min-height: 40px;
-  max-height: 140px;
+  min-height: 24px;
+  max-height: 168px;
+  overflow-y: auto;
   font-family: inherit;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-secondary) 22%, transparent) transparent;
 }
 
 .composer-input:disabled {
@@ -998,44 +1345,46 @@ const onKeydown = (event: KeyboardEvent) => {
 }
 
 .composer-send {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   border: none;
-  border-radius: 12px;
+  border-radius: var(--control-radius, 8px);
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   flex-shrink: 0;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease, background 0.15s ease;
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  font-size: 13px;
+  transition: background 0.15s ease, opacity 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+  background: var(--primary);
   color: white;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--primary) 35%, transparent);
+  box-shadow: none;
 }
 
 .composer-send:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 45%, transparent);
+  transform: none;
+  background: var(--secondary);
+  box-shadow: none;
 }
 
 .composer-send:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
   box-shadow: none;
 }
 
 .composer-send.busy {
-  background: color-mix(in srgb, var(--text-secondary, #6b7280) 22%, var(--bg-secondary, #f3f4f6));
+  background: transparent;
   color: var(--text-primary, #374151);
   box-shadow: none;
-  border: 1px solid color-mix(in srgb, var(--border-color, #e5e7eb) 80%, transparent);
+  border: 1px solid var(--shell-divider, var(--border-color));
 }
 
 .composer-send.busy:hover:not(:disabled) {
   transform: none;
-  background: color-mix(in srgb, #ef4444 14%, var(--bg-secondary, #f3f4f6));
+  background: color-mix(in srgb, #ef4444 10%, transparent);
   color: #b91c1c;
-  border-color: color-mix(in srgb, #ef4444 35%, transparent);
+  border-color: color-mix(in srgb, #ef4444 30%, transparent);
   box-shadow: none;
 }
 
@@ -1114,36 +1463,5 @@ const onKeydown = (event: KeyboardEvent) => {
   border: none;
   border-top: 1px solid var(--border-color);
   margin: 10px 0;
-}
-
-.md-content :deep(.md-code-block) {
-  position: relative;
-  margin: 8px 0;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 28px 12px 12px;
-  border-radius: 10px;
-  background: #1e1e2e;
-  overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.md-content :deep(.md-code-block code) {
-  background: transparent;
-  padding: 0;
-  color: #cdd6f4;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-
-.md-content :deep(.md-code-lang) {
-  position: absolute;
-  top: 4px;
-  right: 10px;
-  font-size: 10.5px;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  color: #7f8496;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 </style>

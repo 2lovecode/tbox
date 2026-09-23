@@ -8,6 +8,15 @@ pub struct SkillDoc {
     pub body: String,
 }
 
+/// Agent Skills L0 目录项（name + description 常驻，正文按需）。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillCatalogEntry {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+}
+
 /// 设置页展示的内置 Skill 目录项。
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -416,6 +425,108 @@ fn skill_description(source: &str) -> String {
         .to_string()
 }
 
+/// 路由用短描述：优先「何时使用 / Use when」首条要点（对齐 Agent Skills description）。
+fn skill_routing_description(body: &str) -> String {
+    let mut in_when = false;
+    for line in body.lines() {
+        let t = line.trim();
+        if t.starts_with("## 何时使用") || t.starts_with("## Use when") || t.starts_with("## When to use")
+        {
+            in_when = true;
+            continue;
+        }
+        if in_when {
+            if t.starts_with("## ") {
+                break;
+            }
+            if let Some(rest) = t.strip_prefix("- **用**：").or_else(|| t.strip_prefix("- **Use**:")) {
+                return rest.trim().to_string();
+            }
+            if let Some(rest) = t.strip_prefix("- ") {
+                if !rest.is_empty() {
+                    return rest.to_string();
+                }
+            }
+        }
+    }
+    let fallback = skill_description(body);
+    if fallback.starts_with('#') {
+        fallback.trim_start_matches('#').trim().to_string()
+    } else {
+        fallback
+    }
+}
+
+/// 启用中的 Skill L0 目录（仅元数据）。
+pub fn skills_catalog_l0() -> Vec<SkillCatalogEntry> {
+    list_skills()
+        .into_iter()
+        .filter(|s| s.enabled)
+        .map(|s| {
+            let description = {
+                let d = skill_routing_description(&s.body);
+                if d.chars().count() > 160 {
+                    format!("{}…", d.chars().take(159).collect::<String>())
+                } else {
+                    d
+                }
+            };
+            SkillCatalogEntry {
+                id: s.id,
+                name: s.name,
+                description,
+            }
+        })
+        .collect()
+}
+
+/// 渲染 L0 目录块（注入模型上下文；与系统提示词模块分离组装）。
+pub fn render_skills_catalog_l0() -> String {
+    let entries = skills_catalog_l0();
+    if entries.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from(
+        "Available skills (id — when to use). Full skill bodies load only when selected for this turn:\n",
+    );
+    for e in &entries {
+        out.push_str(&format!("- {} ({}): {}\n", e.name, e.id, e.description));
+    }
+    out
+}
+
+/// 单个 Skill 注入正文的字符上限。
+pub const SKILL_BODY_CHAR_CAP: usize = 500;
+
+/// 截断 Skill 正文：优先在段落/句子边界断开。
+pub fn truncate_skill_body(body: &str) -> String {
+    if body.chars().count() <= SKILL_BODY_CHAR_CAP {
+        return body.to_string();
+    }
+    let truncated: String = body.chars().take(SKILL_BODY_CHAR_CAP).collect();
+    match truncated.rfind(['\n', '。']) {
+        Some(pos) if pos > SKILL_BODY_CHAR_CAP / 2 => truncated[..=pos].to_string(),
+        _ => truncated,
+    }
+}
+
+/// 渲染 L1 正文块（仅命中项；正文按预算截断）。
+pub fn render_skill_bodies_l1(docs: &[SkillDoc]) -> String {
+    if docs.is_empty() {
+        return String::new();
+    }
+    let mut out = String::from("Loaded skill instructions for this turn:\n");
+    for sk in docs {
+        let body = truncate_skill_body(&sk.body);
+        // 小模型常读完技能仍改调近邻工具；显式钉死本轮工具 id。
+        out.push_str(&format!(
+            "### {}\n本轮请调用工具 `{}`（不要改用其它工具）。\n{}\n\n",
+            sk.tool_id, sk.tool_id, body
+        ));
+    }
+    out
+}
+
 pub fn set_skill_enabled(skill_id: &str, enabled: bool) -> Result<SkillInfo, String> {
     let skill_id = skill_id.trim();
     let embedded = SKILLS.iter().find(|skill| skill.id == skill_id);
@@ -560,7 +671,85 @@ fn contains_match(haystack: &str, needle: &str) -> bool {
     }
 }
 
+/// 判断一行是否更像粘贴的 JSON/DSL 正文，而非用户意图句。
+fn looks_like_payload_line(line: &str) -> bool {
+    let t = line.trim();
+    if t.is_empty() {
+        return false;
+    }
+    if t.starts_with('{')
+        || t.starts_with('[')
+        || t.starts_with("{\\")
+        || t.starts_with("[\\")
+        || t.starts_with("\\\"")
+    {
+        return true;
+    }
+    let colon = t.matches(':').count();
+    let quotes = t.matches('"').count() + t.matches("\\\"").count();
+    t.len() > 80 && colon >= 2 && quotes >= 4
+}
+
+const INTENT_FOCUS_SOFT_CAP: usize = 320;
+
+/// 超长粘贴时抽出**全文中的自然语言意图句**（前/中/后皆可）作为检索焦点，
+/// 丢弃 JSON/DSL 正文，避免字段名污染打分。
+pub fn intent_focus_for_retrieval(query: &str) -> String {
+    let trimmed = query.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if trimmed.chars().count() <= 240 {
+        return trimmed.to_string();
+    }
+
+    let intent_lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|t| !t.is_empty() && !looks_like_payload_line(t))
+        .collect();
+
+    if !intent_lines.is_empty() {
+        let joined = intent_lines.join("\n");
+        if joined.chars().count() <= INTENT_FOCUS_SOFT_CAP {
+            return joined;
+        }
+        // 意图句过多时保留头部与尾部，兼顾「意图在前」与「意图在后」
+        return clip_head_and_tail(&joined, INTENT_FOCUS_SOFT_CAP);
+    }
+
+    // 无换行或整段都像 payload：取头尾各一段，跳过中间大块
+    clip_head_and_tail(trimmed, 240)
+}
+
+fn clip_head_and_tail(text: &str, budget: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= budget {
+        return text.to_string();
+    }
+    let head_n = budget / 2;
+    let tail_n = budget - head_n;
+    let head: String = chars[..head_n].iter().collect();
+    let tail: String = chars[chars.len() - tail_n..].iter().collect();
+    format!("{head}\n…\n{tail}")
+}
+
 fn score_skill(query: &str, parsed: &ParsedSkill) -> i32 {
+    let focus = intent_focus_for_retrieval(query);
+    let mut score = score_skill_against(&focus, parsed);
+
+    // 全文仅作弱补充：意图焦点已足够时不再让 payload 泛词翻盘。
+    if focus != query && query.len() > focus.len().saturating_add(80) {
+        let weak = score_skill_against(query, parsed);
+        if weak > score {
+            score += ((weak - score) / 4).max(0);
+        }
+    }
+
+    score
+}
+
+fn score_skill_against(query: &str, parsed: &ParsedSkill) -> i32 {
     let mut score = 0;
 
     for kw in &parsed.keywords {
@@ -672,6 +861,69 @@ mod tests {
         let hits = retrieve_skills("把 JSON 转成 query string", 3);
         assert!(!hits.is_empty());
         assert_eq!(hits[0].tool_id, "json.to_query");
+    }
+
+    #[test]
+    fn escape_intent_with_es_payload_ranks_format_first() {
+        let mut q = String::from(
+            r#"{\"query\":{\"function_score\":{\"boost_mode\":\"replace\",\"functions\":[{\"filter\":{\"term\":{\"keywd\":\"朝阳\"}},\"weight\":3}],\"query\":{\"bool\":{\"must\":{\"regexp\":{\"keywd.keyword\":{\"value\":\"朝\"}}}}}}},\"size\":10}"#,
+        );
+        // 拉长到超过 intent_focus 阈值，模拟大段粘贴
+        while q.chars().count() < 300 {
+            q.push_str(r#"{\"extra\":\"padding\"}"#);
+        }
+        q.push_str("\n\n把这个转义一下");
+        let focus = intent_focus_for_retrieval(&q);
+        assert!(focus.contains("转义"), "focus={focus}");
+        let hits = retrieve_skills(&q, 3);
+        let ids: Vec<_> = hits.iter().map(|h| h.tool_id.as_str()).collect();
+        assert_eq!(ids.first().copied(), Some("json.format"), "hits={ids:?}");
+        assert!(
+            !ids.iter().any(|id| *id == "charset.convert"),
+            "charset must not rank for 转义: hits={ids:?}"
+        );
+    }
+
+    #[test]
+    fn escape_short_query_excludes_charset() {
+        let hits = retrieve_skills("转义下", 5);
+        let ids: Vec<_> = hits.iter().map(|h| h.tool_id.as_str()).collect();
+        assert_eq!(ids.first().copied(), Some("json.format"), "hits={ids:?}");
+        assert!(
+            !ids.iter().any(|id| *id == "charset.convert"),
+            "charset must not appear: hits={ids:?}"
+        );
+    }
+
+    #[test]
+    fn json_format_skill_body_keeps_tool_id_under_cap() {
+        let hits = retrieve_skills("转义下这段 JSON", 1);
+        assert_eq!(hits[0].tool_id, "json.format");
+        let rendered = render_skill_bodies_l1(&hits);
+        assert!(
+            rendered.contains("json.format") && rendered.contains("本轮请调用工具"),
+            "rendered={rendered}"
+        );
+        let body = truncate_skill_body(&hits[0].body);
+        assert!(body.contains("charset.convert"), "truncated body missing ban: {body}");
+        assert!(body.contains("json.format"), "truncated body missing tool: {body}");
+    }
+
+    #[test]
+    fn leading_intent_with_payload_ranks_format_first() {
+        let mut payload = String::from(
+            r#"{\"query\":{\"function_score\":{\"boost_mode\":\"replace\",\"query\":{\"bool\":{\"must\":{\"term\":{\"keywd\":\"x\"}}}}}}}"#,
+        );
+        while payload.chars().count() < 300 {
+            payload.push_str(r#"{\"extra\":\"padding\"}"#);
+        }
+        let q = format!("请帮我把下面这段 JSON 转义/格式化一下：\n\n{payload}");
+        let focus = intent_focus_for_retrieval(&q);
+        assert!(focus.contains("转义") || focus.contains("格式化"), "focus={focus}");
+        assert!(!focus.contains("function_score"), "payload leaked into focus={focus}");
+        let hits = retrieve_skills(&q, 3);
+        let ids: Vec<_> = hits.iter().map(|h| h.tool_id.as_str()).collect();
+        assert_eq!(ids.first().copied(), Some("json.format"), "hits={ids:?}");
     }
 
     #[test]

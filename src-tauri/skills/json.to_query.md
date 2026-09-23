@@ -1,7 +1,7 @@
 ---
 tool_id: json.to_query
-keywords: query, querystring, URL 参数, 转成 query, 转成 URL, form, 序列化 query
-avoid_keywords: 平铺, flatten, 嵌套平铺, 展平
+keywords: querystring, URL 参数, 转成 query, 转成 URL, form, 序列化 query, query string
+avoid_keywords: 平铺, flatten, 嵌套平铺, 展平, 转义, 反转义, 去转义, 格式化, 美化, pretty
 ---
 
 # JSON 转 URL Query

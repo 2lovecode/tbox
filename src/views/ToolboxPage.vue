@@ -298,6 +298,8 @@ const toast = useToast();
     max-width: 100%;
     height: 100%;
     min-height: 0;
+    box-sizing: border-box;
+    padding: var(--shell-gutter, 16px);
   }
 
   .toolbox-scroll {
@@ -307,7 +309,8 @@ const toast = useToast();
     flex-direction: column;
     gap: 20px;
     overflow-y: auto;
-    padding-right: 6px;
+    padding: 4px 4px 12px;
+    box-sizing: border-box;
   }
 
   .category-filters {
@@ -321,10 +324,10 @@ const toast = useToast();
     align-items: center;
     gap: 8px;
     padding: 8px 12px;
-    border: 1px solid #e2e8f0;
-    background: white;
+    border: 1px solid var(--shell-divider, #e2e8f0);
+    background: var(--surface-elevated, white);
     border-radius: 20px;
-    color: #64748b;
+    color: var(--text-secondary, #64748b);
     font-size: 13px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -336,7 +339,7 @@ const toast = useToast();
   }
 
   .category-chip.active {
-    background: rgba(67, 97, 238, 0.1);
+    background: color-mix(in srgb, var(--primary) 14%, transparent);
     border-color: var(--primary);
     color: var(--primary);
     font-weight: 600;
@@ -347,8 +350,8 @@ const toast = useToast();
   }
 
   .chip-count {
-    background: #f1f5f9;
-    color: #94a3b8;
+    background: color-mix(in srgb, var(--text-secondary) 14%, transparent);
+    color: var(--text-secondary, #94a3b8);
     padding: 1px 7px;
     border-radius: 10px;
     font-size: 11px;
@@ -369,11 +372,11 @@ const toast = useToast();
   .section-title {
     font-size: 20px;
     font-weight: 700;
-    color: var(--dark);
+    color: var(--text-primary, var(--dark));
   }
 
   .tool-count-badge {
-    background: rgba(67, 97, 238, 0.1);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
     color: var(--primary);
     padding: 6px 14px;
     border-radius: 20px;
@@ -434,9 +437,10 @@ const toast = useToast();
 
   /* 工具卡片样式 */
   .tool-card {
-    background: white;
+    background: var(--surface-elevated, white);
+    border: 1px solid var(--shell-divider, transparent);
     border-radius: 12px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow);
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     cursor: pointer;
     pointer-events: auto;
@@ -449,7 +453,7 @@ const toast = useToast();
 
   .tool-card:hover {
     transform: translateY(-4px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   }
 
   /* 普通视图的卡片样式 */
@@ -468,17 +472,18 @@ const toast = useToast();
 
   .tool-card .card-content {
     padding: 14px 16px 16px;
+    background: var(--surface-elevated, white);
   }
 
   .tool-card .card-content h3 {
     font-size: 14px;
-    margin-bottom: 6px;
-    color: var(--dark);
+    margin: 0 0 6px;
+    color: var(--text-primary, var(--dark));
     font-weight: 600;
   }
 
   .tool-card .card-desc {
-    color: var(--gray);
+    color: var(--text-secondary, var(--gray));
     font-size: 12px;
     line-height: 1.5;
     margin-bottom: 10px;
@@ -538,7 +543,7 @@ const toast = useToast();
   }
 
   .tag {
-    background: rgba(67, 97, 238, 0.08);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
     color: var(--primary);
     padding: 2px 8px;
     border-radius: 4px;
@@ -552,16 +557,17 @@ const toast = useToast();
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
-    background: white;
+    background: var(--surface-elevated, white);
+    border: 1px solid var(--shell-divider, transparent);
     border-radius: 10px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow);
   }
 
   .search-info {
     display: flex;
     align-items: center;
     gap: 10px;
-    color: var(--dark);
+    color: var(--text-primary, var(--dark));
     font-size: 14px;
   }
 
@@ -576,7 +582,7 @@ const toast = useToast();
   }
 
   .result-count {
-    background: rgba(67, 97, 238, 0.1);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
     color: var(--primary);
     padding: 4px 12px;
     border-radius: 20px;
@@ -591,7 +597,7 @@ const toast = useToast();
     gap: 6px;
     padding: 8px 16px;
     border: 1px solid var(--primary);
-    background: white;
+    background: transparent;
     color: var(--primary);
     border-radius: 6px;
     font-size: 13px;
@@ -629,16 +635,17 @@ const toast = useToast();
     grid-column: 1 / -1;
     text-align: center;
     padding: 60px 20px;
-    background: white;
+    background: var(--surface-elevated, white);
+    border: 1px solid var(--shell-divider, transparent);
     border-radius: 10px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow);
   }
 
   .empty-icon {
     width: 80px;
     height: 80px;
     margin: 0 auto 20px;
-    background: linear-gradient(135deg, rgba(67, 97, 238, 0.1), rgba(72, 149, 239, 0.1));
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -653,12 +660,12 @@ const toast = useToast();
 
   .empty-state h3 {
     font-size: 20px;
-    color: var(--dark);
+    color: var(--text-primary, var(--dark));
     margin-bottom: 8px;
   }
 
   .empty-state p {
-    color: var(--gray);
+    color: var(--text-secondary, var(--gray));
     font-size: 14px;
   }
 
@@ -669,10 +676,11 @@ const toast = useToast();
   }
 
   .skeleton-card {
-    background: white;
+    background: var(--surface-elevated, white);
+    border: 1px solid var(--shell-divider, transparent);
     border-radius: 12px;
     overflow: hidden;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    box-shadow: var(--shadow);
   }
 
   .skeleton-card.compact {
@@ -682,7 +690,12 @@ const toast = useToast();
   .skeleton-icon {
     width: 100%;
     height: 80px;
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--bg-tertiary) 80%, transparent) 25%,
+      color-mix(in srgb, var(--bg-tertiary) 50%, transparent) 50%,
+      color-mix(in srgb, var(--bg-tertiary) 80%, transparent) 75%
+    );
     background-size: 200% 100%;
     animation: skeleton-loading 1.5s ease-in-out infinite;
   }

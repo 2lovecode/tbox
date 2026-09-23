@@ -55,7 +55,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .manage(commands::agent::AgentCancel::default())
+        .manage(std::sync::Arc::new(crate::agent::run_registry::RunRegistry::default()))
         .manage(commands::model_catalog::DownloadCancels::default())
         .manage(commands::ollama_pull::PullCancels::default())
         .setup(|app| {
@@ -168,8 +168,10 @@ pub fn run() {
             // 会话
             commands::conversation::list_conversations,
             commands::conversation::get_conversation_messages,
+            commands::conversation::list_session_events,
             commands::conversation::delete_conversation,
             commands::conversation::append_user_message,
+            commands::conversation::rename_conversation,
 
             // Agent 对话
             commands::agent::check_llm_ready,

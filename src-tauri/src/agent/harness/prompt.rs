@@ -1,7 +1,6 @@
 //! 提示工程：注册表工具的中文单行摘要 + 小模型四段式系统提示。
 
 use crate::agent::registry::{self, ToolSpec};
-use crate::agent::skills::retrieve_skills;
 
 /// 小模型系统提示字符预算（超出即测试告警断言）。
 /// 0.5B 上下文 4096 token，中文约 1 字 ≈ 1 token，留一半给对话与工具结果。
@@ -103,6 +102,18 @@ fn few_shot_block() -> String {
         "示例 5（被问有哪些功能时，简短概括，不要罗列全部工具清单，更不要重复同一个词）：",
         "用户：你有什么功能",
         "助手：我可以做这些：JSON/Base64/XML/YAML 处理、编码转换、哈希计算、JWT 解析、时间戳转换、UUID 生成、Cron 表达式说明、数制转换等。直接告诉我你的需求即可。",
+        "",
+        "示例 6（问当前时间：input 必须为 now，禁止编造日期）：",
+        "用户：看下当前时间",
+        "助手：<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"now\"}}</tool_call>",
+        "工具结果：{\"iso\":\"2026-09-23T05:20:34+00:00\",\"unix_seconds\":1758600034,\"unix_millis\":1758600034000}",
+        "助手：当前 UTC 时间是 2026-09-23T05:20:34+00:00（Unix 1758600034）。",
+        "",
+        "示例 7（JSON 转义/反转义/美化：必须用 json.format，禁止 charset.convert）：",
+        "用户：转义下 {\\\"a\\\":1}",
+        "助手：<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>",
+        "工具结果：{\n  \"a\": 1\n}",
+        "助手：格式化结果：\n{\n  \"a\": 1\n}",
     ]
     .join("\n")
 }
@@ -119,30 +130,18 @@ fn lite_few_shot_block() -> String {
         "示例 2（无需工具时直接回答，不要输出 tool_call）：",
         "用户：你好",
         "助手：你好！我是 TBox 工具助手，可以帮你做编码、哈希、格式化等计算任务。",
+        "",
+        "示例 3（当前时间用 now，禁止编造日期）：",
+        "用户：看下当前时间",
+        "助手：<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"now\"}}</tool_call>",
     ]
     .join("\n")
-}
-
-/// 单个 Skill 注入正文的字符上限：保留能力描述与首个问法样本，
-/// 防止 3 条 Skill 撑爆小模型 prompt 预算（超限部分截断）。
-const SKILL_BODY_CHAR_CAP: usize = 500;
-
-/// 截断 Skill 正文：优先在段落/句子边界断开，避免截断 `<tool_call>` 块中段。
-fn truncate_skill_body(body: &str) -> String {
-    if body.chars().count() <= SKILL_BODY_CHAR_CAP {
-        return body.to_string();
-    }
-    let truncated: String = body.chars().take(SKILL_BODY_CHAR_CAP).collect();
-    // 回退到最后一个换行或句号，避免撕裂 JSON 示例
-    match truncated.rfind(['\n', '。']) {
-        Some(pos) if pos > SKILL_BODY_CHAR_CAP / 2 => truncated[..=pos].to_string(),
-        _ => truncated,
-    }
 }
 
 fn push_role_and_rules(prompt: &mut String) {
     prompt.push_str("你是 TBox 工具助手。用户提出计算类请求（编码、解码、哈希、解析、格式化、转换、生成）时，你必须调用下述工具完成，不要自己心算。\n");
     prompt.push_str("调用规则：只输出一个 <tool_call> 块，格式为 <tool_call>{\"name\": \"工具id\", \"arguments\": {...}}</tool_call>；不得编造参数名；与工具无关的请求直接回答。\n");
+    prompt.push_str("重要：需要工具时本轮只输出 <tool_call>，不要模仿示例里的「工具结果：」或「助手：」行，也不要编造工具返回值；等系统回传真实结果后再用自然语言回答用户。\n");
 }
 
 fn push_tool_directory(prompt: &mut String) {
@@ -150,38 +149,22 @@ fn push_tool_directory(prompt: &mut String) {
     prompt.push_str(&render_tool_summary());
 }
 
-fn push_skills(prompt: &mut String, user_text: &str) {
-    let skills = retrieve_skills(user_text, 3);
-    if skills.is_empty() {
-        return;
-    }
-    prompt.push_str("\n相关技能说明：\n");
-    for sk in &skills {
-        prompt.push_str(&format!(
-            "### {}\n{}\n\n",
-            sk.tool_id,
-            truncate_skill_body(&sk.body)
-        ));
-    }
-}
-
-/// 小模型强化提示：角色 → 工具目录（常驻）→ Skill（按需）→ 少样本。
-pub fn build_small_prompt(user_text: &str) -> String {
+/// 小模型强化提示：角色 → 工具目录（常驻）→ 少样本。
+/// Skill 采用渐进式披露：L0/L1 由 loop 与系统提示词分装，不在此拼正文。
+pub fn build_small_prompt(_user_text: &str) -> String {
     let mut prompt = String::new();
     push_role_and_rules(&mut prompt);
     push_tool_directory(&mut prompt);
-    push_skills(&mut prompt, user_text);
     prompt.push_str("\n\n用法示例：\n");
     prompt.push_str(&few_shot_block());
     prompt
 }
 
 /// 轻量档提示：同布局，缩短少样本。
-pub fn build_lite_prompt(user_text: &str) -> String {
+pub fn build_lite_prompt(_user_text: &str) -> String {
     let mut prompt = String::new();
     push_role_and_rules(&mut prompt);
     push_tool_directory(&mut prompt);
-    push_skills(&mut prompt, user_text);
     prompt.push_str("\n\n用法示例：\n");
     prompt.push_str(&lite_few_shot_block());
     prompt
@@ -196,19 +179,11 @@ pub fn lite_prompt_within_budget(prompt: &str) -> bool {
     prompt.chars().count() <= LITE_PROMPT_CHAR_BUDGET
 }
 
-/// 默认策略提示：与旧版 `build_system_prompt` 行为等价（云端/Ollama 路径）。
-pub fn build_default_prompt(user_text: &str) -> String {
-    let skills = retrieve_skills(user_text, 3);
-    let mut prompt = String::from(
+/// 默认策略提示：云端/Ollama；Skill 正文不写进 system（由 loop 渐进装载）。
+pub fn build_default_prompt(_user_text: &str) -> String {
+    String::from(
         "You are the TBox local agent. Prefer registered pure-compute tools when helpful.\n",
-    );
-    if !skills.is_empty() {
-        prompt.push_str("\nRelevant skills:\n");
-        for sk in &skills {
-            prompt.push_str(&format!("### {}\n{}\n\n", sk.tool_id, sk.body));
-        }
-    }
-    prompt
+    )
 }
 
 #[cfg(test)]
@@ -240,12 +215,10 @@ mod tests {
         assert!(p.contains("base64.encode"));
         assert!(p.contains("示例 4")); // 负例
         assert!(p.contains("不得编造参数名"));
-        // 目录常驻在 Skill 之前
-        let dir_pos = p.find("可调用工具").expect("tool directory");
-        let skill_pos = p.find("相关技能说明");
-        if let Some(sp) = skill_pos {
-            assert!(dir_pos < sp, "tool directory must precede skills");
-        }
+        assert!(p.contains("可调用工具"));
+        // Skill 正文不再写入 system（渐进式披露由 loop 装载）
+        assert!(!p.contains("相关技能说明"));
+        assert!(!p.contains("Loaded skill instructions"));
     }
 
     #[test]

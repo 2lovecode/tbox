@@ -25,7 +25,7 @@ pub struct ParsedTurn {
 /// 可插拔 harness 策略。
 pub trait HarnessStrategy {
     fn name(&self) -> &'static str;
-    /// 构建本轮系统提示（含 Skill 检索与工具说明）。
+    /// 构建本轮系统提示（工具说明等；Skill L0/L1 由循环渐进装载，不在此拼正文）。
     fn build_system_prompt(&self, user_text: &str) -> String;
     /// 容错解析模型输出。
     fn parse_completion(&self, text: &str) -> ParsedTurn {

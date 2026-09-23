@@ -172,7 +172,7 @@ onBeforeUnmount(() => {
 <template>
   <section class="llm-panel">
     <div class="section-intro">
-      <h3>LLM 提供方</h3>
+      <h3>模型</h3>
       <p>配置后，Spotlight AI 搜索与智能功能会使用该服务。API Key 加密保存在本地，不会上传。</p>
     </div>
 

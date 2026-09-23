@@ -12,6 +12,8 @@ const routes = [
     component: () => import('@/views/SettingsPage.vue'),
   },
   { path: '/toolbox', component: () => import('@/views/ToolboxPage.vue') },
+  { path: '/agent-runs', redirect: '/' },
+  { path: '/agent-runs/:id', component: () => import('@/views/AgentRuns.vue') },
   { path: '/image-compression', component: () => import('@/views/ImageCompression.vue') },
   { path: '/video-converter', component: () => import('@/views/VideoConverter.vue') },
   { path: '/password-manage', component: () => import('@/views/PasswordManage.vue') },
