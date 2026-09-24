@@ -53,6 +53,7 @@ interface AgentEventPayload {
     | 'reasoning'
     | 'tool_start'
     | 'tool_end'
+    | 'tool_approval_required'
     | 'stream_meta'
     | 'context_budget'
     | 'compress'
@@ -72,7 +73,24 @@ interface AgentEventPayload {
     nearLimit?: boolean;
   };
   count?: number;
+  requestId?: string;
+  toolId?: string;
+  command?: string;
+  cwd?: string;
+  similarKey?: string;
 }
+
+interface PendingToolApproval {
+  requestId: string;
+  conversationId: string;
+  toolId: string;
+  command: string;
+  cwd: string;
+  similarKey: string;
+}
+
+const pendingApproval = ref<PendingToolApproval | null>(null);
+const approvalBusy = ref(false);
 
 const budgetLabel = computed(() => {
   const b = contextBudget.value;
@@ -151,8 +169,28 @@ watch(
     showJumpBottom.value = false;
     atBottom.value = true;
     if (!id) contextBudget.value = null;
+    if (pendingApproval.value && pendingApproval.value.conversationId !== id) {
+      // keep pending for other conv; hide when switching away is OK — still resolve when shown
+    }
   },
 );
+
+async function resolveApproval(decision: 'deny' | 'allow' | 'allow_similar') {
+  const pending = pendingApproval.value;
+  if (!pending || approvalBusy.value) return;
+  approvalBusy.value = true;
+  try {
+    await invoke('resolve_tool_approval', {
+      requestId: pending.requestId,
+      decision,
+    });
+    pendingApproval.value = null;
+  } catch (error) {
+    conversations.lastError = error instanceof Error ? error.message : String(error);
+  } finally {
+    approvalBusy.value = false;
+  }
+}
 
 watch(
   () => conversations.contextBudget,
@@ -299,6 +337,18 @@ onMounted(async () => {
       case 'tool_end':
         agentRuns.applyAgentEvent(convId, type, p);
         break;
+      case 'tool_approval_required':
+        if (p.requestId) {
+          pendingApproval.value = {
+            requestId: p.requestId,
+            conversationId: convId,
+            toolId: p.toolId ?? 'os.shell',
+            command: p.command ?? '',
+            cwd: p.cwd ?? '',
+            similarKey: p.similarKey ?? '',
+          };
+        }
+        break;
       case 'context_budget': {
         if (!isActive) break;
         const b = p.budget;
@@ -327,9 +377,15 @@ onMounted(async () => {
         agentRuns.clearLive(convId);
         break;
       case 'interrupted':
+        if (pendingApproval.value?.conversationId === convId) {
+          pendingApproval.value = null;
+        }
         finalizeStreaming(convId, '（已中断）');
         break;
       case 'done':
+        if (pendingApproval.value?.conversationId === convId) {
+          pendingApproval.value = null;
+        }
         finalizeStreaming(convId);
         break;
       default:
@@ -599,6 +655,26 @@ const onKeydown = (event: KeyboardEvent) => {
         去设置
       </button>
     </p>
+
+    <div
+      v-if="pendingApproval && pendingApproval.conversationId === conversations.activeId"
+      class="shell-approval"
+      role="alertdialog"
+      aria-label="确认执行 shell 命令"
+    >
+      <div class="shell-approval-main">
+        <strong>允许执行命令？</strong>
+        <code class="shell-cmd">{{ pendingApproval.command }}</code>
+        <span class="shell-cwd">cwd: {{ pendingApproval.cwd }}</span>
+      </div>
+      <div class="shell-approval-actions">
+        <button type="button" class="btn" :disabled="approvalBusy" @click="resolveApproval('deny')">拒绝</button>
+        <button type="button" class="btn" :disabled="approvalBusy" @click="resolveApproval('allow')">允许一次</button>
+        <button type="button" class="btn primary" :disabled="approvalBusy" @click="resolveApproval('allow_similar')">
+          本会话允许「{{ pendingApproval.similarKey }}」
+        </button>
+      </div>
+    </div>
 
     <form class="composer-dock" @submit.prevent="send">
       <div class="composer">
@@ -1229,6 +1305,61 @@ const onKeydown = (event: KeyboardEvent) => {
   font-weight: 600;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.shell-approval {
+  margin: 0 var(--shell-gutter, 16px) 8px;
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--primary, #2563eb) 35%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--primary, #2563eb) 6%, var(--bg-elevated, #fff));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.shell-approval-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.shell-cmd {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--bg-muted, #f3f4f6);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.shell-cwd {
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
+}
+
+.shell-approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.shell-approval-actions .btn {
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-elevated, #fff);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.shell-approval-actions .btn.primary {
+  background: var(--primary, #2563eb);
+  border-color: transparent;
+  color: #fff;
 }
 
 /* ---------- 上下文用量环（输入区旁，低调） ---------- */

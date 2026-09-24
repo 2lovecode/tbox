@@ -9,20 +9,48 @@ interface LlamaLogSettings {
   logPath: string;
 }
 
+interface ShellPrefs {
+  shellDefaultCwd?: string | null;
+}
+
 const llamaLog = ref<LlamaLogSettings>({
   maxSizeMb: 5,
   retentionDays: 7,
   mirrorStdout: false,
   logPath: '',
 });
+const shellPrefs = ref<ShellPrefs>({ shellDefaultCwd: '' });
 const saving = ref(false);
+const savingShell = ref(false);
 const feedback = ref('');
+const shellFeedback = ref('');
 
 async function refresh() {
   try {
     llamaLog.value = await invoke<LlamaLogSettings>('get_llama_engine_log_settings');
   } catch (error) {
     console.error('[settings] get_llama_engine_log_settings failed:', error);
+  }
+  try {
+    shellPrefs.value = await invoke<ShellPrefs>('get_shell_prefs');
+  } catch (error) {
+    console.error('[settings] get_shell_prefs failed:', error);
+  }
+}
+
+async function saveShell() {
+  savingShell.value = true;
+  shellFeedback.value = '';
+  try {
+    const cwd = (shellPrefs.value.shellDefaultCwd ?? '').trim();
+    shellPrefs.value = await invoke<ShellPrefs>('save_shell_prefs', {
+      prefs: { shellDefaultCwd: cwd || null },
+    });
+    shellFeedback.value = '已保存';
+  } catch (error) {
+    shellFeedback.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    savingShell.value = false;
   }
 }
 
@@ -53,7 +81,29 @@ onMounted(() => {
 <template>
   <section class="general-panel">
     <h2>通用</h2>
-    <p class="lead">本机偏好。主题可在顶栏切换；引擎日志策略如下。</p>
+    <p class="lead">本机偏好。主题可在顶栏切换；Shell 默认目录与引擎日志如下。</p>
+
+    <div class="log-card">
+      <div class="section-intro">
+        <h3>Agent Shell 默认工作目录</h3>
+        <p>执行 <code>os.shell</code> 且未指定 cwd 时使用。留空则使用用户主目录。</p>
+      </div>
+      <label class="field">
+        <span class="field-label">默认 cwd</span>
+        <input
+          v-model="shellPrefs.shellDefaultCwd"
+          class="field-input"
+          type="text"
+          placeholder="例如 /Users/you/projects"
+        />
+      </label>
+      <div class="log-actions">
+        <button type="button" class="btn btn-primary" :disabled="savingShell" @click="saveShell">
+          {{ savingShell ? '保存中…' : '保存 Shell 设置' }}
+        </button>
+        <span v-if="shellFeedback" class="field-hint">{{ shellFeedback }}</span>
+      </div>
+    </div>
 
     <div class="log-card">
       <div class="section-intro">
@@ -139,6 +189,16 @@ onMounted(() => {
   border: 1px solid var(--border-color, #e5e7eb);
   border-radius: 10px;
   background: var(--surface-2, #f8fafc);
+}
+
+.log-card + .log-card {
+  margin-top: 1.25rem;
+}
+
+.log-card > .field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .log-grid {

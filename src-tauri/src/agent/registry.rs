@@ -1,6 +1,6 @@
 //! Allowlisted Agent 工具注册表：lookup + schema 校验 + dispatch。
 //!
-//! 仅注册 `side_effect=None` 的纯计算工具；未注册 id 一律拒绝。
+//! `side_effect=None` 为纯计算；`Process`（如 os.shell）须经审批闸门后执行。
 
 use base64::{engine::general_purpose, Engine as _};
 use md5::{Digest, Md5};
@@ -9,10 +9,12 @@ use serde_json::{json, Value};
 use sha2::Sha256;
 use std::collections::HashMap;
 
-/// 工具副作用标记。第一期仅 `None`；预留未来变体。
+/// 工具副作用标记。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SideEffect {
     None,
+    /// 启动子进程；执行前必须用户审批。
+    Process,
 }
 
 /// 注册表中的工具规格（id、展示名、参数 schema、副作用）。
@@ -55,6 +57,19 @@ fn tool(
         name,
         schema,
         side_effect: SideEffect::None,
+    }
+}
+
+fn tool_process(
+    id: &'static str,
+    name: &'static str,
+    schema: Value,
+) -> ToolSpec {
+    ToolSpec {
+        id,
+        name,
+        schema,
+        side_effect: SideEffect::Process,
     }
 }
 
@@ -102,13 +117,13 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
         ),
         tool(
             "timestamp.convert",
-            "时间戳转换；也可取当前时刻（input=now）",
+            "时间戳转换；也可取当前时刻（input=now，默认本地时区）",
             json!({
                 "type": "object",
                 "properties": {
                     "input": {
                         "type": "string",
-                        "description": "Unix 秒/毫秒时间戳、ISO-8601 时间字符串，或 now/当前/现在（取本机当前 UTC 时刻）"
+                        "description": "Unix 秒/毫秒时间戳、ISO-8601 时间字符串，或 now/当前/现在（取本机当前时刻；iso 为本地时区）"
                     },
                     "unit": {
                         "type": "string",
@@ -190,6 +205,25 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
             "form.parse",
             "表单字符串解析为 JSON 对象",
             required_string_props(&[("input", "application/x-www-form-urlencoded 字符串")]),
+        ),
+        tool_process(
+            "os.shell",
+            "受限 OS Shell（需用户确认）",
+            json!({
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "要执行的 shell 命令（短命令；危险命令会被拒绝）"
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "工作目录；省略则使用设置中的默认 cwd"
+                    }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }),
         ),
     ]
 });
@@ -366,6 +400,11 @@ pub fn dispatch(tool_id: &str, args: &Value) -> Result<String, String> {
             let input = require_str(args, "input")?;
             crate::commands::encoding::form_parse_dispatch(input)
         }
+        "os.shell" => {
+            let command = require_str(args, "command")?;
+            let cwd = args.get("cwd").and_then(|v| v.as_str());
+            crate::agent::os_shell::execute(command, cwd)
+        }
         _ => Err(format!("未注册的工具: {tool_id}（unknown tool）")),
     }
 }
@@ -447,7 +486,7 @@ fn dispatch_jwt_parse(args: &Value) -> Result<String, String> {
 }
 
 fn dispatch_timestamp(args: &Value) -> Result<String, String> {
-    use chrono::{DateTime, TimeZone, Utc};
+    use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 
     let input = require_str(args, "input")?.trim();
     let unit = args
@@ -459,19 +498,24 @@ fn dispatch_timestamp(args: &Value) -> Result<String, String> {
     let is_now = matches!(input_lower.as_str(), "now" | "current")
         || matches!(input, "当前" | "现在" | "此刻");
 
-    let dt: DateTime<Utc> = if is_now {
-        Utc::now()
+    let dt_local: DateTime<Local> = if is_now {
+        Local::now()
     } else if unit == "iso"
         || (!input.chars().all(|c| c.is_ascii_digit() || c == '-')
             && input.contains(|c: char| c == 'T' || c == '-' || c == ':'))
     {
-        DateTime::parse_from_rfc3339(input)
-            .map(|d| d.with_timezone(&Utc))
-            .or_else(|_| {
-                chrono::NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S")
-                    .map(|n| Utc.from_utc_datetime(&n))
-            })
-            .map_err(|e| format!("无法解析时间字符串: {e}"))?
+        if let Ok(fixed) = DateTime::parse_from_rfc3339(input) {
+            fixed.with_timezone(&Local)
+        } else {
+            let naive = NaiveDateTime::parse_from_str(input, "%Y-%m-%d %H:%M:%S")
+                .or_else(|_| NaiveDateTime::parse_from_str(input, "%Y-%m-%dT%H:%M:%S"))
+                .map_err(|e| format!("无法解析时间字符串: {e}"))?;
+            Local
+                .from_local_datetime(&naive)
+                .single()
+                .or_else(|| Local.from_local_datetime(&naive).earliest())
+                .ok_or_else(|| "本地时区无法唯一解释该时间".to_string())?
+        }
     } else {
         let n: i64 = input
             .parse()
@@ -491,12 +535,14 @@ fn dispatch_timestamp(args: &Value) -> Result<String, String> {
         Utc.timestamp_opt(secs, 0)
             .single()
             .ok_or_else(|| "时间戳超出范围".to_string())?
+            .with_timezone(&Local)
     };
 
     Ok(json!({
-        "iso": dt.to_rfc3339(),
-        "unix_seconds": dt.timestamp(),
-        "unix_millis": dt.timestamp_millis(),
+        "iso": dt_local.to_rfc3339(),
+        "iso_utc": dt_local.with_timezone(&Utc).to_rfc3339(),
+        "unix_seconds": dt_local.timestamp(),
+        "unix_millis": dt_local.timestamp_millis(),
     })
     .to_string())
 }
@@ -656,7 +702,7 @@ mod tests {
 
     #[test]
     fn timestamp_now_returns_current_instant() {
-        use chrono::Utc;
+        use chrono::{Local, Utc};
         let before = Utc::now().timestamp();
         let raw = dispatch("timestamp.convert", &json!({"input": "now"})).unwrap();
         let after = Utc::now().timestamp();
@@ -666,7 +712,21 @@ mod tests {
             secs >= before - 1 && secs <= after + 1,
             "secs={secs} before={before} after={after} raw={raw}"
         );
-        assert!(v["iso"].as_str().unwrap_or("").contains('T'));
+        let iso = v["iso"].as_str().unwrap_or("");
+        assert!(iso.contains('T'), "iso={iso}");
+        let iso_utc = v["iso_utc"].as_str().unwrap_or("");
+        assert!(
+            iso_utc.ends_with('Z') || iso_utc.contains("+00:00") || iso_utc.contains("-00:00"),
+            "iso_utc should be UTC: {iso_utc}"
+        );
+        // iso 使用本地 offset：与 Local::now 的数值 offset 一致（UTC 本机则二者可同为 +00:00）
+        let local_now = Local::now();
+        let local_off = local_now.offset().local_minus_utc();
+        let iso_off = chrono::DateTime::parse_from_rfc3339(iso)
+            .expect("iso rfc3339")
+            .timezone()
+            .local_minus_utc();
+        assert_eq!(iso_off, local_off, "iso offset should match local: iso={iso}");
         assert!(v["unix_millis"].as_i64().unwrap() >= secs * 1000);
     }
 
@@ -692,6 +752,27 @@ mod tests {
     }
 
     #[test]
+    fn timestamp_naive_datetime_is_local() {
+        use chrono::{Local, Timelike};
+        let raw = dispatch(
+            "timestamp.convert",
+            &json!({"input": "2020-01-15 12:00:00"}),
+        )
+        .unwrap();
+        let v: Value = serde_json::from_str(&raw).unwrap();
+        let iso = v["iso"].as_str().unwrap();
+        let parsed = chrono::DateTime::parse_from_rfc3339(iso).unwrap();
+        assert_eq!(parsed.hour(), 12);
+        assert_eq!(parsed.minute(), 0);
+        let local_off = Local::now().offset().local_minus_utc();
+        assert_eq!(
+            parsed.timezone().local_minus_utc(),
+            local_off,
+            "naive wall time should use local offset: {iso}"
+        );
+    }
+
+    #[test]
     fn timestamp_chinese_now_alias() {
         use chrono::Utc;
         let before = Utc::now().timestamp();
@@ -699,6 +780,7 @@ mod tests {
         let v: Value = serde_json::from_str(&raw).unwrap();
         let secs = v["unix_seconds"].as_i64().unwrap();
         assert!((secs - before).abs() <= 2, "raw={raw}");
+        assert!(v.get("iso_utc").and_then(|x| x.as_str()).is_some());
     }
 
     #[test]
@@ -734,6 +816,31 @@ mod tests {
             assert_eq!(spec.side_effect, SideEffect::None);
             assert_eq!(spec.id, id);
         }
+        let shell = lookup("os.shell").expect("os.shell");
+        assert_eq!(shell.side_effect, SideEffect::Process);
         assert!(lookup("http.request").is_none());
+    }
+
+    #[test]
+    fn os_shell_requires_command() {
+        let err = dispatch("os.shell", &json!({})).unwrap_err();
+        assert!(err.contains("command") || err.contains("参数"), "{err}");
+    }
+
+    #[test]
+    fn os_shell_denies_rm() {
+        let err = dispatch("os.shell", &json!({"command": "rm -rf /tmp/x"})).unwrap_err();
+        assert!(err.contains("拒绝") || err.contains("危险"), "{err}");
+    }
+
+    #[test]
+    fn json_format_chaoyang_es_query_from_trajectory() {
+        // 轨迹 df21924b：用户 ES DSL +「转义下」；一层 / 两层转义都应成功
+        let once = r#"{\"query\":{\"function_score\":{\"boost_mode\":\"replace\",\"functions\":[{\"filter\":{\"match_all\":{}},\"weight\":40}],\"query\":{\"bool\":{\"filter\":[{\"terms\":{\"city\":[110000,0]}},{\"term\":{\"is_del\":0}}],\"must\":{\"match\":{\"keywd\":{\"fuzziness\":\"AUTO\",\"query\":\"朝阳114号线将台站\"}}},\"must_not\":{\"term\":{\"manual_weight\":0}}}},\"score_mode\":\"first\"}},\"size\":10,\"sort\":[{\"_score\":{\"order\":\"desc\"}},{\"hits_total\":{\"order\":\"desc\"}}]}"#;
+        let out = dispatch("json.format", &json!({ "input": once })).unwrap();
+        assert!(out.contains("朝阳114号线将台站"), "{out}");
+        let twice = once.replace('\\', "\\\\").replace('"', "\\\"");
+        let out2 = dispatch("json.format", &json!({ "input": twice })).unwrap();
+        assert!(out2.contains("function_score"), "{out2}");
     }
 }

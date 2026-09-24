@@ -105,12 +105,22 @@ fn parse_first_json_value(input: &str) -> Result<Value, String> {
 }
 
 fn unescape_json_text(escaped: &str) -> String {
+    // 把当前文本当作「JSON 字符串字面量的内容」再解一层（正确处理 \\" / \\\" 顺序）。
+    let mut wrapped = String::with_capacity(escaped.len() + 2);
+    wrapped.push('"');
+    wrapped.push_str(escaped);
+    wrapped.push('"');
+    if let Ok(s) = serde_json::from_str::<String>(&wrapped) {
+        return s;
+    }
+    // 回退：朴素替换（兼容非严格转义）
     escaped
+        .replace("\\\\", "\u{0001}")
+        .replace("\\\"", "\"")
         .replace("\\n", "\n")
         .replace("\\r", "\r")
         .replace("\\t", "\t")
-        .replace("\\\"", "\"")
-        .replace("\\\\", "\\")
+        .replace('\u{0001}', "\\")
 }
 
 /// 压缩JSON（去除所有空格和换行）

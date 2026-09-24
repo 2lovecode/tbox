@@ -33,6 +33,14 @@ pub enum AgentEvent {
     Reasoning { text: String },
     ToolStart { id: String, args: Value },
     ToolEnd { id: String, result: String },
+    /// Process 工具执行前的用户审批请求。
+    ToolApprovalRequired {
+        request_id: String,
+        tool_id: String,
+        command: String,
+        cwd: String,
+        similar_key: String,
+    },
     ContextBudget { budget: ContextBudget },
     Compress { message: String, count: usize },
     Error { message: String },
@@ -274,7 +282,7 @@ pub fn run_agent_on(
     if !skill_docs.is_empty() {
         let pairs: Vec<(String, String)> = skill_docs
             .iter()
-            .map(|s| (s.tool_id.clone(), s.body.clone()))
+            .map(|s| (s.skill_id.clone(), s.body.clone()))
             .collect();
         let _ = log.append(
             "context/snapshot",
@@ -659,14 +667,72 @@ pub fn run_agent_on(
                     let result = match harness::parse::validate_call(
                         &call.name,
                         &call.arguments,
-                    )
-                    .and_then(|()| registry::dispatch(&call.name, &call.arguments))
-                    {
-                        Ok(s) => {
-                            any_success = true;
-                            s
-                        }
+                    ) {
                         Err(e) => e,
+                        Ok(()) => {
+                            let needs_approval = registry::lookup(&call.name)
+                                .map(|s| s.side_effect == registry::SideEffect::Process)
+                                .unwrap_or(false);
+                            let approved = if needs_approval {
+                                let command = call
+                                    .arguments
+                                    .get("command")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let cwd = call
+                                    .arguments
+                                    .get("cwd")
+                                    .and_then(|v| v.as_str())
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| {
+                                        crate::agent::os_shell::default_cwd()
+                                            .display()
+                                            .to_string()
+                                    });
+                                let similar_key =
+                                    crate::agent::os_shell::similar_key(&command);
+                                if crate::agent::tool_approval::is_session_allowed(
+                                    conv_id, &similar_key,
+                                ) {
+                                    true
+                                } else {
+                                    let request_id = uuid::Uuid::new_v4().to_string();
+                                    emit(AgentEvent::ToolApprovalRequired {
+                                        request_id: request_id.clone(),
+                                        tool_id: tool_id.clone(),
+                                        command: command.clone(),
+                                        cwd: cwd.clone(),
+                                        similar_key: similar_key.clone(),
+                                    });
+                                    let decision =
+                                        crate::agent::tool_approval::wait_for_approval(
+                                            &request_id,
+                                            conv_id,
+                                            &similar_key,
+                                            cancel,
+                                        );
+                                    !matches!(
+                                        decision,
+                                        crate::agent::tool_approval::ApprovalDecision::Deny
+                                    )
+                                }
+                            } else {
+                                true
+                            };
+                            if !approved {
+                                "用户拒绝执行该命令".to_string()
+                            } else {
+                                match registry::dispatch(&call.name, &call.arguments) {
+                                    Ok(s) => {
+                                        any_success = true;
+                                        s
+                                    }
+                                    Err(e) => e,
+                                }
+                            }
+                        }
                     };
                     emit(AgentEvent::ToolEnd {
                         id: tool_id.clone(),

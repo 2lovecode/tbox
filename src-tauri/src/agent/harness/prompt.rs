@@ -103,17 +103,19 @@ fn few_shot_block() -> String {
         "用户：你有什么功能",
         "助手：我可以做这些：JSON/Base64/XML/YAML 处理、编码转换、哈希计算、JWT 解析、时间戳转换、UUID 生成、Cron 表达式说明、数制转换等。直接告诉我你的需求即可。",
         "",
-        "示例 6（问当前时间：input 必须为 now，禁止编造日期）：",
+        "示例 6（问当前时间：input 必须为 now，禁止编造日期；iso 为本机本地时区）：",
         "用户：看下当前时间",
         "助手：<tool_call>{\"name\": \"timestamp.convert\", \"arguments\": {\"input\": \"now\"}}</tool_call>",
-        "工具结果：{\"iso\":\"2026-09-23T05:20:34+00:00\",\"unix_seconds\":1758600034,\"unix_millis\":1758600034000}",
-        "助手：当前 UTC 时间是 2026-09-23T05:20:34+00:00（Unix 1758600034）。",
+        "工具结果：{\"iso\":\"2026-09-23T13:20:34+08:00\",\"iso_utc\":\"2026-09-23T05:20:34+00:00\",\"unix_seconds\":1758600034,\"unix_millis\":1758600034000}",
+        "助手：当前本地时间是 2026-09-23T13:20:34+08:00（Unix 1758600034）。",
         "",
-        "示例 7（JSON 转义/反转义/美化：必须用 json.format，禁止 charset.convert）：",
-        "用户：转义下 {\\\"a\\\":1}",
+        "示例 7（JSON 转义/反转义/美化：必须用 json.format，禁止 charset.convert；input=用户原文，禁止二次转义）：",
+        "用户：转义下",
+        "（用户消息里另有一段 JSON 对象，例如 {\"a\":1}）",
         "助手：<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>",
         "工具结果：{\n  \"a\": 1\n}",
         "助手：格式化结果：\n{\n  \"a\": 1\n}",
+        "说明：上面 arguments 里的 \\\" 是 tool_call JSON 信封的一层转义；不要先把用户原文改成 {\\\"a\\\":1} 再转义一次。",
     ]
     .join("\n")
 }
@@ -142,6 +144,7 @@ fn push_role_and_rules(prompt: &mut String) {
     prompt.push_str("你是 TBox 工具助手。用户提出计算类请求（编码、解码、哈希、解析、格式化、转换、生成）时，你必须调用下述工具完成，不要自己心算。\n");
     prompt.push_str("调用规则：只输出一个 <tool_call> 块，格式为 <tool_call>{\"name\": \"工具id\", \"arguments\": {...}}</tool_call>；不得编造参数名；与工具无关的请求直接回答。\n");
     prompt.push_str("重要：需要工具时本轮只输出 <tool_call>，不要模仿示例里的「工具结果：」或「助手：」行，也不要编造工具返回值；等系统回传真实结果后再用自然语言回答用户。\n");
+    prompt.push_str("重要：json.format 的 input 必须是用户 JSON 原文；tool_call 信封只做一层字符串转义。禁止先把全文改成 {\\\"a\\\":1} 再塞进 input（二次转义会导致解析失败）。若工具返回「不要再多写反斜杠」，下一轮用用户原文重试，不要指责用户 JSON 结构错误。\n");
 }
 
 fn push_tool_directory(prompt: &mut String) {

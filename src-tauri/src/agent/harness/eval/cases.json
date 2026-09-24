@@ -405,6 +405,25 @@
       "model_output": "<tool_call>{\"name\": \"form.parse\", \"arguments\": {\"input\": \"flag\"}}</tool_call>"
     },
     {
+      "id": "shell-1",
+      "user_input": "用 rg 搜一下 TODO",
+      "expect_tool": "os.shell",
+      "expect_args": {
+        "command": "rg TODO"
+      },
+      "model_output": "<tool_call>{\"name\": \"os.shell\", \"arguments\": {\"command\": \"rg TODO\"}}</tool_call>"
+    },
+    {
+      "id": "shell-2",
+      "user_input": "run ls -la in /tmp",
+      "expect_tool": "os.shell",
+      "expect_args": {
+        "command": "ls -la",
+        "cwd": "/tmp"
+      },
+      "model_output": "<tool_call>{\"name\": \"os.shell\", \"arguments\": {\"command\": \"ls -la\", \"cwd\": \"/tmp\"}}</tool_call>"
+    },
+    {
       "id": "ms-1",
       "user_input": "先 base64 解码 aGk= 再算 md5",
       "expect_chain": [

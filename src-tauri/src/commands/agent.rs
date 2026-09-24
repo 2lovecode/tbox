@@ -51,6 +51,16 @@ pub struct AgentEventPayload {
     pub budget: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub count: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub similar_key: Option<String>,
 }
 
 fn empty_payload(conversation_id: String, event_type: &str) -> AgentEventPayload {
@@ -65,6 +75,11 @@ fn empty_payload(conversation_id: String, event_type: &str) -> AgentEventPayload
         mode: None,
         budget: None,
         count: None,
+        request_id: None,
+        tool_id: None,
+        command: None,
+        cwd: None,
+        similar_key: None,
     }
 }
 
@@ -94,6 +109,20 @@ fn wire_event(conversation_id: String, ev: AgentEvent) -> AgentEventPayload {
             id: Some(id),
             result: Some(result),
             ..empty_payload(conversation_id, "tool_end")
+        },
+        AgentEvent::ToolApprovalRequired {
+            request_id,
+            tool_id,
+            command,
+            cwd,
+            similar_key,
+        } => AgentEventPayload {
+            request_id: Some(request_id),
+            tool_id: Some(tool_id),
+            command: Some(command),
+            cwd: Some(cwd),
+            similar_key: Some(similar_key),
+            ..empty_payload(conversation_id, "tool_approval_required")
         },
         AgentEvent::ContextBudget { budget } => AgentEventPayload {
             budget: serde_json::to_value(&budget).ok(),
@@ -242,6 +271,7 @@ pub async fn send_chat_turn(
         }
 
         registry.finish(&conv_id);
+        crate::agent::tool_approval::clear_session(&conv_id);
         emit_run_status(&app_for_worker, &conv_id, "idle");
     });
 
@@ -255,7 +285,38 @@ pub fn cancel_chat_turn(
     conversationId: String,
 ) -> Result<(), String> {
     registry.cancel(&conversationId);
+    crate::agent::tool_approval::clear_session(&conversationId);
     Ok(())
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub fn resolve_tool_approval(requestId: String, decision: String) -> Result<(), String> {
+    use crate::agent::tool_approval::ApprovalDecision;
+    let d = match decision.as_str() {
+        "deny" => ApprovalDecision::Deny,
+        "allow" => ApprovalDecision::Allow,
+        "allow_similar" => ApprovalDecision::AllowSimilar,
+        other => return Err(format!("未知决策: {other}")),
+    };
+    crate::agent::tool_approval::resolve(&requestId, d)
+}
+
+#[tauri::command]
+pub fn get_shell_prefs() -> crate::agent::os_shell::ShellPrefs {
+    crate::agent::os_shell::load_shell_prefs()
+}
+
+#[tauri::command]
+pub fn save_shell_prefs(
+    prefs: crate::agent::os_shell::ShellPrefs,
+) -> Result<crate::agent::os_shell::ShellPrefs, String> {
+    crate::agent::os_shell::save_shell_prefs(prefs)
+}
+
+#[tauri::command]
+pub fn probe_shell_commands() -> Vec<crate::agent::os_shell::CommandAvailability> {
+    crate::agent::os_shell::probe_commands()
 }
 
 /// Engine load status + which local backend is currently effective, for the
@@ -321,6 +382,24 @@ pub fn delete_skill(id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn import_skill(raw: String, name: Option<String>) -> Result<crate::agent::skills::SkillInfo, String> {
     crate::agent::skills::import_skill(raw, name)
+}
+
+#[tauri::command]
+pub fn list_skill_versions(id: String) -> Result<Vec<crate::agent::skills::SkillVersionInfo>, String> {
+    crate::agent::skills::list_skill_versions(&id)
+}
+
+#[tauri::command]
+pub fn restore_skill_version(
+    id: String,
+    seq: u64,
+) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::restore_skill_version(&id, seq)
+}
+
+#[tauri::command]
+pub fn restore_skill_default(id: String) -> Result<crate::agent::skills::SkillInfo, String> {
+    crate::agent::skills::restore_skill_default(&id)
 }
 
 #[tauri::command]

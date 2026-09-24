@@ -6,11 +6,21 @@ interface SkillInfo {
   id: string;
   name: string;
   toolIds: string[];
+  toolboxIds?: number[];
   keywords?: string[];
   description: string;
   source: string;
   body: string;
   enabled: boolean;
+  editable?: boolean;
+  modified?: boolean;
+  canRestoreDefault?: boolean;
+}
+
+interface SkillVersionInfo {
+  seq: number;
+  savedAt: string;
+  preview: string;
 }
 
 interface SkillForm {
@@ -29,6 +39,9 @@ const feedback = ref('');
 const query = ref('');
 const showDialog = ref(false);
 const showDeleteConfirm = ref<string | null>(null);
+const showHistoryId = ref<string | null>(null);
+const versions = ref<SkillVersionInfo[]>([]);
+const versionsLoading = ref(false);
 const form = ref<SkillForm>(emptyForm());
 const filteredSkills = computed(() => {
   const keyword = query.value.trim().toLowerCase();
@@ -79,7 +92,6 @@ function openCreate() {
 }
 
 function openEdit(skill: SkillInfo) {
-  if (skill.source === 'builtin') return;
   form.value = {
     id: skill.id,
     name: skill.name,
@@ -119,6 +131,42 @@ async function deleteSkill(skill: SkillInfo) {
   }
 }
 
+async function openHistory(skill: SkillInfo) {
+  showHistoryId.value = skill.id;
+  versionsLoading.value = true;
+  versions.value = [];
+  try {
+    versions.value = await invoke<SkillVersionInfo[]>('list_skill_versions', { id: skill.id });
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : String(error);
+  } finally {
+    versionsLoading.value = false;
+  }
+}
+
+async function restoreVersion(seq: number) {
+  const id = showHistoryId.value;
+  if (!id) return;
+  try {
+    await invoke('restore_skill_version', { id, seq });
+    await refresh();
+    feedback.value = `已恢复到版本 ${seq}`;
+    showHistoryId.value = null;
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function restoreDefault(skill: SkillInfo) {
+  try {
+    await invoke('restore_skill_default', { id: skill.id });
+    await refresh();
+    feedback.value = `已恢复默认：${skill.name}`;
+  } catch (error) {
+    feedback.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function importSkill() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -148,7 +196,7 @@ onMounted(() => {
   <section class="skills-panel">
     <h2>技能</h2>
     <p class="lead">
-      内置技能是 Agent 可按需查阅的工具说明书。禁用后不再注入 Agent 上下文，但工具箱页面和工具注册表不受影响。
+      按主题合并的 Skill（一 Skill 可对应多工具），L0 仅 name+描述常驻，L1 正文按需注入。可编辑并记版本；禁用只影响 Agent 注入。
     </p>
 
     <div class="toolbar">
@@ -174,14 +222,28 @@ onMounted(() => {
         :class="{ disabled: !skill.enabled }"
       >
         <div class="skill-main">
-          <h3>{{ skill.name }}</h3>
+          <h3>
+            {{ skill.name }}
+            <span v-if="skill.modified" class="mod-badge">已修改</span>
+          </h3>
           <p class="skill-id">{{ skill.id }}</p>
           <p class="skill-desc">{{ skill.description }}</p>
-          <p class="skill-tools">{{ skill.toolIds.join('、') || '未关联工具' }}</p>
+          <p class="skill-tools">{{ skill.toolIds.join('、') || '未关联 Agent 工具' }}</p>
+          <p v-if="skill.toolboxIds?.length" class="skill-tools">工具箱 #{{ skill.toolboxIds.join(', #') }}</p>
         </div>
         <div class="skill-actions">
           <span class="source-badge">{{ skill.source === 'builtin' ? '内置' : '用户' }}</span>
-          <button v-if="skill.source === 'user'" type="button" class="icon-btn" @click="openEdit(skill)"><i class="fas fa-edit"></i></button>
+          <button type="button" class="icon-btn" title="编辑" @click="openEdit(skill)"><i class="fas fa-edit"></i></button>
+          <button type="button" class="icon-btn" title="版本历史" @click="openHistory(skill)"><i class="fas fa-clock-rotate-left"></i></button>
+          <button
+            v-if="skill.canRestoreDefault"
+            type="button"
+            class="icon-btn"
+            title="恢复默认"
+            @click="restoreDefault(skill)"
+          >
+            <i class="fas fa-rotate-left"></i>
+          </button>
           <button v-if="skill.source === 'user'" type="button" class="icon-btn danger" @click="showDeleteConfirm = skill.id"><i class="fas fa-trash-can"></i></button>
           <label class="skill-switch">
             <input type="checkbox" :checked="skill.enabled" :disabled="updatingId === skill.id || loading" @change="toggle(skill)" />
@@ -190,7 +252,7 @@ onMounted(() => {
       </article>
     </div>
 
-    <p v-if="!loading && !filteredSkills.length" class="empty">没有匹配的内置技能。</p>
+    <p v-if="!loading && !filteredSkills.length" class="empty">没有匹配的技能。</p>
 
     <dialog v-if="showDialog" class="skill-dialog" open @click.self="showDialog = false">
       <form class="dialog-form" @submit.prevent="saveSkill">
@@ -205,6 +267,27 @@ onMounted(() => {
           <button type="submit" class="btn primary">保存</button>
         </div>
       </form>
+    </dialog>
+
+    <dialog v-if="showHistoryId" class="skill-dialog" open @click.self="showHistoryId = null">
+      <div class="dialog-form">
+        <h3>版本历史 · {{ showHistoryId }}</h3>
+        <p v-if="versionsLoading">加载中…</p>
+        <p v-else-if="!versions.length" class="empty">暂无历史版本。</p>
+        <ul v-else class="version-list">
+          <li v-for="v in versions" :key="v.seq">
+            <div>
+              <strong>#{{ v.seq }}</strong>
+              <span class="muted">{{ v.savedAt }}</span>
+              <p>{{ v.preview }}</p>
+            </div>
+            <button type="button" class="btn" @click="restoreVersion(v.seq)">恢复此版</button>
+          </li>
+        </ul>
+        <div class="dialog-actions">
+          <button type="button" class="btn" @click="showHistoryId = null">关闭</button>
+        </div>
+      </div>
     </dialog>
 
     <dialog v-if="showDeleteConfirm" class="skill-dialog confirm" open @click.self="showDeleteConfirm = null">
@@ -237,80 +320,129 @@ h2 {
   color: var(--text-secondary, #6b7280);
   font-size: 13px;
   line-height: 1.6;
-  max-width: 46em;
+}
+
+.mod-badge {
+  margin-left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #b45309;
+  background: #fef3c7;
+  padding: 2px 6px;
+  border-radius: 999px;
+}
+
+.version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.version-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+}
+
+.version-list .muted {
+  margin-left: 8px;
+  color: var(--text-secondary, #6b7280);
+  font-size: 12px;
 }
 
 .toolbar {
   display: flex;
-  gap: 10px;
+  gap: 8px;
   align-items: center;
-  justify-content: space-between;
 }
 
 .search-box {
-  display: flex;
   flex: 1;
-  max-width: 340px;
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--border, #e5e7eb);
   border-radius: 8px;
-  background: var(--bg-secondary, #f9fafb);
+  padding: 6px 10px;
 }
 
 .search-box input {
-  flex: 1;
-  border: 0;
+  border: none;
   outline: none;
+  width: 100%;
   background: transparent;
-  color: var(--text-primary, #111827);
-}
-
-.btn {
-  padding: 8px 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 8px;
-  background: var(--surface-2, var(--bg-secondary, #fff));
-  color: var(--text-primary, #111827);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.feedback {
-  margin: 0;
-  color: #dc2626;
-  font-size: 12px;
 }
 
 .management-actions {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
 }
 
+.btn {
+  border: 1px solid var(--border, #e5e7eb);
+  background: var(--bg-elevated, #fff);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
 .btn.primary {
-  background: var(--primary, #4361ee);
-  border-color: var(--primary, #4361ee);
-  color: white;
+  background: var(--primary, #2563eb);
+  border-color: transparent;
+  color: #fff;
 }
 
 .btn.danger {
-  background: #ef4444;
-  border-color: #ef4444;
-  color: white;
+  background: #dc2626;
+  border-color: transparent;
+  color: #fff;
 }
 
-.skill-desc {
-  margin: 0 0 6px;
+.feedback {
+  margin: 0;
   color: var(--text-secondary, #6b7280);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 13px;
+}
+
+.skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skill-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 10px;
+}
+
+.skill-card.disabled {
+  opacity: 0.65;
+}
+
+.skill-main h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.skill-id,
+.skill-desc,
+.skill-tools {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-secondary, #6b7280);
 }
 
 .skill-actions {
@@ -321,151 +453,89 @@ h2 {
 }
 
 .source-badge {
-  padding: 3px 6px;
+  font-size: 11px;
+  padding: 2px 6px;
   border-radius: 999px;
-  background: var(--bg-secondary, #f3f4f6);
-  color: var(--text-secondary, #6b7280);
-  font-size: 10px;
-  white-space: nowrap;
+  background: var(--bg-muted, #f3f4f6);
 }
 
 .icon-btn {
-  width: 28px;
-  height: 28px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: none;
   background: transparent;
-  color: var(--text-secondary, #6b7280);
-  border-radius: 7px;
   cursor: pointer;
+  padding: 4px 6px;
+  color: var(--text-secondary, #6b7280);
 }
 
-.icon-btn.danger:hover {
+.icon-btn.danger {
   color: #dc2626;
-  border-color: #ef4444;
+}
+
+.skill-switch input {
+  width: 36px;
+  height: 18px;
+}
+
+.empty {
+  color: var(--text-secondary, #6b7280);
+  font-size: 13px;
 }
 
 .skill-dialog {
   position: fixed;
   inset: 0;
-  z-index: 50;
-  display: grid;
-  place-items: center;
-  width: 100vw;
+  z-index: 1000;
+  width: 100%;
   max-width: none;
-  max-height: none;
-  border: 0;
-  padding: 0;
+  height: 100%;
+  margin: 0;
+  padding: 24px;
+  border: none;
   background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.skill-dialog .dialog-form {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  background: var(--bg-elevated, #fff);
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(15, 23, 42, 0.18);
+}
+
+.skill-dialog.confirm .dialog-form {
+  width: min(400px, 100%);
 }
 
 .dialog-form {
-  width: min(760px, calc(100vw - 32px));
-  max-height: min(85vh, 860px);
-  overflow: auto;
-  border-radius: 12px;
-  background: var(--surface-2, var(--bg-secondary, #fff));
-  padding: 20px;
-  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.2);
-}
-
-.dialog-form h3 {
-  margin: 0 0 16px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .dialog-form label {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: 4px;
+  font-size: 13px;
 }
 
 .dialog-form input,
 .dialog-form textarea {
-  padding: 9px 10px;
-  border: 1px solid var(--border-color, #e5e7eb);
+  border: 1px solid var(--border, #e5e7eb);
   border-radius: 8px;
-  background: var(--bg-secondary, #f9fafb);
-  color: var(--text-primary, #111827);
-  font-family: inherit;
-}
-
-.dialog-form textarea {
-  font-family: 'SFMono-Regular', Consolas, Monaco, monospace;
-  line-height: 1.5;
-}
-
-.dialog-form span {
-  font-size: 12px;
-  color: var(--text-secondary, #6b7280);
+  padding: 8px 10px;
+  font: inherit;
 }
 
 .dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.skill-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 10px;
-}
-
-.skill-card {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid var(--border-color, #e5e7eb);
-  border-radius: 10px;
-  background: var(--surface-2, var(--bg-secondary, #fff));
-}
-
-.skill-card.disabled {
-  opacity: 0.72;
-  background: var(--bg-secondary, #f9fafb);
-}
-
-.skill-main {
-  min-width: 0;
-}
-
-h3 {
-  margin: 0 0 4px;
-  font-size: 14px;
-}
-
-.skill-id {
-  margin: 0 0 6px;
-  color: var(--text-secondary, #6b7280);
-  font-family: monospace;
-  font-size: 11px;
-}
-
-.skill-tools {
-  margin: 0;
-  color: var(--text-secondary, #6b7280);
-  font-size: 12px;
-  word-break: break-word;
-}
-
-.skill-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-  color: var(--text-secondary, #6b7280);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.empty {
-  margin: 0;
-  color: var(--text-secondary, #6b7280);
-  font-size: 13px;
-  text-align: center;
-  padding: 24px;
 }
 </style>
