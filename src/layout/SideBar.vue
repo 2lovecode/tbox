@@ -23,7 +23,7 @@ const menuRef = ref<HTMLElement | null>(null);
 const renameInputEl = ref<HTMLInputElement | null>(null);
 
 /** v-for 内字符串 ref 会变成数组，用函数 ref 绑定单个 input。 */
-function setRenameInputEl(el: Element | null) {
+function setRenameInputEl(el: unknown) {
   renameInputEl.value = el instanceof HTMLInputElement ? el : null;
 }
 

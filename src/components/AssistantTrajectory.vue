@@ -73,7 +73,12 @@ onBeforeUnmount(() => clearTick());
 const processSteps = computed(() =>
   props.steps
     .map((step, index) => ({ step, index }))
-    .filter(({ step }) => step.type === 'reasoning' || step.type === 'tool'),
+    .filter(
+      (item): item is {
+        index: number;
+        step: Extract<TrajectoryStep, { type: 'reasoning' | 'tool' }>;
+      } => item.step.type === 'reasoning' || item.step.type === 'tool',
+    ),
 );
 
 /** 用户可见正文：有工具步骤时，只展示最后一个工具之后的文本；去掉工具结果回声前缀。 */
@@ -259,6 +264,11 @@ const summaryLines = computed((): SummaryGroup[] => {
       continue;
     }
 
+    if (step.type !== 'tool') {
+      i += 1;
+      continue;
+    }
+
     const kind = toolKind(step.id);
     if (kind === 'other') {
       groups.push({
@@ -283,12 +293,13 @@ const summaryLines = computed((): SummaryGroup[] => {
 
     if (batch.length === 1) {
       const only = batch[0];
+      const onlyTool = only.step.type === 'tool' ? only.step : step;
       groups.push({
         key: `t-${only.index}`,
         indices: [only.index],
-        line: stepSummaryLine(only.step),
-        steps: [only.step],
-        hasDetail: only.step.args != null || !!(only.step.result && only.step.result.trim()),
+        line: stepSummaryLine(onlyTool),
+        steps: [onlyTool],
+        hasDetail: onlyTool.args != null || !!(onlyTool.result && onlyTool.result.trim()),
       });
     } else {
       const n = batch.length;
