@@ -367,9 +367,13 @@ watch(isActive, (newVal) => {
 
 <style scoped>
 .screen-ruler {
-  max-width: 1200px;
+  /* 壳层 body/main-wrapper 为 overflow:hidden，本页自行承担纵向滚动 */
+  height: 100%;
+  overflow-y: auto;
+  width: min(1400px, 100%);
   margin: 0 auto;
-  padding: 0;
+  padding: 20px;
+  box-sizing: border-box;
   position: relative;
 }
 

@@ -161,21 +161,42 @@ pub fn escape_json(json_str: String) -> Result<JsonEscapeResult, String> {
 }
 
 /// JSON去转义（将转义的JSON字符串还原）
+///
+/// 按 JSON 字符串字面量规则解层（含 `\uXXXX`），必要时多层剥壳；
+/// 不美化。若输入已是合法 JSON，则原样（trim）返回。
 #[tauri::command]
 pub fn unescape_json(escaped_str: String) -> Result<JsonUnescapeResult, String> {
-    // 去转义
-    let unescaped = escaped_str
-        .replace("\\n", "\n")   // 换行
-        .replace("\\r", "\r")   // 回车
-        .replace("\\t", "\t")   // 制表符
-        .replace("\\\"", "\"")  // 双引号
-        .replace("\\\\", "\\"); // 反斜杠（最后处理，避免重复转义）
-    
-    // 验证去转义后的JSON是否有效
-    let is_valid = serde_json::from_str::<Value>(&unescaped).is_ok();
-    
+    let trimmed = escaped_str.trim().to_string();
+    if trimmed.is_empty() {
+        return Ok(JsonUnescapeResult {
+            unescaped: String::new(),
+            is_valid: false,
+        });
+    }
+
+    // 已是合法 JSON：不做剥壳，避免误伤明文。
+    if serde_json::from_str::<Value>(&trimmed).is_ok() {
+        return Ok(JsonUnescapeResult {
+            unescaped: trimmed,
+            is_valid: true,
+        });
+    }
+
+    let mut candidate = trimmed;
+    for _ in 0..8 {
+        let next = unescape_json_text(&candidate);
+        if next == candidate {
+            break;
+        }
+        candidate = next;
+        if serde_json::from_str::<Value>(&candidate).is_ok() {
+            break;
+        }
+    }
+
+    let is_valid = serde_json::from_str::<Value>(&candidate).is_ok();
     Ok(JsonUnescapeResult {
-        unescaped,
+        unescaped: candidate,
         is_valid,
     })
 }
@@ -633,6 +654,41 @@ mod dispatch_tests {
         let out = url_parse_dispatch("https://x.com/?k=hi%20world").unwrap();
         let v: Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["query"]["k"], "hi world");
+    }
+
+    #[test]
+    fn unescape_simple_escaped_object() {
+        let escaped = r#"{\"a\":1,\"b\":\"x\"}"#;
+        let result = unescape_json(escaped.to_string()).unwrap();
+        assert!(result.is_valid, "unescaped={}", result.unescaped);
+        let v: Value = serde_json::from_str(&result.unescaped).unwrap();
+        assert_eq!(v["a"], 1);
+        assert_eq!(v["b"], "x");
+        // 不美化：不应插入 pretty 换行缩进
+        assert!(!result.unescaped.contains("\n  "), "got: {}", result.unescaped);
+    }
+
+    #[test]
+    fn unescape_plain_json_passthrough() {
+        let plain = r#"{"a":1}"#;
+        let result = unescape_json(plain.to_string()).unwrap();
+        assert!(result.is_valid);
+        assert_eq!(result.unescaped, plain);
+    }
+
+    #[test]
+    fn unescape_es_query_with_unicode_and_newlines() {
+        // 用户粘贴的整段转义 ES query：script source 内含 \\n 与 \\u0026
+        let escaped = r#"{\"query\":{\"bool\":{\"filter\":{\"term\":{\"cuid.keyword\":\"69c8ff0e-075a-4395-976d-d7a702ce052f\"}},\"must_not\":{\"terms\":{\"sug_click_num.keyword\":[\"1\",\"2\"]}}}},\"size\":300,\"sort\":[{\"_script\":{\"order\":\"desc\",\"script\":{\"lang\":\"painless\",\"source\":\"def v = '0';\\nif (doc.containsKey('sug_click_num.keyword') \\u0026\\u0026 doc['sug_click_num.keyword'].size() != 0) {\\n  v = doc['sug_click_num.keyword'].value;\\n}\\ntry { return Integer.parseInt(v); } catch (Exception e) { return 0; }\"},\"type\":\"number\"}}]}"#;
+        let result = unescape_json(escaped.to_string()).unwrap();
+        assert!(result.is_valid, "unescaped={}", result.unescaped);
+        let v: Value = serde_json::from_str(&result.unescaped).unwrap();
+        assert_eq!(v["size"], 300);
+        let source = v["sort"][0]["_script"]["script"]["source"]
+            .as_str()
+            .expect("source string");
+        assert!(source.contains("&&"), "expected && from \\u0026, got: {source}");
+        assert!(source.contains('\n'), "expected real newlines from \\n, got: {source:?}");
     }
 
     #[test]
