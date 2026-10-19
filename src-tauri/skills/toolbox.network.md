@@ -1,6 +1,7 @@
 ---
 name: 网络调试
-description: 测延迟/下载/上传（模拟）、HTTP GET/POST/PUT/DELETE 联调（自定义 Headers/Body）。只拆 URL 用 encoding。无 Agent tool。
+description: 测延迟/下载/上传（模拟）、HTTP GET/POST/PUT/DELETE 联调（自定义 Headers/Body）。只拆 URL 用 encoding。
+tool_id: http.request
 toolbox_id: 8, 17
 keywords: 网速, 测速, speed test, HTTP, API请求, GET, POST, PUT, DELETE, Headers
 avoid_keywords: URL解析成JSON, curl危险命令
@@ -10,7 +11,7 @@ avoid_keywords: URL解析成JSON, curl危险命令
 
 ## 何时使用 / 何时不用
 
-- **用**：测速展示、可视化发 HTTP 请求
+- **用**：发 HTTP 请求（`http.request`，需用户批准）；测速仍是页面里的随机数模拟，没有工具
 - **不用**：只拆 URL → `encoding` 的 `url.parse`；任意 shell 下载 → `os.shell`（常被拒）
 
 ## 页面完整能力
@@ -20,4 +21,5 @@ avoid_keywords: URL解析成JSON, curl危险命令
 
 ## 样本
 
-**用户**：测网速 / 发 POST → 引导对应页面。
+**用户**：测网速 → 引导 `/network-speed-test`，说明是模拟  
+**用户**：发 POST → `http.request`

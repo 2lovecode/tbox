@@ -1,0 +1,176 @@
+[
+  {
+    "query": "我想把这段 JSON 美化一下再看看",
+    "expected": 9,
+    "choice": "34",
+    "confidence": 0.303
+  },
+  {
+    "query": "帮我把这个字符串做 Base64 编码",
+    "expected": 10,
+    "choice": "34",
+    "confidence": 0.216
+  },
+  {
+    "query": "计算一下这个文件的 SHA256 哈希值",
+    "expected": 11,
+    "choice": "11",
+    "confidence": 0.436
+  },
+  {
+    "query": "把 JSON 转成 TypeScript 的 interface 定义",
+    "expected": 12,
+    "choice": "34",
+    "confidence": 0.225
+  },
+  {
+    "query": "这两个 JSON 有什么不一样的字段？",
+    "expected": 13,
+    "choice": "34",
+    "confidence": 0.461
+  },
+  {
+    "query": "这个正则表达式能匹配邮箱吗，帮我测一下",
+    "expected": 15,
+    "choice": "16",
+    "confidence": 0.499
+  },
+  {
+    "query": "给这个接口发一个 POST 请求测试下",
+    "expected": 17,
+    "choice": "17",
+    "confidence": 0.53
+  },
+  {
+    "query": "把这两段文字对比一下有哪些差异",
+    "expected": 18,
+    "choice": "33",
+    "confidence": 0.513
+  },
+  {
+    "query": "URL 里的中文参数怎么解码",
+    "expected": 19,
+    "choice": "16",
+    "confidence": 0.162
+  },
+  {
+    "query": "用 SM4 加密一下这段数据",
+    "expected": 22,
+    "choice": "16",
+    "confidence": 0.122
+  },
+  {
+    "query": "测试一下 MySQL 的连接是否正常",
+    "expected": 24,
+    "choice": "16",
+    "confidence": 0.306
+  },
+  {
+    "query": "帮我生成一个包含这段网址的二维码",
+    "expected": 29,
+    "choice": "3",
+    "confidence": 0.726
+  },
+  {
+    "query": "把 255 转成十六进制",
+    "expected": 32,
+    "choice": "6",
+    "confidence": 0.22
+  },
+  {
+    "query": "这个网页乱码了，帮我检测一下是什么编码",
+    "expected": 33,
+    "choice": "6",
+    "confidence": 0.727
+  },
+  {
+    "query": "把这个 POST body 的 JSON 拼成 GET 的 query 参数",
+    "expected": 34,
+    "choice": "34",
+    "confidence": 0.221
+  },
+  {
+    "query": "北京和上海两个经纬度之间距离多远",
+    "expected": 35,
+    "choice": "16",
+    "confidence": 0.211
+  },
+  {
+    "query": "把这批坐标点在地图上标出来看看",
+    "expected": 36,
+    "choice": "25",
+    "confidence": 0.164
+  },
+  {
+    "query": "这张 PNG 太大了帮我压缩一下",
+    "expected": 1,
+    "choice": "25",
+    "confidence": 0.795
+  },
+  {
+    "query": "帮我生成一个 16 位强密码",
+    "expected": 3,
+    "choice": "3",
+    "confidence": 0.565
+  },
+  {
+    "query": "校验下载文件完整性应该用什么哈希",
+    "expected": 11,
+    "choice": "11",
+    "confidence": 0.595
+  },
+  {
+    "query": "接口返回的 JSON 嵌套太深看不清，格式化下",
+    "expected": 9,
+    "choice": "34",
+    "confidence": 0.299
+  },
+  {
+    "query": "SM2 签名怎么生成",
+    "expected": 22,
+    "choice": "30",
+    "confidence": 0.234
+  },
+  {
+    "query": "api.example.com 的接口想手动调一下",
+    "expected": 17,
+    "choice": "16",
+    "confidence": 0.173
+  },
+  {
+    "query": "这段文本有重复行，帮我去掉重复的",
+    "expected": 18,
+    "choice": "18",
+    "confidence": 0.555
+  },
+  {
+    "query": "HTML 实体编码 &amp; 是什么意思",
+    "expected": 33,
+    "choice": "16",
+    "confidence": 0.333
+  },
+  {
+    "query": "生成一个每天早上八点执行的定时任务表达式",
+    "expected": 31,
+    "choice": "31",
+    "confidence": 0.369
+  },
+  {
+    "query": "二进制 1010 是十进制多少",
+    "expected": 32,
+    "choice": "29",
+    "confidence": 0.532
+  },
+  {
+    "query": "YAML 配置和 JSON 怎么互相转换",
+    "expected": 21,
+    "choice": "21",
+    "confidence": 0.214
+  },
+  {
+    "query": "图片压缩但不要太模糊",
+    "expected": 1,
+    "choice": "1",
+    "confidence": 0.629
+  }
+]

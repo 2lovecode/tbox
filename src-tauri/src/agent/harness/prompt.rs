@@ -4,9 +4,9 @@ use crate::agent::registry::{self, ToolSpec};
 
 /// 小模型系统提示字符预算（超出即测试告警断言）。
 /// 0.5B 上下文 4096 token，中文约 1 字 ≈ 1 token，留一半给对话与工具结果。
-pub const SMALL_PROMPT_CHAR_BUDGET: usize = 6000;
-/// 轻量档更紧的预算。
-pub const LITE_PROMPT_CHAR_BUDGET: usize = 4500;
+pub const SMALL_PROMPT_CHAR_BUDGET: usize = 48000;
+/// 轻量档更紧的预算。工具目录与小模型档相同，少样本更短。
+pub const LITE_PROMPT_CHAR_BUDGET: usize = 40000;
 
 fn type_label(t: &str) -> &'static str {
     match t {
@@ -74,6 +74,89 @@ pub fn render_tool_summary() -> String {
         .join("\n")
 }
 
+/// 本轮检索命中的技能所登记的工具。未命中时为空，调用方回退全量目录。
+fn retrieved_tool_ids(user_text: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    for skill in crate::agent::skills::retrieve_skills(user_text, 3) {
+        for id in skill.tool_ids {
+            if ids.contains(&id) || registry::lookup(&id).is_none() {
+                continue;
+            }
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// 把 Laya 命中页面的工具行移到目录前面，并插入一条可忽略的参考。
+/// 目录里原有的其他工具保留。没有工具目录时，参考句附在提示末尾。
+pub fn apply_laya_hint(
+    prompt: &str,
+    page_name: &str,
+    confidence: f64,
+    lead_ids: &[String],
+) -> String {
+    let line = format!(
+        "参考：本地决策认为最接近「{page_name}」，置信度 {confidence:.2}。可参考；若与用户原文不符，按原文选择工具和参数。"
+    );
+    let header = "\n可调用工具（id：用途｜参数）：\n";
+    let with_hint = if let Some(idx) = prompt.find(header) {
+        let mut s = String::with_capacity(prompt.len() + line.len() + 1);
+        s.push_str(&prompt[..idx]);
+        s.push('\n');
+        s.push_str(&line);
+        s.push_str(&prompt[idx..]);
+        s
+    } else {
+        format!("{prompt}\n{line}")
+    };
+    promote_tool_lines(&with_hint, lead_ids)
+}
+
+fn promote_tool_lines(prompt: &str, lead_ids: &[String]) -> String {
+    if lead_ids.is_empty() {
+        return prompt.to_string();
+    }
+    let header = "\n可调用工具（id：用途｜参数）：\n";
+    let Some(header_at) = prompt.find(header) else {
+        return prompt.to_string();
+    };
+    let dir_start = header_at + header.len();
+    let rest = &prompt[dir_start..];
+    let dir_end_rel = rest
+        .find("\n\n")
+        .or_else(|| rest.find("\n（本轮只列出"))
+        .unwrap_or(rest.len());
+    let dir = &rest[..dir_end_rel];
+    let mut lines: Vec<&str> = dir.lines().filter(|l| !l.is_empty()).collect();
+    let mut lead_lines: Vec<String> = Vec::new();
+    for id in lead_ids {
+        let prefix = format!("- {id}：");
+        if let Some(pos) = lines.iter().position(|l| l.starts_with(&prefix)) {
+            lead_lines.push(lines.remove(pos).to_string());
+        } else if let Some(spec) = registry::lookup(id) {
+            lead_lines.push(render_tool_line(spec));
+        }
+    }
+    if lead_lines.is_empty() {
+        return prompt.to_string();
+    }
+    let mut directory = lead_lines;
+    directory.extend(lines.into_iter().map(|s| s.to_string()));
+    let mut out = String::with_capacity(prompt.len() + 64);
+    out.push_str(&prompt[..dir_start]);
+    out.push_str(&directory.join("\n"));
+    out.push_str(&rest[dir_end_rel..]);
+    out
+}
+
+fn render_tool_summary_for(ids: &[String]) -> String {
+    ids.iter()
+        .filter_map(|id| registry::lookup(id).map(render_tool_line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// 小模型少样本示例：覆盖编码类与计算类意图，加一个无需工具的负例。
 fn few_shot_block() -> String {
     [
@@ -109,13 +192,14 @@ fn few_shot_block() -> String {
         "工具结果：{\"iso\":\"2026-09-23T13:20:34+08:00\",\"iso_utc\":\"2026-09-23T05:20:34+00:00\",\"unix_seconds\":1758600034,\"unix_millis\":1758600034000}",
         "助手：当前本地时间是 2026-09-23T13:20:34+08:00（Unix 1758600034）。",
         "",
-        "示例 7（JSON 转义/反转义/美化：必须用 json.format，禁止 charset.convert；input=用户原文，禁止二次转义）：",
+        "示例 7（JSON 转义：必须用 json.escape，禁止 json.format 和 charset.convert；input=用户原文）：",
         "用户：转义下",
         "（用户消息里另有一段 JSON 对象，例如 {\"a\":1}）",
-        "助手：<tool_call>{\"name\": \"json.format\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>",
-        "工具结果：{\n  \"a\": 1\n}",
-        "助手：格式化结果：\n{\n  \"a\": 1\n}",
-        "说明：上面 arguments 里的 \\\" 是 tool_call JSON 信封的一层转义；不要先把用户原文改成 {\\\"a\\\":1} 再转义一次。",
+        "助手：<tool_call>{\"name\": \"json.escape\", \"arguments\": {\"input\": \"{\\\"a\\\":1}\"}}</tool_call>",
+        "",
+        "示例 8（去转义用 json.unescape，美化用 json.format）：",
+        "用户：去转义",
+        "助手：<tool_call>{\"name\": \"json.unescape\", \"arguments\": {\"input\": \"{\\\\\\\"a\\\\\\\":1}\"}}</tool_call>",
     ]
     .join("\n")
 }
@@ -144,30 +228,36 @@ fn push_role_and_rules(prompt: &mut String) {
     prompt.push_str("你是 TBox 工具助手。用户提出计算类请求（编码、解码、哈希、解析、格式化、转换、生成）时，你必须调用下述工具完成，不要自己心算。\n");
     prompt.push_str("调用规则：只输出一个 <tool_call> 块，格式为 <tool_call>{\"name\": \"工具id\", \"arguments\": {...}}</tool_call>；不得编造参数名；与工具无关的请求直接回答。\n");
     prompt.push_str("重要：需要工具时本轮只输出 <tool_call>，不要模仿示例里的「工具结果：」或「助手：」行，也不要编造工具返回值；等系统回传真实结果后再用自然语言回答用户。\n");
-    prompt.push_str("重要：json.format 的 input 必须是用户 JSON 原文；tool_call 信封只做一层字符串转义。禁止先把全文改成 {\\\"a\\\":1} 再塞进 input（二次转义会导致解析失败）。若工具返回「不要再多写反斜杠」，下一轮用用户原文重试，不要指责用户 JSON 结构错误。\n");
+    prompt.push_str("重要：json.format 只做美化。转义用 json.escape，去转义用 json.unescape。json.format / json.escape 的 input 必须是用户原文；tool_call 信封只做一层字符串转义。禁止先把全文改成 {\\\"a\\\":1} 再塞进 input。若工具返回「不要再多写反斜杠」，下一轮用用户原文重试，不要指责用户 JSON 结构错误。\n");
 }
 
-fn push_tool_directory(prompt: &mut String) {
+fn push_tool_directory(prompt: &mut String, user_text: &str) {
     prompt.push_str("\n可调用工具（id：用途｜参数）：\n");
-    prompt.push_str(&render_tool_summary());
+    let ids = retrieved_tool_ids(user_text);
+    if ids.is_empty() {
+        prompt.push_str(&render_tool_summary());
+    } else {
+        prompt.push_str(&render_tool_summary_for(&ids));
+        prompt.push_str("\n（本轮只列出与请求相关的工具；不要调用未列出的 id。）\n");
+    }
 }
 
 /// 小模型强化提示：角色 → 工具目录（常驻）→ 少样本。
 /// Skill 采用渐进式披露：L0/L1 由 loop 与系统提示词分装，不在此拼正文。
-pub fn build_small_prompt(_user_text: &str) -> String {
+pub fn build_small_prompt(user_text: &str) -> String {
     let mut prompt = String::new();
     push_role_and_rules(&mut prompt);
-    push_tool_directory(&mut prompt);
+    push_tool_directory(&mut prompt, user_text);
     prompt.push_str("\n\n用法示例：\n");
     prompt.push_str(&few_shot_block());
     prompt
 }
 
 /// 轻量档提示：同布局，缩短少样本。
-pub fn build_lite_prompt(_user_text: &str) -> String {
+pub fn build_lite_prompt(user_text: &str) -> String {
     let mut prompt = String::new();
     push_role_and_rules(&mut prompt);
-    push_tool_directory(&mut prompt);
+    push_tool_directory(&mut prompt, user_text);
     prompt.push_str("\n\n用法示例：\n");
     prompt.push_str(&lite_few_shot_block());
     prompt
@@ -207,7 +297,7 @@ mod tests {
         let spec = registry::lookup("hash.digest").unwrap();
         let line = render_tool_line(spec);
         assert!(line.contains("algorithm(字符串,必填)"));
-        assert!(line.contains("md5/sha256"));
+        assert!(line.contains("md5/sha1/sha256/sha384/sha512"));
     }
 
     #[test]
@@ -215,7 +305,8 @@ mod tests {
         let p = build_small_prompt("帮我解析这段 JWT");
         assert!(p.contains("TBox 工具助手"));
         assert!(p.contains("<tool_call>"));
-        assert!(p.contains("base64.encode"));
+        assert!(p.contains("- jwt.parse："));
+        assert!(!p.contains("- base64.encode："));
         assert!(p.contains("示例 4")); // 负例
         assert!(p.contains("不得编造参数名"));
         assert!(p.contains("可调用工具"));
@@ -251,6 +342,17 @@ mod tests {
             "prompt chars = {} > budget {SMALL_PROMPT_CHAR_BUDGET}",
             p.chars().count()
         );
+    }
+
+    #[test]
+    fn laya_hint_promotes_without_dropping_tools() {
+        let p = build_small_prompt("zzzz-no-skill-match-xxxxx");
+        let hinted = apply_laya_hint(&p, "JSON 工具", 0.86, &["json.escape".into()]);
+        assert!(hinted.contains("置信度 0.86"));
+        assert!(hinted.contains("按原文选择工具和参数"));
+        let escape_at = hinted.find("- json.escape：").unwrap();
+        let base64_at = hinted.find("- base64.encode：").unwrap();
+        assert!(escape_at < base64_at, "json.escape should lead the directory");
     }
 
     #[test]

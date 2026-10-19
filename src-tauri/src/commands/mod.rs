@@ -34,6 +34,9 @@ pub mod uuid_tools;
 pub mod cron_tools;
 pub mod number_tools;
 pub mod charset_tools;
+pub mod laya;
+pub mod geo;
+pub mod password_store;
 
 // 未接入（保留文件，暂不注册到 generate_handler!）：
 // - json_diff: `compare_json` 已由 json 模块提供，该模块被取代

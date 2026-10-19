@@ -488,6 +488,199 @@ pub fn hex_to_binary(hex: String) -> Result<String, String> {
     Ok(result)
 }
 
+/// 文本 → 摩尔斯。未知字符原样保留。
+#[tauri::command]
+pub fn morse_encode(input: String) -> String {
+    input
+        .chars()
+        .map(|c| {
+            let up = c.to_ascii_uppercase();
+            MORSE
+                .iter()
+                .find(|(ch, _)| *ch == up)
+                .map(|(_, code)| (*code).to_string())
+                .unwrap_or_else(|| c.to_string())
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// 摩尔斯 → 文本。空格分词，未知片段原样保留。
+#[tauri::command]
+pub fn morse_decode(input: String) -> String {
+    input
+        .split(' ')
+        .map(|token| {
+            MORSE
+                .iter()
+                .find(|(_, code)| *code == token)
+                .map(|(ch, _)| ch.to_string())
+                .unwrap_or_else(|| token.to_string())
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn rot13(input: String) -> String {
+    caesar_shift(&input, 13)
+}
+
+#[tauri::command]
+pub fn caesar(input: String, shift: i32, decode: bool) -> String {
+    let sign = if decode { -1 } else { 1 };
+    let n = (sign * (shift.rem_euclid(26)) + 26).rem_euclid(26);
+    caesar_shift(&input, n)
+}
+
+fn caesar_shift(input: &str, shift: i32) -> String {
+    input
+        .chars()
+        .map(|c| {
+            let base = if c.is_ascii_uppercase() {
+                b'A'
+            } else if c.is_ascii_lowercase() {
+                b'a'
+            } else {
+                return c;
+            };
+            let off = (c as u8 - base) as i32;
+            char::from(base + ((off + shift).rem_euclid(26) as u8))
+        })
+        .collect()
+}
+
+/// `mode`：`upper` / `lower` / `reverse`。
+#[tauri::command]
+pub fn encoding_case(input: String, mode: String) -> String {
+    match mode.as_str() {
+        "upper" => input.to_uppercase(),
+        "lower" => input.to_lowercase(),
+        "reverse" => input.chars().rev().collect(),
+        _ => input,
+    }
+}
+
+/// 与编码页「自动检测」相同的结论行。
+#[tauri::command]
+pub fn encoding_detect(input: String) -> String {
+    let mut results = Vec::new();
+    if is_hex_text(&input) {
+        results.push("可能是十六进制");
+    }
+    if is_base64_text(&input) {
+        results.push("可能是 Base64");
+    }
+    if is_morse_text(&input) {
+        results.push("可能是摩尔斯码");
+    }
+    if !input.is_empty() && input.is_ascii() {
+        results.push("标准 ASCII");
+    }
+    if input.chars().any(|c| ('\u{4e00}'..='\u{9fa5}').contains(&c)) {
+        results.push("包含中文 (UTF-8)");
+    }
+    if results.is_empty() {
+        "未检测到特殊编码格式".to_string()
+    } else {
+        results.join("\n")
+    }
+}
+
+fn is_hex_text(input: &str) -> bool {
+    !input.is_empty()
+        && input
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() || c.is_whitespace())
+}
+
+fn is_base64_text(input: &str) -> bool {
+    let s: String = input.chars().filter(|c| !c.is_whitespace()).collect();
+    if s.is_empty() || s.len() % 4 != 0 {
+        return false;
+    }
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i + 4 <= bytes.len() {
+        let chunk = &bytes[i..i + 4];
+        let pad = chunk.iter().filter(|b| **b == b'=').count();
+        if pad > 2 || (pad > 0 && i + 4 != bytes.len()) {
+            return false;
+        }
+        if !chunk.iter().all(|b| {
+            b.is_ascii_alphanumeric() || *b == b'+' || *b == b'/' || *b == b'='
+        }) {
+            return false;
+        }
+        i += 4;
+    }
+    true
+}
+
+fn is_morse_text(input: &str) -> bool {
+    !input.is_empty()
+        && input
+            .chars()
+            .all(|c| matches!(c, '.' | '-' | '/' | '\\' | 's' | ' ' | '\n' | '\t'))
+}
+
+const MORSE: &[(char, &str)] = &[
+    ('A', ".-"),
+    ('B', "-..."),
+    ('C', "-.-."),
+    ('D', "-.."),
+    ('E', "."),
+    ('F', "..-."),
+    ('G', "--."),
+    ('H', "...."),
+    ('I', ".."),
+    ('J', ".---"),
+    ('K', "-.-"),
+    ('L', ".-.."),
+    ('M', "--"),
+    ('N', "-."),
+    ('O', "---"),
+    ('P', ".--."),
+    ('Q', "--.-"),
+    ('R', ".-."),
+    ('S', "..."),
+    ('T', "-"),
+    ('U', "..-"),
+    ('V', "...-"),
+    ('W', ".--"),
+    ('X', "-..-"),
+    ('Y', "-.--"),
+    ('Z', "--.."),
+    ('0', "-----"),
+    ('1', ".----"),
+    ('2', "..---"),
+    ('3', "...--"),
+    ('4', "....-"),
+    ('5', "....."),
+    ('6', "-...."),
+    ('7', "--..."),
+    ('8', "---.."),
+    ('9', "----."),
+    ('.', ".-.-.-"),
+    (',', "--..--"),
+    ('?', "..--.."),
+    ('\'', ".----."),
+    ('!', "-.-.--"),
+    ('/', "-..-."),
+    ('(', "-.--."),
+    (')', "-.--.-"),
+    ('&', ".-..."),
+    (':', "---..."),
+    (';', "-.-.-."),
+    ('=', "-...-"),
+    ('+', ".-.-."),
+    ('-', "-....-"),
+    ('_', "..--.-"),
+    ('"', ".-..-."),
+    ('$', "...-..-"),
+    ('@', ".--.-."),
+    (' ', "/"),
+];
+
 // ==================== Agent dispatch: form-urlencoded → JSON ====================
 
 /// Agent dispatch: `application/x-www-form-urlencoded` 字符串解析为 JSON 对象。

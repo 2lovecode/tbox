@@ -1,6 +1,7 @@
 ---
 name: 开发数据处理
-description: 多语言代码格式化、正则测试、文本对比/去重/排序、SQL 格式化转义、库连接测试、CSV↔JSON、日志分析。JSON/XML/YAML 专用用 json/markup。无 Agent tool。
+description: 多语言代码格式化、正则测试、文本对比/去重/排序、SQL 格式化转义、库连接测试、CSV↔JSON、日志分析。JSON/XML/YAML 专用用 json/markup。
+tool_id: code.format, regex.test, text.compare, text.dedupe, text.sort, sql.format, sql.minify, sql.escape, sql.unescape, db.test, csv.to_json, json.to_csv, csv.format, csv.stats, log.analyze, log.count_errors, log.filter, log.levels
 toolbox_id: 6, 15, 18, 23, 24, 26, 27
 keywords: 代码格式化, JavaScript, TypeScript, Python, Rust, 正则, 文本对比, 去重, 排序, SQL, 转义SQL, MySQL, PostgreSQL, SQLite, CSV, 日志分析, 过滤日志
 avoid_keywords: JSON格式化, XML格式化, YAML格式化
@@ -13,7 +14,15 @@ avoid_keywords: JSON格式化, XML格式化, YAML格式化
 - **用**：通用代码美化、正则、文本处理、SQL、库连接、CSV、日志
 - **不用**：JSON/XML/YAML 专用 → `json` / `markup`
 
-全部无 Agent tool_call。
+## Agent 可调用
+
+- `code.format` — `input` + `language`
+- `regex.test` — `pattern` + `text`
+- `text.compare` / `text.dedupe` / `text.sort`
+- `sql.format` / `sql.minify` / `sql.escape` / `sql.unescape`（`db_type`）
+- `db.test` — 连接测试，需用户批准
+- `csv.to_json` / `json.to_csv` / `csv.format` / `csv.stats`
+- `log.analyze` / `log.count_errors` / `log.filter` / `log.levels`
 
 ## 页面完整能力
 
@@ -27,4 +36,4 @@ avoid_keywords: JSON格式化, XML格式化, YAML格式化
 
 ## 样本
 
-**用户**：测正则 / CSV 转 JSON / 格式化 SQL → 引导对应路由；勿编造 tool_call。
+**用户**：测正则 / CSV 转 JSON / 格式化 SQL → `regex.test` / `csv.to_json` / `sql.format`

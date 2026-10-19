@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn grammar_excludes_unregistered() {
         let g = tool_call_grammar();
-        assert!(!g.contains("\"http.request\""));
+        assert!(!g.contains("\"not.a.tool\""));
     }
 
     /// 用本机已安装 GGUF 实测 grammar 能否被 llama-cpp-2 成功解析（防回归）。

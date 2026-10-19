@@ -1,7 +1,7 @@
 ---
 name: 标记语言格式化
 description: XML 格式化/压缩与 XML↔JSON/YAML；YAML 格式化/验证/合并与 YAML↔JSON。JSON 用 json；通用代码美化用 toolbox.dev。
-tool_id: xml.format, yaml.format
+tool_id: xml.format, xml.minify, xml.to_json, json.to_xml, xml.to_yaml, yaml.to_xml, yaml.format, yaml.validate, yaml.to_json, json.to_yaml, yaml.merge
 toolbox_id: 20, 21
 keywords: XML, xml, YAML, yaml, 格式化XML, 格式化YAML, 压缩XML, XML转JSON, YAML转JSON, 合并YAML, 验证YAML
 avoid_keywords: JSON格式化, JSON转义, 代码格式化通用
@@ -16,12 +16,11 @@ avoid_keywords: JSON格式化, JSON转义, 代码格式化通用
 
 ## Agent 可调用（子集）
 
-- `xml.format` — **仅**弱格式化；`input`
-- `yaml.format` — **仅**解析再序列化；`input`
+- `xml.format` — 格式化；`xml.minify` — 压缩
+- `xml.to_json` / `json.to_xml` / `xml.to_yaml` / `yaml.to_xml`
+- `yaml.format` — 格式化；`yaml.validate`；`yaml.to_json` / `json.to_yaml`；`yaml.merge`（`left`/`right`）
 
-Agent **不能**：XML 压缩、XML↔JSON/YAML、YAML 验证/合并/↔JSON（请开页面）。
-
-## 工具箱页面完整能力
+## 页面完整能力
 
 - `/xml-tools`(20)：格式化 / 压缩（`format_xml`/`minify_xml`）· XML↔JSON · XML↔YAML
 - `/yaml-tools`(21)：格式化 + 验证（`format_yaml`/`validate_yaml`）· YAML↔JSON · 合并（`merge_yaml`）

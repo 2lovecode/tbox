@@ -137,10 +137,20 @@ fn strip_leading_fillers(s: &str) -> String {
     out
 }
 
-/// Deterministic seed for titles: first sentence → strip fillers → length cap.
+/// Deterministic seed for titles: drop JSON payloads, then first sentence → strip fillers → length cap.
 /// Used as placeholder and as LLM input so summarizer only sees the core clause.
 pub fn extract_title_seed(text: &str) -> String {
-    let sentence = first_sentence(text);
+    let (intent, saw_payload) = crate::agent::laya_hint::intent_without_payload(text);
+    let source = if intent.trim().is_empty() {
+        if saw_payload {
+            "JSON"
+        } else {
+            text
+        }
+    } else {
+        intent.as_str()
+    };
+    let sentence = first_sentence(source);
     let core = strip_leading_fillers(sentence);
     let seed = if core.is_empty() {
         sentence.trim().to_string()
@@ -312,6 +322,19 @@ mod tests {
         assert_eq!(t, "JWT 解析");
         assert!(t.chars().count() <= SHORT_TITLE_LIMIT);
         assert!(is_short_title_seed("请帮我 JWT 解析"));
+    }
+
+    #[test]
+    fn json_block_then_verb_uses_verb() {
+        let msg = "{\n  \"city_code\": 110000\n}\n\n转query\n";
+        assert_eq!(extract_title_seed(msg), "转query");
+        assert!(is_short_title_seed(msg));
+        assert_eq!(summarize_title(msg).as_deref(), Some("转query"));
+    }
+
+    #[test]
+    fn payload_only_is_json() {
+        assert_eq!(extract_title_seed("{\n  \"a\": 1\n}\n"), "JSON");
     }
 
     #[test]

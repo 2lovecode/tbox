@@ -123,7 +123,7 @@ Agent 循环 SHALL 以**仅追加事件日志（append-only event log）**作为
 
 标签约定：主时间线使用「系统 / 用户 / 上下文 / 助手 / 工具」（对齐 DeepSeek Harness）；内部 kind 仍为 `model`。
 
-每条记录为**紧凑单行**：左侧 kind 色标 + 单行摘要（ellipsis）+ 耗时；**主时间线 MUST NOT 内联展开**思考/正文/工具参数与结果。点击行 MUST 在右侧检查器打开完整详情（模型：思考/输出/tool_calls；工具：参数/结果；系统/用户：原文）。模型摘要 MUST 使用事件中的原始 `reasoning` / `text` / `tool_calls` 的预览，MUST NOT 改写成「仅工具调用 ·…」「最终回复 ·…」；若需标示本回合最后一条模型文本，可用角标「交付用户」，不得改写正文。旧日志若 `assistant/message` 未带思考，SHALL 用同会话 `trajectory_json` 的对应 `model_call.reasoning` 回填。工具栏 SHALL 提供：时长摘要、收起/展开全部轮次、收起/展开工具调用、**搜索**。重进 Run 时选择态与折叠态 MUST 复位。
+每条记录为**紧凑单行**：左侧 kind 色标 + 单行摘要（ellipsis）+ 耗时；**主时间线 MUST NOT 内联展开**思考/正文/工具参数与结果。点击行 MUST 在右侧检查器打开完整详情（模型：思考/输出/tool_calls；工具：参数/结果；系统/用户：原文）。模型摘要 MUST 使用事件中的原始 `reasoning` / `text` / `tool_calls` 的预览，MUST NOT 改写成「仅工具调用 ·…」「最终回复 ·…」；若需标示本回合最后一条模型文本，可用角标「交付用户」，不得改写正文。旧日志若 `assistant/message` 未带思考，SHALL 用同会话 `trajectory_json` 的对应 `model_call.reasoning` 回填。工具栏 SHALL 提供：时长（等宽 / 记录耗时切换）、收起/展开全部轮次、收起/展开工具调用、**搜索**。重进 Run 时选择态、折叠态与时间概览区间 MUST 复位。
 
 **顶栏多轨时间线（SHALL）**：详情页工具栏下方 SHALL 展示「输入 / 模型 / 工具」三轨水平时间线（泳道）：
 - **输入**：用户消息、系统提示词、上下文、压缩、Agent 请求头等非模型/非工具事件
@@ -191,11 +191,11 @@ Agent 循环 SHALL 以**仅追加事件日志（append-only event log）**作为
 
 #### Scenario: Multi-track swimlane timeline
 - **WHEN** 用户打开含用户输入、模型调用与工具调用的 Run 详情
-- **THEN** 工具栏下方 SHALL 显示「输入 / 模型 / 工具」三轨水平时间线；输入轨含用户/系统/上下文等块，模型轨含助手块，工具轨含工具块；点击任一色块 MUST 选中对应主时间线记录并打开检查器
+- **THEN** 工具栏下方 SHALL 显示「输入 / 模型 / 工具」三轨时间概览，并画出轮次分界；默认等宽；按下「时长」后按记录耗时投影并压缩空闲间隔；点击色块 MUST 选中对应账本记录并打开检查器；拖选区间 MUST 只保留该区间内活动的记录；滚轮缩放时间域，右键或双击清除区间
 
 #### Scenario: Trajectory search filters ledger and dims swimlane
 - **WHEN** 用户在轨迹工具栏搜索框输入关键词
-- **THEN** 主时间线仅保留匹配记录；多轨时间线中不匹配色块弱化、匹配色块高亮；清空搜索后全部恢复
+- **THEN** 账本仅保留匹配记录；时间概览中不匹配色块弱化；清空搜索后全部恢复
 
 #### Scenario: Per-conversation entry visible after first message
 - **WHEN** 用户在聊天首页发送了至少一条消息（`conversations.activeId` 非空且消息数 ≥ 1）

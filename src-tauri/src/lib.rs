@@ -10,6 +10,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 pub mod agent;
 pub mod commands;
 mod db;
+pub mod laya_runtime;
 
 /// Event name emitted to the frontend when the user invokes the global
 /// Spotlight shortcut. The frontend listens on this channel to toggle the
@@ -164,6 +165,12 @@ pub fn run() {
             commands::encoding::punycode_decode,
             commands::encoding::binary_to_hex,
             commands::encoding::hex_to_binary,
+            commands::encoding::morse_encode,
+            commands::encoding::morse_decode,
+            commands::encoding::rot13,
+            commands::encoding::caesar,
+            commands::encoding::encoding_case,
+            commands::encoding::encoding_detect,
 
             // 会话
             commands::conversation::list_conversations,
@@ -375,6 +382,21 @@ pub fn run() {
             commands::charset_tools::url_decode_component,
             commands::charset_tools::html_entity_encode,
             commands::charset_tools::html_entity_decode,
+            commands::laya::get_laya_settings,
+            commands::laya::save_laya_settings,
+            commands::laya::laya_health,
+            commands::laya::laya_route,
+            commands::laya::laya_model_status,
+            commands::laya::laya_model_download,
+            commands::laya::laya_model_delete,
+            commands::geo::geo_convert,
+            commands::geo::geo_distance,
+            commands::password_store::password_list,
+            commands::password_store::password_get,
+            commands::password_store::password_save,
+            commands::password_store::password_delete,
+            commands::password_store::password_import,
+            commands::password_store::password_generate,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -2,12 +2,11 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { renderMarkdown } from '@/utils/markdown';
 import CopyIconButton from '@/components/CopyIconButton.vue';
+import TrajectoryOverview from '@/components/TrajectoryOverview.vue';
 import type { ChatMessage } from '@/stores/conversations';
 import {
-  buildSwimlaneBlocks,
   countByKind,
   deriveTrajectoryLayout,
-  estimateRunDurationSeconds,
   flattenCells,
   formatDurationSeconds,
   isSessionPreamble,
@@ -16,6 +15,11 @@ import {
   type TrajectoryCell,
   type TrajectoryTurn,
 } from '@/utils/sessionTrajectory';
+import {
+  trajectoryTimelineFocusIndexes,
+  type TrajectoryTimeRange,
+  type TrajectoryTimelineMode,
+} from '@/utils/trajectoryTimeline';
 
 /**
  * DeepSeek Harness 风格轨迹：扁平紧凑事件流（系统/用户/上下文/助手/工具）；
@@ -29,6 +33,8 @@ const props = withDefaults(
     canExport?: boolean;
     /** 日志 desync 警告 */
     desync?: boolean;
+    /** 嵌入对话视图环时隐藏返回 */
+    showBack?: boolean;
     /** 会话 id 短码 */
     runIdShort?: string;
     /** 时间范围文案 */
@@ -39,6 +45,7 @@ const props = withDefaults(
     messages: () => [],
     canExport: false,
     desync: false,
+    showBack: true,
     runIdShort: '',
     timeRange: '',
   },
@@ -57,6 +64,8 @@ const turns = computed<TrajectoryTurn[]>(() =>
 );
 
 const searchQuery = ref('');
+const timelineMode = ref<TrajectoryTimelineMode>('sequence');
+const timelineRange = ref<TrajectoryTimeRange | null>(null);
 const collapsedTurns = ref(new Set<string>());
 const collapseCalls = ref(false);
 const selectedKey = ref<string | null>(null);
@@ -93,6 +102,8 @@ watch(
     selectedKey.value = null;
     inspectorMode.value = 'content';
     searchQuery.value = '';
+    timelineMode.value = 'sequence';
+    timelineRange.value = null;
     moreOpen.value = false;
   },
 );
@@ -141,8 +152,15 @@ function matchesQuery(cell: TrajectoryCell, q: string): boolean {
   return hay.includes(q);
 }
 
+const focusIndexes = computed(() => {
+  const range = timelineRange.value;
+  if (!range) return null;
+  return trajectoryTimelineFocusIndexes(turns.value, range, timelineMode.value);
+});
+
 const filteredTurns = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
+  const focus = focusIndexes.value;
   return turns.value
     .map((turn) => ({
       ...turn,
@@ -151,6 +169,7 @@ const filteredTurns = computed(() => {
           ...g,
           cells: g.cells.filter((c) => {
             if (collapseCalls.value && c.kind === 'tool') return false;
+            if (focus && !focus.has(c.index)) return false;
             return matchesQuery(c, q);
           }),
         }))
@@ -269,42 +288,50 @@ const toolCount = computed(() => countByKind(turns.value, 'tool'));
 const turnCount = computed(() => turns.value.filter((t) => t.turn != null).length);
 
 const allCells = computed(() => flattenCells(turns.value));
-const swimBlocks = computed(() => buildSwimlaneBlocks(allCells.value));
-const runDurationLabel = computed(() =>
-  formatDurationSeconds(estimateRunDurationSeconds(allCells.value)),
-);
 
-const searchActive = computed(() => searchQuery.value.trim().length > 0);
-
-function blockMatchesSearch(block: { cell: TrajectoryCell }): boolean {
+const searchMatchIndexes = computed(() => {
   const q = searchQuery.value.trim().toLowerCase();
-  if (!q) return true;
-  return matchesQuery(block.cell, q);
-}
+  if (!q) return null;
+  const matched = new Set<number>();
+  for (const cell of allCells.value) {
+    if (matchesQuery(cell, q)) matched.add(cell.index);
+  }
+  return matched;
+});
 
-function onSwimBlockClick(cell: TrajectoryCell) {
-  // 展开所属轮次
+const selectedIndex = computed(() => selectedCell.value?.index ?? null);
+
+function revealCell(index: number) {
   for (let i = 0; i < turns.value.length; i++) {
     const turn = turns.value[i];
-    const hit = turn.groups.some((g) => g.cells.some((c) => c.index === cell.index && c.kind === cell.kind));
-    if (hit) {
-      const key = turnKey(turn, i);
-      if (!isSessionPreamble(turn)) {
-        const next = new Set(collapsedTurns.value);
-        next.delete(key);
-        collapsedTurns.value = next;
-      }
-      break;
+    const cell = turn.groups.flatMap((g) => g.cells).find((c) => c.index === index);
+    if (!cell) continue;
+    if (!isSessionPreamble(turn)) {
+      const next = new Set(collapsedTurns.value);
+      next.delete(turnKey(turn, i));
+      collapsedTurns.value = next;
     }
+    selectedKey.value = cellKey(cell);
+    inspectorMode.value = 'content';
+    return;
   }
-  selectCell(cell);
 }
 
-const SWIM_LANES = [
-  { id: 'input' as const, label: '输入' },
-  { id: 'model' as const, label: '模型' },
-  { id: 'tool' as const, label: '工具' },
-];
+function onTimelineSelect(index: number) {
+  revealCell(index);
+}
+
+function onTimelineFocus(index: number) {
+  for (let i = 0; i < turns.value.length; i++) {
+    const turn = turns.value[i];
+    const hit = turn.groups.some((g) => g.cells.some((c) => c.index === index));
+    if (!hit || isSessionPreamble(turn)) continue;
+    const next = new Set(collapsedTurns.value);
+    next.delete(turnKey(turn, i));
+    collapsedTurns.value = next;
+    break;
+  }
+}
 
 type DetailTab =
   | 'overview'
@@ -484,14 +511,30 @@ function localTime(ms: number | null | undefined): string {
   <div class="ledger" :class="{ 'has-details': Boolean(selectedCell) }">
     <div class="ledger-head">
       <div class="toolbar" role="toolbar" aria-label="轨迹工具栏">
-        <button type="button" class="tb-btn tb-back" title="返回会话" @click="emit('back')">
+        <button
+          v-if="showBack"
+          type="button"
+          class="tb-btn tb-back"
+          title="返回会话"
+          @click="emit('back')"
+        >
           <i class="fas fa-arrow-left" aria-hidden="true"></i>
           返回
         </button>
-        <span class="tb-metric" title="总时长">
-          <i class="fas fa-clock" aria-hidden="true"></i>
-          {{ runDurationLabel }}
-        </span>
+        <button
+          type="button"
+          class="tb-btn"
+          :class="{ on: timelineMode === 'duration' }"
+          :aria-pressed="timelineMode === 'duration'"
+          :title="timelineMode === 'duration' ? '改为等宽' : '按时长显示'"
+          @click="timelineMode = timelineMode === 'duration' ? 'sequence' : 'duration'"
+        >
+          <svg class="tb-clock" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="8" cy="8" r="5.25" />
+            <path d="M8 4.75V8l2.25 1.5" />
+          </svg>
+          时长
+        </button>
         <button
           type="button"
           class="tb-btn"
@@ -580,39 +623,16 @@ function localTime(ms: number | null | undefined): string {
         </div>
       </div>
 
-      <div
-        v-if="swimBlocks.length > 0"
-        class="swimlane"
-        role="img"
-        aria-label="输入、模型、工具时间线"
-      >
-        <div
-          v-for="lane in SWIM_LANES"
-          :key="lane.id"
-          class="swim-row"
-          :data-lane="lane.id"
-        >
-          <span class="swim-label">{{ lane.label }}</span>
-          <div class="swim-track">
-            <button
-              v-for="block in swimBlocks.filter((b) => b.lane === lane.id)"
-              :key="block.key"
-              type="button"
-              class="swim-block"
-              :class="{
-                selected: selectedKey === cellKey(block.cell),
-                dim: searchActive && !blockMatchesSearch(block),
-                hit: searchActive && blockMatchesSearch(block),
-              }"
-              :data-kind="block.kind"
-              :style="{ left: `${block.leftPct}%`, width: `${block.widthPct}%` }"
-              :title="block.label"
-              :aria-label="block.label"
-              @click="onSwimBlockClick(block.cell)"
-            ></button>
-          </div>
-        </div>
-      </div>
+      <TrajectoryOverview
+        :turns="turns"
+        :mode="timelineMode"
+        :range="timelineRange"
+        :selected-index="selectedIndex"
+        :search-match-indexes="searchMatchIndexes"
+        @update:range="timelineRange = $event"
+        @select="onTimelineSelect"
+        @focus="onTimelineFocus"
+      />
     </div>
 
     <div class="ledger-body">
@@ -1023,23 +1043,37 @@ function localTime(ms: number | null | undefined): string {
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 2px 10px;
+  gap: 2px;
+  height: 32px;
+  padding: 0 6px;
   flex-shrink: 0;
+  border-bottom: 0.5px solid var(--shell-divider, var(--border-color));
+  background: var(--bg-primary);
+  box-sizing: border-box;
 }
 
 .tb-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 26px;
-  padding: 0 7px;
-  border: 1px solid color-mix(in srgb, var(--border-color, #e5e7eb) 80%, transparent);
+  height: 20px;
+  padding: 0 5px;
+  border: 0;
   background: transparent;
-  border-radius: 5px;
-  font-size: 11px;
-  color: #64748b;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
   cursor: pointer;
+  font-family: inherit;
+}
+
+.tb-clock {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .tb-btn.on,
@@ -1051,20 +1085,6 @@ function localTime(ms: number | null | undefined): string {
 .tb-glyph {
   font-size: 13px;
   line-height: 1;
-}
-
-.tb-metric {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text-secondary);
-  padding: 0 4px;
-}
-
-.tb-metric i {
-  font-size: 11px;
-  opacity: 0.75;
 }
 
 .tb-meta {
@@ -1089,13 +1109,15 @@ function localTime(ms: number | null | undefined): string {
   margin-left: auto;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--border-color, #e5e7eb) 80%, transparent);
-  border-radius: 6px;
-  color: #94a3b8;
-  background: rgba(255, 255, 255, 0.6);
+  gap: 4px;
+  flex: 0 1 164px;
+  min-width: 84px;
+  height: 22px;
+  padding: 0 6px;
+  border: 0.5px solid color-mix(in srgb, var(--border-color, #e5e7eb) 90%, transparent);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-secondary, #f8fafc) 80%, var(--bg-primary));
 }
 
 :global(.dark-mode) .tb-search {
@@ -1183,116 +1205,6 @@ function localTime(ms: number | null | undefined): string {
   color: #94a3b8;
   line-height: 1.35;
   word-break: break-all;
-}
-
-.swimlane {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 6px 12px 8px;
-  border-bottom: 1px solid var(--shell-divider, var(--border-color));
-  background: color-mix(in srgb, var(--bg-secondary, #f1f5f9) 55%, transparent);
-}
-
-.swim-row {
-  display: grid;
-  grid-template-columns: 28px 1fr;
-  align-items: center;
-  gap: 6px;
-  min-height: 8px;
-}
-
-.swim-label {
-  font-size: 10px;
-  color: var(--text-secondary);
-  text-align: right;
-  user-select: none;
-  line-height: 1;
-  opacity: 0.85;
-}
-
-.swim-track {
-  position: relative;
-  height: 6px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--text-secondary) 6%, transparent);
-}
-
-.swim-block {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: 1px;
-  overflow: hidden;
-  cursor: pointer;
-  min-width: 3px;
-  opacity: 0.95;
-  transition: opacity 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
-}
-
-.swim-block:hover {
-  opacity: 1;
-  z-index: 2;
-  box-shadow: 0 0 0 1px color-mix(in srgb, #fff 40%, transparent);
-}
-
-.swim-block.selected {
-  z-index: 3;
-  box-shadow: 0 0 0 1.5px var(--primary, #4361ee);
-}
-
-.swim-block.dim {
-  opacity: 0.22;
-  filter: grayscale(0.35);
-}
-
-.swim-block.hit {
-  opacity: 1;
-  z-index: 2;
-  box-shadow: 0 0 0 1px var(--warning, #f59e0b);
-}
-
-/* 与主时间线 .tag-* 色相一致 */
-.swim-block[data-kind='user'] {
-  background: #5b8a6a;
-}
-.swim-block[data-kind='prompt'],
-.swim-block[data-kind='agent'],
-.swim-block[data-kind='compacted'] {
-  background: #64748b;
-}
-.swim-block[data-kind='context'] {
-  background: #6b8f7a;
-}
-.swim-block[data-kind='model'] {
-  background: #6b7bb8;
-}
-.swim-block[data-kind='tool'] {
-  background: #a68a5b;
-}
-
-:global(.dark-mode) .swim-block[data-kind='user'] {
-  background: #7a9e88;
-}
-:global(.dark-mode) .swim-block[data-kind='tool'] {
-  background: #b59a6a;
-}
-:global(.dark-mode) .swim-block[data-kind='model'] {
-  background: #8a96c4;
-}
-:global(.dark-mode) .swim-block[data-kind='prompt'],
-:global(.dark-mode) .swim-block[data-kind='agent'],
-:global(.dark-mode) .swim-block[data-kind='compacted'],
-:global(.dark-mode) .swim-block[data-kind='context'] {
-  background: #94a3b8;
-}
-
-:global(.dark-mode) .swimlane {
-  background: color-mix(in srgb, var(--bg-secondary, #181b22) 80%, transparent);
 }
 
 .ledger-scroll {

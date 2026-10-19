@@ -3,10 +3,8 @@
 //! `side_effect=None` 为纯计算；`Process`（如 os.shell）须经审批闸门后执行。
 
 use base64::{engine::general_purpose, Engine as _};
-use md5::{Digest, Md5};
 use once_cell::sync::Lazy;
 use serde_json::{json, Value};
-use sha2::Sha256;
 use std::collections::HashMap;
 
 /// 工具副作用标记。
@@ -15,6 +13,14 @@ pub enum SideEffect {
     None,
     /// 启动子进程；执行前必须用户审批。
     Process,
+    /// 网络、数据库或密码库；执行前必须用户审批。
+    Confirm,
+}
+
+impl SideEffect {
+    pub fn needs_approval(self) -> bool {
+        matches!(self, Self::Process | Self::Confirm)
+    }
 }
 
 /// 注册表中的工具规格（id、展示名、参数 schema、副作用）。
@@ -26,7 +32,7 @@ pub struct ToolSpec {
     pub side_effect: SideEffect,
 }
 
-fn required_string_props(props: &[(&str, &str)]) -> Value {
+pub(crate) fn required_string_props(props: &[(&str, &str)]) -> Value {
     let mut properties = serde_json::Map::new();
     let mut required = Vec::new();
     for (name, description) in props {
@@ -47,7 +53,7 @@ fn required_string_props(props: &[(&str, &str)]) -> Value {
     })
 }
 
-fn tool(
+pub(crate) fn tool(
     id: &'static str,
     name: &'static str,
     schema: Value,
@@ -60,7 +66,7 @@ fn tool(
     }
 }
 
-fn tool_process(
+pub(crate) fn tool_process(
     id: &'static str,
     name: &'static str,
     schema: Value,
@@ -73,14 +79,23 @@ fn tool_process(
     }
 }
 
+pub(crate) fn tool_confirm(name: &'static str, description: &'static str, schema: Value) -> ToolSpec {
+    ToolSpec {
+        id: name,
+        name: description,
+        schema,
+        side_effect: SideEffect::Confirm,
+    }
+}
+
 static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
-    vec![
+    let mut tools = vec![
         tool(
             "json.format",
-            "JSON 格式化/转义/反转义（美化缩进）",
+            "JSON 美化（缩进排版）",
             required_string_props(&[(
                 "input",
-                "待格式化或反转义的 JSON 字符串（可为 {\\\"a\\\":1} 形态）",
+                "待美化的 JSON 原文（不要预先转义，也不要用于去转义）",
             )]),
         ),
         tool(
@@ -102,8 +117,8 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
                     "input": { "type": "string", "description": "待哈希的文本" },
                     "algorithm": {
                         "type": "string",
-                        "description": "算法：md5 或 sha256",
-                        "enum": ["md5", "sha256"]
+                        "description": "算法：md5、sha1、sha256、sha384 或 sha512",
+                        "enum": ["md5", "sha1", "sha256", "sha384", "sha512"]
                     }
                 },
                 "required": ["input", "algorithm"],
@@ -225,7 +240,9 @@ static TOOLS: Lazy<Vec<ToolSpec>> = Lazy::new(|| {
                 "additionalProperties": false
             }),
         ),
-    ]
+    ];
+    tools.extend(crate::agent::page_tools::extra_specs());
+    tools
 });
 
 static BY_ID: Lazy<HashMap<&'static str, usize>> = Lazy::new(|| {
@@ -405,7 +422,7 @@ pub fn dispatch(tool_id: &str, args: &Value) -> Result<String, String> {
             let cwd = args.get("cwd").and_then(|v| v.as_str());
             crate::agent::os_shell::execute(command, cwd)
         }
-        _ => Err(format!("未注册的工具: {tool_id}（unknown tool）")),
+        other => crate::agent::page_tools::dispatch_extra(other, args),
     }
 }
 
@@ -441,17 +458,24 @@ fn dispatch_hash(args: &Value) -> Result<String, String> {
     let input = require_str(args, "input")?;
     let algorithm = require_str(args, "algorithm")?.to_ascii_lowercase();
     match algorithm.as_str() {
-        "md5" => {
-            let mut hasher = Md5::new();
+        "md5" => Ok(crate::commands::crypto::md5_hash(input.to_string())),
+        "sha1" => {
+            use sha1::{Digest, Sha1};
+            let mut hasher = Sha1::new();
             hasher.update(input.as_bytes());
-            Ok(format!("{:x}", hasher.finalize()))
+            Ok(hex::encode(hasher.finalize()))
         }
-        "sha256" => {
-            let mut hasher = Sha256::new();
+        "sha256" => Ok(crate::commands::crypto::sha256_hash(input.to_string())),
+        "sha384" => {
+            use sha2::{Digest, Sha384};
+            let mut hasher = Sha384::new();
             hasher.update(input.as_bytes());
-            Ok(format!("{:x}", hasher.finalize()))
+            Ok(hex::encode(hasher.finalize()))
         }
-        other => Err(format!("不支持的哈希算法: {other}（仅 md5 / sha256）")),
+        "sha512" => Ok(crate::commands::crypto::sha512_hash(input.to_string())),
+        other => Err(format!(
+            "不支持的哈希算法: {other}（md5 / sha1 / sha256 / sha384 / sha512）"
+        )),
     }
 }
 
@@ -661,7 +685,7 @@ mod tests {
 
     #[test]
     fn unknown_tool_is_rejected() {
-        let err = dispatch("http.request", &json!({})).unwrap_err();
+        let err = dispatch("not.a.tool", &json!({})).unwrap_err();
         assert!(err.contains("未注册") || err.contains("unknown"));
     }
 
@@ -818,7 +842,12 @@ mod tests {
         }
         let shell = lookup("os.shell").expect("os.shell");
         assert_eq!(shell.side_effect, SideEffect::Process);
-        assert!(lookup("http.request").is_none());
+        let http = lookup("http.request").expect("http.request");
+        assert!(http.side_effect.needs_approval());
+        let vault = lookup("password.list").expect("password.list");
+        assert!(vault.side_effect.needs_approval());
+        assert!(lookup("json.escape").is_some());
+        assert!(!lookup("json.escape").unwrap().side_effect.needs_approval());
     }
 
     #[test]
@@ -831,6 +860,35 @@ mod tests {
     fn os_shell_denies_rm() {
         let err = dispatch("os.shell", &json!({"command": "rm -rf /tmp/x"})).unwrap_err();
         assert!(err.contains("拒绝") || err.contains("危险"), "{err}");
+    }
+
+    #[test]
+    fn page_tools_match_commands() {
+        let escaped = dispatch("json.escape", &json!({"input": r#"{"a":1}"#})).unwrap();
+        assert!(escaped.contains(r#"\""#), "{escaped}");
+        let direct = crate::commands::json::escape_json(r#"{"a":1}"#.to_string()).unwrap();
+        let direct_v = serde_json::to_value(&direct).unwrap();
+        assert_eq!(escaped, direct_v["escaped"].as_str().unwrap());
+
+        let plain = dispatch("json.unescape", &json!({"input": r#"{\"a\":1}"#})).unwrap();
+        assert_eq!(plain, r#"{"a":1}"#);
+        assert!(!plain.contains("\n  "));
+
+        let xml = dispatch("xml.minify", &json!({"input": "<a>\n  <b/>\n</a>"})).unwrap();
+        let via = crate::commands::xml_utils::minify_xml("<a>\n  <b/>\n</a>".to_string()).unwrap();
+        assert_eq!(xml, via);
+
+        let sql = dispatch("sql.escape", &json!({"input": "a'b", "db_type": "mysql"})).unwrap();
+        assert_eq!(sql, crate::commands::sql_utils::escape_sql("a'b".into(), "mysql".into()));
+
+        let id = dispatch("uuid.v7", &json!({})).unwrap();
+        assert_eq!(uuid::Uuid::parse_str(&id).unwrap().get_version_num(), 7);
+
+        let cron = dispatch("cron.validate", &json!({"input": "0 * * * *"})).unwrap();
+        assert!(cron.contains("有效"), "{cron}");
+
+        let err = dispatch("json.escape", &json!({})).unwrap_err();
+        assert!(err.contains("input") || err.contains("参数"), "{err}");
     }
 
     #[test]

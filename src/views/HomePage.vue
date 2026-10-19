@@ -271,6 +271,12 @@ const canOpenTrajectory = computed(
   () => !!(conversations.activeId && conversations.hasMessages),
 );
 
+const goAgentRunDetail = () => {
+  const id = conversations.activeId;
+  if (!id) return;
+  router.push({ path: `/agent-runs/${id}` });
+};
+
 function messageSteps(msg: ChatMessage): TrajectoryStep[] {
   if (msg.role !== 'assistant') return [];
   // Chat uses the legacy flat timeline (reasoning/tool/text). The persisted
@@ -459,12 +465,6 @@ function finalizeStreaming(convId: string, _suffix?: string) {
 
 const openLlmSettings = () => {
   void router.push('/settings/llm');
-};
-
-const goAgentRunDetail = () => {
-  const id = conversations.activeId;
-  if (!id) return;
-  router.push({ path: `/agent-runs/${id}` });
 };
 
 const send = async () => {

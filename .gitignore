@@ -62,3 +62,4 @@ IMPLEMENTATION_SUMMARY.md
 
 # Git worktrees (Superpowers isolated workspaces)
 .worktrees/
+.venv-laya/

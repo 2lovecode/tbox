@@ -594,7 +594,7 @@ fn bare_json_tool_call_recovered() {
 
     #[test]
     fn unknown_tool_without_suggestion() {
-        let err = validate_call("http.request", &json!({})).unwrap_err();
+        let err = validate_call("not.a.tool", &json!({})).unwrap_err();
         assert!(err.contains("未注册"));
     }
 

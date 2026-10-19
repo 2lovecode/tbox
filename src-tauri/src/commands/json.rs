@@ -140,24 +140,51 @@ pub fn compress_json(json_str: String) -> Result<JsonFormatResult, String> {
     })
 }
 
+fn normalize_curly_quotes(input: &str) -> String {
+    input
+        .replace(['\u{201c}', '\u{201d}', '\u{ff02}'], "\"")
+        .replace(['\u{2018}', '\u{2019}'], "'")
+}
+
+fn escape_json_text(json_str: &str) -> String {
+    json_str
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('\t', "\\t")
+}
+
+const EXTRA_SLASH_HINT: &str = "若这是用户粘贴的转义 JSON，请把原文原样放入 input，不要再多写反斜杠";
+
 /// JSON转义（将JSON字符串转义为可以在代码中使用的字符串）
+///
+/// 原文已是合法 JSON 时按原文转义。小模型多包一层反斜杠、或粘贴弯引号时，
+/// 先剥层再转义；仍然失败则要求用用户原文重试。
 #[tauri::command]
 pub fn escape_json(json_str: String) -> Result<JsonEscapeResult, String> {
-    // 验证JSON是否有效
-    let _: Value = serde_json::from_str(&json_str)
-        .map_err(|e| format!("JSON解析错误: {}", e))?;
-    
-    // 转义JSON字符串
-    let escaped = json_str
-        .replace('\\', "\\\\")  // 反斜杠
-        .replace('"', "\\\"")   // 双引号
-        .replace('\n', "\\n")   // 换行
-        .replace('\r', "\\r")   // 回车
-        .replace('\t', "\\t");  // 制表符
-    
-    Ok(JsonEscapeResult {
-        escaped,
-    })
+    let normalized = normalize_curly_quotes(&json_str);
+    if serde_json::from_str::<Value>(&normalized).is_ok() {
+        return Ok(JsonEscapeResult {
+            escaped: escape_json_text(&normalized),
+        });
+    }
+    match parse_json_value_lenient(&normalized) {
+        Ok(value) => {
+            let canonical = serde_json::to_string(&value)
+                .map_err(|e| format!("JSON转义错误: {e}"))?;
+            Ok(JsonEscapeResult {
+                escaped: escape_json_text(&canonical),
+            })
+        }
+        Err(e) => {
+            if e.contains("不要再多写反斜杠") {
+                Err(e)
+            } else {
+                Err(format!("JSON解析错误: {e}；{EXTRA_SLASH_HINT}"))
+            }
+        }
+    }
 }
 
 /// JSON去转义（将转义的JSON字符串还原）
@@ -753,5 +780,33 @@ mod dispatch_tests {
         body.push('}'); // 多余尾括号，对应本次轨迹 trailing characters
         let result = format_json_pretty(body, None).unwrap();
         assert!(result.formatted.contains("function_score"), "got: {}", result.formatted);
+    }
+
+    #[test]
+    fn escape_plain_object() {
+        let result = escape_json(r#"{"a":1}"#.to_string()).unwrap();
+        assert_eq!(result.escaped, r#"{\"a\":1}"#);
+    }
+
+    #[test]
+    fn escape_peels_extra_slash_layer() {
+        let result = escape_json(r#"{\"a\":1}"#.to_string()).unwrap();
+        assert_eq!(result.escaped, r#"{\"a\":1}"#);
+    }
+
+    #[test]
+    fn escape_normalizes_curly_quote_then_peels() {
+        let input = format!("{{\\\"a\\\":\\\"b\\{}}}", '\u{201d}');
+        let result = escape_json(input).unwrap();
+        assert_eq!(result.escaped, r#"{\"a\":\"b\"}"#);
+    }
+
+    #[test]
+    fn escape_unparseable_asks_for_original() {
+        let err = match escape_json("not-json".to_string()) {
+            Err(e) => e,
+            Ok(_) => panic!("plain text must not escape"),
+        };
+        assert!(err.contains("不要再多写反斜杠"), "{err}");
     }
 }

@@ -1,0 +1,25 @@
+{
+ "revision": "multilingual-fp32-2026-10-17",
+ "files": [
+  {
+   "name": "laya-multilingual.onnx",
+   "sha256": "75dd2699722b2ea8c93910de4fc9bfd33e5e212b7ded0f06effbe8ccc17b002a",
+   "size": 2851219
+  },
+  {
+   "name": "laya-multilingual.onnx.data",
+   "sha256": "92fe711b480d8a6ac8a9bcdc07599ecc6382ff4615961d9857cc4b367ef965fd",
+   "size": 1287651328
+  },
+  {
+   "name": "tokenizer.json",
+   "sha256": "609d8f4c067cd3950f88594c5a802616cea245823836ef5848ee4fc40aab5b6f",
+   "size": 34363188
+  },
+  {
+   "name": "rl_agent_config.json",
+   "sha256": "25061739243b617ad88d1219ba6f8a9c86c5881ca28df024fa2d9b3b2fcc30c6",
+   "size": 472
+  }
+ ]
+}

@@ -12,6 +12,14 @@ export function setTrajectoryLocale(locale: TrajectoryLocale) {
 type Msg = {
   workedFor: (duration: string) => string;
   workedForUnknown: string;
+  analyzing: string;
+  analyzed: string;
+  deepDiving: string;
+  deepDivingFor: (duration: string) => string;
+  think: string;
+  separator: string;
+  joinTwo: (first: string, second: string) => string;
+  more: (title: string) => string;
   thinking: string;
   writing: string;
   waiting: string;
@@ -21,6 +29,12 @@ type Msg = {
   formatted: (target: string) => string;
   reading: (target: string) => string;
   read: (target: string) => string;
+  searching: (target: string) => string;
+  searched: (target: string) => string;
+  editing: (target: string) => string;
+  edited: (target: string) => string;
+  calling: (target: string) => string;
+  called: (target: string) => string;
   converting: (target: string) => string;
   converted: (target: string) => string;
   computingHash: string;
@@ -49,6 +63,14 @@ type Msg = {
 const zh: Msg = {
   workedFor: (d) => `思考了 ${d}`,
   workedForUnknown: '思考了 —',
+  analyzing: '正在分析请求',
+  analyzed: '已完成分析',
+  deepDiving: '努力思考中',
+  deepDivingFor: (d) => `努力思考中，用时 ${d} ···`,
+  think: '思考',
+  separator: ' · ',
+  joinTwo: (first, second) => `${first}并${second}`,
+  more: (title) => `${title}等`,
   thinking: '思考中',
   writing: '撰写中',
   waiting: '等待中…',
@@ -58,6 +80,12 @@ const zh: Msg = {
   formatted: (t) => `已格式化 ${t}`,
   reading: (t) => `正在读取 ${t}`,
   read: (t) => `已读取 ${t}`,
+  searching: (t) => `正在搜索 ${t}`,
+  searched: (t) => `已搜索 ${t}`,
+  editing: (t) => `正在编辑 ${t}`,
+  edited: (t) => `已编辑 ${t}`,
+  calling: (t) => `正在调用 ${t}`,
+  called: (t) => `已调用 ${t}`,
   converting: (t) => `正在转换 ${t}`,
   converted: (t) => `已转换 ${t}`,
   computingHash: '正在计算哈希',
@@ -86,6 +114,14 @@ const zh: Msg = {
 const en: Msg = {
   workedFor: (d) => `Thought for ${d}`,
   workedForUnknown: 'Thought for —',
+  analyzing: 'Analyzing the request',
+  analyzed: 'Finished analyzing',
+  deepDiving: 'Deep diving',
+  deepDivingFor: (d) => `Deep diving for ${d} ···`,
+  think: 'Think',
+  separator: ' · ',
+  joinTwo: (first, second) => `${first} and ${second}`,
+  more: (title) => `${title}, and more`,
   thinking: 'Thinking',
   writing: 'Writing',
   waiting: 'Waiting…',
@@ -95,6 +131,12 @@ const en: Msg = {
   formatted: (t) => `Formatted ${t}`,
   reading: (t) => `Reading ${t}`,
   read: (t) => `Read ${t}`,
+  searching: (t) => `Searching ${t}`,
+  searched: (t) => `Searched ${t}`,
+  editing: (t) => `Editing ${t}`,
+  edited: (t) => `Edited ${t}`,
+  calling: (t) => `Calling ${t}`,
+  called: (t) => `Called ${t}`,
   converting: (t) => `Converting ${t}`,
   converted: (t) => `Converted ${t}`,
   computingHash: 'Computing hash',

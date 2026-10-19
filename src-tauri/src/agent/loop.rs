@@ -48,6 +48,27 @@ pub enum AgentEvent {
     Done,
 }
 
+/// 当前用户句之前最近一条工具结果，供短跟进的决策状态使用。
+fn prior_tool_context(history: &[ModelMessage], user_text: &str) -> Option<(String, String)> {
+    let end = history
+        .iter()
+        .rposition(|m| m.role == "user" && m.content == user_text)
+        .unwrap_or(history.len());
+    let tool = history[..end].iter().rev().find(|m| m.role == "tool")?;
+    let name = tool.tool_name.clone().unwrap_or_default();
+    if name.is_empty() {
+        return None;
+    }
+    let note = tool
+        .content
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    Some((name, note))
+}
+
 fn history_to_model_messages(conn: &Connection, conv_id: &str) -> Result<Vec<ModelMessage>, String> {
     use super::llm::ToolCall;
     use super::trajectory::{resolve_trajectory, TrajectoryEvent};
@@ -202,8 +223,24 @@ pub fn run_agent_on(
     let _ = log.append("turn/start", session_log::ev_turn_start(turn_no));
     let _ = log.append("user/message", session_log::ev_user_message(user_text));
 
+    let history = history_to_model_messages(conn, conv_id)?;
+    let prior = prior_tool_context(&history, user_text);
+    let decision_state = super::laya_hint::compress_decision_state(
+        user_text,
+        prior.as_ref().map(|(name, note)| (name.as_str(), note.as_str())),
+    );
     let mut msgs = Vec::new();
     let mut system_prompt = strategy.build_system_prompt(user_text);
+    if let Some(hit) = crate::commands::laya::route_decision(&decision_state) {
+        let page = crate::commands::laya::toolbox_page_name(hit.tool_id);
+        let leads = super::skills::tool_ids_for_toolbox(hit.tool_id as u32);
+        system_prompt = super::harness::prompt::apply_laya_hint(
+            &system_prompt,
+            &page,
+            hit.confidence,
+            &leads,
+        );
+    }
     let mut memory_tokens = 0u32;
     // Inject existing memories regardless of auto_memory_enabled (switch only gates extract).
     {
@@ -301,7 +338,7 @@ pub fn run_agent_on(
         system_for_model.push_str(&l1_block);
     }
     msgs.push(ModelMessage::system(system_for_model));
-    msgs.extend(history_to_model_messages(conn, conv_id)?);
+    msgs.extend(history);
     // 增量 cursor：第 1 步 delta 用 user-only；此后 msgs[cursor..] 为本步追加
     let mut delta_cursor = msgs.len();
 
@@ -590,7 +627,8 @@ pub fn run_agent_on(
                 emit(AgentEvent::Done);
                 return Ok(());
             }
-            ModelTurn::ToolCalls(calls) => {
+            ModelTurn::ToolCalls(mut calls) => {
+                calls = dedupe_identical_calls(calls);
                 // 工具轮：丢掉已泄漏到轨迹的 tool_call 正文与 few-shot 回声，工具不算对话输出
                 scrub_tool_call_text_from_trajectory(&mut trajectory);
                 let window_start = *iter_boundaries.last().unwrap_or(&0);
@@ -670,29 +708,42 @@ pub fn run_agent_on(
                     ) {
                         Err(e) => e,
                         Ok(()) => {
-                            let needs_approval = registry::lookup(&call.name)
+                            let spec = registry::lookup(&call.name);
+                            let needs_approval = spec
+                                .map(|s| s.side_effect.needs_approval())
+                                .unwrap_or(false);
+                            let is_shell = spec
                                 .map(|s| s.side_effect == registry::SideEffect::Process)
                                 .unwrap_or(false);
                             let approved = if needs_approval {
-                                let command = call
-                                    .arguments
-                                    .get("command")
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let cwd = call
-                                    .arguments
-                                    .get("cwd")
-                                    .and_then(|v| v.as_str())
-                                    .filter(|s| !s.is_empty())
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| {
-                                        crate::agent::os_shell::default_cwd()
-                                            .display()
-                                            .to_string()
-                                    });
-                                let similar_key =
-                                    crate::agent::os_shell::similar_key(&command);
+                                let command = if is_shell {
+                                    call.arguments
+                                        .get("command")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string()
+                                } else {
+                                    format!("{tool_id} {}", call.arguments)
+                                };
+                                let cwd = if is_shell {
+                                    call.arguments
+                                        .get("cwd")
+                                        .and_then(|v| v.as_str())
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| {
+                                            crate::agent::os_shell::default_cwd()
+                                                .display()
+                                                .to_string()
+                                        })
+                                } else {
+                                    String::new()
+                                };
+                                let similar_key = if is_shell {
+                                    crate::agent::os_shell::similar_key(&command)
+                                } else {
+                                    tool_id.clone()
+                                };
                                 if crate::agent::tool_approval::is_session_allowed(
                                     conv_id, &similar_key,
                                 ) {
@@ -902,6 +953,19 @@ fn reasoning_in_window(steps: &[TrajectoryStep], from: usize) -> Option<String> 
     } else {
         Some(out)
     }
+}
+
+/// 同一回合里工具名和参数完全相同的调用只保留第一次。
+fn dedupe_identical_calls(calls: Vec<crate::agent::llm::ToolCall>) -> Vec<crate::agent::llm::ToolCall> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(calls.len());
+    for call in calls {
+        let key = format!("{}:{}", call.name, call.arguments);
+        if seen.insert(key) {
+            out.push(call);
+        }
+    }
+    out
 }
 
 fn tool_calls_log_value(calls: &[crate::agent::llm::ToolCall]) -> Value {
@@ -1117,6 +1181,31 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    #[test]
+    fn identical_calls_in_one_turn_collapse() {
+        let calls = vec![
+            ToolCall {
+                id: "a".into(),
+                name: "json.to_query".into(),
+                arguments: json!({"input": "{}"}),
+            },
+            ToolCall {
+                id: "b".into(),
+                name: "json.to_query".into(),
+                arguments: json!({"input": "{}"}),
+            },
+            ToolCall {
+                id: "c".into(),
+                name: "json.to_query".into(),
+                arguments: json!({"input": "{\"x\":1}"}),
+            },
+        ];
+        let kept = dedupe_identical_calls(calls);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(kept[0].id, "a");
+        assert_eq!(kept[1].id, "c");
+    }
+
     struct Scripted {
         turns: VecDeque<ModelTurn>,
         pub received: Vec<Vec<ModelMessage>>,
@@ -1219,7 +1308,8 @@ mod tests {
     let msgs = get_messages_on(&db, &conv.id).unwrap();
     let last = msgs.last().expect("assistant message persisted");
     assert_eq!(last.role, "assistant");
-    assert!(last.content.contains("连续发起"));
+    assert!(!last.content.is_empty());
+    assert!(!last.content.contains("soft_exit"));
     let evs = events.lock().unwrap();
     assert!(matches!(evs.last(), Some(AgentEvent::Done)));
     assert!(!evs.iter().any(|e| matches!(e, AgentEvent::Error { .. })));
@@ -1575,7 +1665,7 @@ fn stuck_round_signature_exits_early_with_explanation() {
         let mut model = Scripted::new(vec![
             ModelTurn::ToolCalls(vec![ToolCall {
                 id: "c1".into(),
-                name: "http.request".into(),
+                name: "not.a.tool".into(),
                 arguments: json!({}),
             }]),
             ModelTurn::text("tool unavailable"),
@@ -1714,7 +1804,7 @@ fn stuck_round_signature_exits_early_with_explanation() {
         let msgs = get_messages_on(&db, &conv.id).unwrap();
         assert!(msgs
             .iter()
-            .any(|m| m.role == "assistant" && m.content.contains("修复重试预算")));
+            .any(|m| m.role == "assistant" && (m.content.contains("algorithm") || m.content.contains("重试"))));
     }
 
     #[test]

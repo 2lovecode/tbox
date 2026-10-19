@@ -213,6 +213,10 @@ fn strategy_summarize_tools(msgs: &mut [ModelMessage]) -> usize {
     compressed
 }
 
+/// 重置后仍要让模型看见的单条工具结果上限。更长的成功结果只留开头。
+const RESET_TOOL_KEEP_CHARS: usize = 2000;
+const RESET_TOOL_HEAD_CHARS: usize = 800;
+
 fn strategy_reset(msgs: &mut Vec<ModelMessage>, user_text: &str) -> usize {
     let discarded = msgs.iter().filter(|m| m.role != "system").count();
     if discarded == 0 {
@@ -223,10 +227,48 @@ fn strategy_reset(msgs: &mut Vec<ModelMessage>, user_text: &str) -> usize {
         .find(|m| m.role == "system")
         .cloned()
         .unwrap_or_else(|| ModelMessage::system(""));
+    let tail = last_tool_exchange(msgs);
     msgs.clear();
     msgs.push(system);
     msgs.push(ModelMessage::user(user_text));
+    if let Some((assistant, tools)) = tail {
+        msgs.push(assistant);
+        msgs.extend(tools);
+    }
     discarded
+}
+
+/// 尾部「assistant tool_calls + 紧随的 tool 结果」。没有成对调用时不保留孤立 tool。
+fn last_tool_exchange(msgs: &[ModelMessage]) -> Option<(ModelMessage, Vec<ModelMessage>)> {
+    let mut i = msgs.len();
+    while i > 0 && msgs[i - 1].role == "tool" {
+        i -= 1;
+    }
+    if i == msgs.len() {
+        return None;
+    }
+    let assistant = msgs.get(i.checked_sub(1)?)?;
+    if assistant.role != "assistant" || !has_tool_calls(assistant) {
+        return None;
+    }
+    let tools = msgs[i..]
+        .iter()
+        .cloned()
+        .map(shrink_tool_for_reset)
+        .collect();
+    Some((assistant.clone(), tools))
+}
+
+fn shrink_tool_for_reset(mut message: ModelMessage) -> ModelMessage {
+    let n = message.content.chars().count();
+    if n <= RESET_TOOL_KEEP_CHARS {
+        return message;
+    }
+    let head: String = message.content.chars().take(RESET_TOOL_HEAD_CHARS).collect();
+    message.content = format!(
+        "{head}\n…[保留前 {RESET_TOOL_HEAD_CHARS} 字，共 {n} 字。请据此回答用户，不要用相同参数再次调用。]"
+    );
+    message
 }
 
 /// Apply L1 truncate to the latest tool message content before push.
@@ -387,9 +429,30 @@ mod tests {
         ];
         let discarded = strategy_reset(&mut msgs, "new ask");
         assert_eq!(discarded, 3);
-        assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].content, "sys");
         assert_eq!(msgs[1].content, "new ask");
+        assert_eq!(msgs[2].role, "assistant");
+        assert_eq!(msgs[3].content, "ok");
+        assert_eq!(msgs.len(), 4);
+    }
+
+    #[test]
+    fn reset_shrinks_long_tool_result() {
+        let long = "z".repeat(RESET_TOOL_KEEP_CHARS + 50);
+        let mut msgs = vec![
+            ModelMessage::system("sys"),
+            ModelMessage::user("old"),
+            ModelMessage::assistant_tool_calls(vec![ToolCall {
+                id: "c1".into(),
+                name: "t".into(),
+                arguments: json!({}),
+            }]),
+            ModelMessage::tool_result("c1", "t", long),
+        ];
+        strategy_reset(&mut msgs, "payload");
+        assert_eq!(msgs[1].content, "payload");
+        assert!(msgs[3].content.contains("不要用相同参数再次调用"));
+        assert!(msgs[3].content.chars().count() < RESET_TOOL_KEEP_CHARS);
     }
 
     #[test]

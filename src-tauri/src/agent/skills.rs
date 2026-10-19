@@ -1137,6 +1137,35 @@ fn score_skill_against(query: &str, parsed: &ParsedSkill) -> i32 {
     score
 }
 
+/// 工具箱页面 id 对应的 agent 工具。一个技能可覆盖多个页面，返回该技能登记的全部工具 id。
+pub fn tool_ids_for_toolbox(toolbox_id: u32) -> Vec<String> {
+    let disabled = load_disabled_skills();
+    let mut ids = Vec::new();
+    let mut push = |list: Vec<String>| {
+        for id in list {
+            if !ids.contains(&id) && crate::agent::registry::lookup(&id).is_some() {
+                ids.push(id);
+            }
+        }
+    };
+    for embedded in SKILLS.iter().filter(|e| !disabled.contains(e.id)) {
+        let Some(parsed) = parse_skill(&resolve_builtin_raw(embedded.id, embedded.source)) else {
+            continue;
+        };
+        if parsed.toolbox_ids.contains(&toolbox_id) {
+            push(parsed.tool_ids);
+        }
+    }
+    if let Ok(users) = read_user_skills(&disabled) {
+        for skill in users.into_iter().filter(|s| s.enabled) {
+            if skill.toolbox_ids.contains(&toolbox_id) {
+                push(skill.tool_ids);
+            }
+        }
+    }
+    ids
+}
+
 /// 按 query 关键词/工具名/中文别名匹配预置 Skill，最多返回 `limit` 条。
 pub fn retrieve_skills(query: &str, limit: usize) -> Vec<SkillDoc> {
     if limit == 0 || query.trim().is_empty() {
@@ -1203,6 +1232,20 @@ mod tests {
     use crate::agent::registry::{all_tools, lookup};
 
     #[test]
+    fn sha512_and_qrcode_skills_name_tools() {
+        let hash = retrieve_skills("计算 SHA-512", 3);
+        assert!(
+            hash.iter().any(|s| {
+                s.tool_ids.iter().any(|t| t == "hash.digest") || s.body.contains("sha512")
+            }),
+            "hits={:?}",
+            hash.iter().map(|s| s.skill_id.as_str()).collect::<Vec<_>>()
+        );
+        let qr = retrieve_skills("生成二维码", 3);
+        assert!(qr.iter().any(|s| s.body.contains("qrcode.generate")), "hits={qr:?}");
+    }
+
+    #[test]
     fn jwt_query_hits_jwt_skill() {
         let hits = retrieve_skills("帮我解析这段 JWT", 3);
         assert!(hits.iter().any(|s| {
@@ -1260,12 +1303,12 @@ mod tests {
         assert_eq!(hits[0].skill_id, "json");
         let rendered = render_skill_bodies_l1(&hits);
         assert!(
-            rendered.contains("json.format")
+            rendered.contains("json.escape")
                 && rendered.contains("按正文「何时使用」选择其中一个工具"),
             "rendered={rendered}"
         );
         let body = truncate_skill_body(&hits[0].body);
-        assert!(body.contains("json.format"), "truncated body missing tool: {body}");
+        assert!(body.contains("json.escape"), "truncated body missing tool: {body}");
     }
 
     #[test]
@@ -1287,10 +1330,10 @@ mod tests {
 
     #[test]
     fn loading_skills_does_not_register_tools() {
-        let before = lookup("http.request");
+        let before = lookup("not.a.tool");
         let _ = retrieve_skills("http", 3);
         assert!(before.is_none());
-        assert!(lookup("http.request").is_none());
+        assert!(lookup("not.a.tool").is_none());
     }
 
     #[test]

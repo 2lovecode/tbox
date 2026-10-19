@@ -65,6 +65,20 @@ export const useSearchStore = defineStore('search', {
         aiResults: [] as Array<Tool & { score: number; reason: string }>,
         aiIsLoading: false,
         aiError: null as string | null,
+        // laya-spotlight-tool-routing: Laya 决策路由（默认关闭，配置驱动）。
+        layaSettings: null as
+          | {
+              mode?: 'off' | 'embedded' | 'external';
+              enabled: boolean;
+              endpoint: string;
+              threshold: number;
+              timeoutMs: number;
+            }
+          | null,
+        layaHit: null as { toolId: number; confidence: number } | null,
+        layaTool: null as Tool | null,
+        layaIsLoading: false,
+        _allTools: [] as Tool[],
       }),
 
   getters: {
@@ -221,6 +235,73 @@ export const useSearchStore = defineStore('search', {
       this.aiResults = [];
       this.aiError = null;
       this.aiIsLoading = false;
+      this.clearLayaRoute();
+    },
+
+    // ---- laya-spotlight-tool-routing -------------------------------------
+
+    /**
+     * 加载 Laya 配置（每次打开 Spotlight 时刷新，设置改动即时生效）。
+     * 失败时视为未启用，走纯关键词检索。
+     */
+    async loadLayaSettings() {
+      try {
+        this.layaSettings = await invoke(
+          'get_laya_settings',
+        ) as typeof this.layaSettings;
+      } catch (error) {
+        console.error('[search] failed to load laya settings:', error);
+        this.layaSettings = null;
+      }
+    },
+
+    clearLayaRoute() {
+      this.layaHit = null;
+      this.layaTool = null;
+      this.layaIsLoading = false;
+    },
+
+    /**
+     * Laya 决策路由：仅当启用、有关键词、且关键词检索结果少于 3 条时触发
+     * （结果充足时关键词检索已够用，避免请求风暴）。
+     * 任何失败/低置信度都由 Rust 侧折叠为 null —— 这里静默清空，无错误 UI。
+     */
+    async runLayaRoute() {
+      const trimmed = this.query.trim();
+      const s = this.layaSettings;
+      // 兼容旧配置：mode 缺省时回退 enabled 字段（后端 effective_mode 同语义）。
+      const enabled =
+        s?.mode === 'embedded' || s?.mode === 'external' || (s?.mode === undefined && !!s?.enabled);
+      if (!enabled || !trimmed || this.results.length >= 3) {
+        this.clearLayaRoute();
+        return;
+      }
+      this.layaIsLoading = true;
+      try {
+        const hit = await invoke<{ toolId: number; confidence: number } | null>(
+          'laya_route',
+          { query: trimmed },
+        );
+        if (!hit) {
+          this.clearLayaRoute();
+          return;
+        }
+        if (this._allTools.length === 0) {
+          this._allTools = await invoke<Tool[]>('get_all_tools');
+        }
+        const tool = this._allTools.find((t) => t.id === hit.toolId);
+        if (!tool) {
+          this.clearLayaRoute();
+          return;
+        }
+        this.layaHit = hit;
+        this.layaTool = tool;
+      } catch (error) {
+        console.error('[search] laya route failed:', error);
+        this.clearLayaRoute();
+      } finally {
+        this.layaIsLoading = false;
+      }
     },
   },
 

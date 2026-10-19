@@ -19,6 +19,7 @@ const {
   aiResults,
   aiIsLoading,
   aiError,
+  layaTool,
 } = storeToRefs(searchStore);
 const routerMap: Record<number, string> = {
   1: 'image-compression',
@@ -108,9 +109,20 @@ const aiRanked = computed<RankedTool[]>(() => {
   return merged;
 });
 
-const displayedResults = computed(() =>
-  aiMode.value ? aiRanked.value : rankedBase.value,
-);
+const displayedResults = computed(() => {
+  const base = aiMode.value ? aiRanked.value : rankedBase.value;
+  // laya-spotlight-tool-routing: Laya 命中时置顶展示（去重），标注「智能匹配」。
+  const pinned = layaTool.value && query.value.trim() ? [layaTool.value] : [];
+  if (pinned.length === 0) return base;
+  const pinnedIds = new Set(pinned.map((t) => t.id));
+  const rest = base.filter((b) => !pinnedIds.has(b.id));
+  const pinnedRanked: RankedTool[] = pinned.map((t) => ({
+    ...t,
+    _recencyBoost: recencyBoost(t.id),
+    _reason: '智能匹配',
+  }));
+  return [...pinnedRanked, ...rest];
+});
 
 const visibleHistory = computed(() =>
   isQueryEmpty.value ? searchHistory.value.slice(0, 8) : [],
@@ -121,9 +133,22 @@ watch(isOpen, (open) => {
     if (aiMode.value && query.value.trim()) {
       void searchStore.runAiRoute();
     }
+    // laya-spotlight-tool-routing: 每次打开刷新配置，设置改动即时生效。
+    void searchStore.loadLayaSettings();
   } else {
     searchStore.clearAiRoute();
   }
+});
+
+// Laya 决策路由防抖（300ms）：关键词检索完成后若结果不足 3 条才触发，
+// 避免每次按键都打到 laya-serve。
+const layaDebounceId = ref<ReturnType<typeof setTimeout> | null>(null);
+watch(results, () => {
+  if (layaDebounceId.value) clearTimeout(layaDebounceId.value);
+  if (!isOpen.value) return;
+  layaDebounceId.value = setTimeout(() => {
+    void searchStore.runLayaRoute();
+  }, 300);
 });
 
 watch(query, () => {
@@ -237,6 +262,7 @@ onBeforeUnmount(() => {
     window.removeEventListener('keydown', handleKeydown);
   }
   if (debounceId.value) clearTimeout(debounceId.value);
+  if (layaDebounceId.value) clearTimeout(layaDebounceId.value);
 });
 </script>
 
@@ -336,7 +362,7 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="result-desc">{{ tool.description }}</div>
                   <div
-                    v-if="tool._reason && aiMode"
+                    v-if="tool._reason"
                     class="result-reason"
                     :title="tool._reason"
                   >

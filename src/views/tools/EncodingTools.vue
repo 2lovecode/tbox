@@ -199,7 +199,6 @@ import { useToolShortcuts } from '@/composables/useToolShortcuts';
 import { computeTextStats, isBase64, isHex, isMorse } from '@/utils/textStats';
 import { ASCII_TABLE } from '@/utils/ascii';
 import { encodeBase64, decodeBase64 } from '@/utils/base64';
-import { encodeMorse, decodeMorse } from '@/utils/morse';
 import { downloadTextFile } from '@/utils/download';
 
 const toast = useToast();
@@ -388,8 +387,9 @@ const TABS: TabSpec[] = [
       { key: 'toMorse', label: '文本 → 摩尔斯码', kind: 'primary' },
       { key: 'toText', label: '摩尔斯码 → 文本' },
     ],
-    run: (op, ctx) => {
-      ctx.output = op.key === 'toMorse' ? encodeMorse(ctx.input) : decodeMorse(ctx.input);
+    run: async (op, ctx) => {
+      const cmd = op.key === 'toMorse' ? 'morse_encode' : 'morse_decode';
+      ctx.output = await invoke<string>(cmd, { input: ctx.input });
     },
   },
   {
@@ -399,11 +399,8 @@ const TABS: TabSpec[] = [
     placeholder: '输入要加密/解密的文本',
     example: 'Hello, World!',
     ops: [{ key: 'encode', label: 'ROT13 加密/解密', kind: 'primary' }],
-    run: (_op, ctx) => {
-      ctx.output = ctx.input.replace(/[a-zA-Z]/g, (c) => {
-        const base = c <= 'Z' ? 65 : 97;
-        return String.fromCharCode((c.charCodeAt(0) - base + 13) % 26 + base);
-      });
+    run: async (_op, ctx) => {
+      ctx.output = await invoke<string>('rot13', { input: ctx.input });
     },
   },
   {
@@ -417,12 +414,11 @@ const TABS: TabSpec[] = [
       { key: 'encode', label: '凯撒加密', kind: 'primary' },
       { key: 'decode', label: '凯撒解密' },
     ],
-    run: (op, ctx) => {
-      const sign = op.key === 'encode' ? 1 : -1;
-      const shift = (sign * (ctx.shift % 26) + 26) % 26;
-      ctx.output = ctx.input.replace(/[a-zA-Z]/g, (c) => {
-        const base = c <= 'Z' ? 65 : 97;
-        return String.fromCharCode((c.charCodeAt(0) - base + shift + 26) % 26 + base);
+    run: async (op, ctx) => {
+      ctx.output = await invoke<string>('caesar', {
+        input: ctx.input,
+        shift: ctx.shift,
+        decode: op.key === 'decode',
       });
     },
   },
@@ -437,12 +433,8 @@ const TABS: TabSpec[] = [
       { key: 'lower', label: '转小写' },
       { key: 'reverse', label: '反转' },
     ],
-    run: (op, ctx) => {
-      switch (op.key) {
-        case 'upper': ctx.output = ctx.input.toUpperCase(); break;
-        case 'lower': ctx.output = ctx.input.toLowerCase(); break;
-        case 'reverse': ctx.output = ctx.input.split('').reverse().join(''); break;
-      }
+    run: async (op, ctx) => {
+      ctx.output = await invoke<string>('encoding_case', { input: ctx.input, mode: op.key });
     },
   },
   {
@@ -452,14 +444,8 @@ const TABS: TabSpec[] = [
     placeholder: '输入要检测的文本',
     example: 'SGVsbG8sIFdvcmxkIQ==',
     ops: [{ key: 'detect', label: '自动检测编码', kind: 'primary' }],
-    run: (_op, ctx) => {
-      const results: string[] = [];
-      if (isHex(ctx.input)) results.push('可能是十六进制');
-      if (isBase64(ctx.input)) results.push('可能是 Base64');
-      if (isMorse(ctx.input)) results.push('可能是摩尔斯码');
-      if (/^[\x00-\x7F]+$/.test(ctx.input)) results.push('标准 ASCII');
-      if (/[\u4e00-\u9fa5]/.test(ctx.input)) results.push('包含中文 (UTF-8)');
-      ctx.output = results.length > 0 ? results.join('\n') : '未检测到特殊编码格式';
+    run: async (_op, ctx) => {
+      ctx.output = await invoke<string>('encoding_detect', { input: ctx.input });
     },
   },
 ];

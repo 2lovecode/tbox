@@ -740,6 +740,952 @@
       },
       "model_output": "[answer_mismatch] another mismatch",
       "expect_failure_class": "answer_mismatch"
+    },
+    {
+      "id": "page-json-compress",
+      "user_input": "调用 json.compress",
+      "expect_tool": "json.compress",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.compress\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-escape",
+      "user_input": "调用 json.escape",
+      "expect_tool": "json.escape",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.escape\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-unescape",
+      "user_input": "调用 json.unescape",
+      "expect_tool": "json.unescape",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.unescape\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-validate",
+      "user_input": "调用 json.validate",
+      "expect_tool": "json.validate",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.validate\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-info",
+      "user_input": "调用 json.info",
+      "expect_tool": "json.info",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.info\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-diff",
+      "user_input": "调用 json.diff",
+      "expect_tool": "json.diff",
+      "expect_args": {
+        "left": "{}",
+        "right": "{}"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.diff\", \"arguments\": {\"left\": \"{}\", \"right\": \"{}\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_java",
+      "user_input": "调用 json.to_java",
+      "expect_tool": "json.to_java",
+      "expect_args": {
+        "input": "{}",
+        "class_name": "A"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_java\", \"arguments\": {\"input\": \"{}\", \"class_name\": \"A\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_csharp",
+      "user_input": "调用 json.to_csharp",
+      "expect_tool": "json.to_csharp",
+      "expect_args": {
+        "input": "{}",
+        "class_name": "A"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_csharp\", \"arguments\": {\"input\": \"{}\", \"class_name\": \"A\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_go",
+      "user_input": "调用 json.to_go",
+      "expect_tool": "json.to_go",
+      "expect_args": {
+        "input": "{}",
+        "struct_name": "A"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_go\", \"arguments\": {\"input\": \"{}\", \"struct_name\": \"A\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_python",
+      "user_input": "调用 json.to_python",
+      "expect_tool": "json.to_python",
+      "expect_args": {
+        "input": "{}",
+        "class_name": "A"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_python\", \"arguments\": {\"input\": \"{}\", \"class_name\": \"A\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_typescript",
+      "user_input": "调用 json.to_typescript",
+      "expect_tool": "json.to_typescript",
+      "expect_args": {
+        "input": "{}",
+        "interface_name": "A"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_typescript\", \"arguments\": {\"input\": \"{}\", \"interface_name\": \"A\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-url_decode",
+      "user_input": "调用 encoding.url_decode",
+      "expect_tool": "encoding.url_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.url_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-unicode_encode",
+      "user_input": "调用 encoding.unicode_encode",
+      "expect_tool": "encoding.unicode_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.unicode_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-unicode_decode",
+      "user_input": "调用 encoding.unicode_decode",
+      "expect_tool": "encoding.unicode_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.unicode_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-base58_encode",
+      "user_input": "调用 encoding.base58_encode",
+      "expect_tool": "encoding.base58_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.base58_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-base58_decode",
+      "user_input": "调用 encoding.base58_decode",
+      "expect_tool": "encoding.base58_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.base58_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-hex_encode",
+      "user_input": "调用 encoding.hex_encode",
+      "expect_tool": "encoding.hex_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.hex_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-hex_decode",
+      "user_input": "调用 encoding.hex_decode",
+      "expect_tool": "encoding.hex_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.hex_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-html_encode",
+      "user_input": "调用 encoding.html_encode",
+      "expect_tool": "encoding.html_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.html_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-html_decode",
+      "user_input": "调用 encoding.html_decode",
+      "expect_tool": "encoding.html_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.html_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-punycode_encode",
+      "user_input": "调用 encoding.punycode_encode",
+      "expect_tool": "encoding.punycode_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.punycode_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-punycode_decode",
+      "user_input": "调用 encoding.punycode_decode",
+      "expect_tool": "encoding.punycode_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.punycode_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-binary_encode",
+      "user_input": "调用 encoding.binary_encode",
+      "expect_tool": "encoding.binary_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.binary_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-binary_decode",
+      "user_input": "调用 encoding.binary_decode",
+      "expect_tool": "encoding.binary_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.binary_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-morse_encode",
+      "user_input": "调用 encoding.morse_encode",
+      "expect_tool": "encoding.morse_encode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.morse_encode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-morse_decode",
+      "user_input": "调用 encoding.morse_decode",
+      "expect_tool": "encoding.morse_decode",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.morse_decode\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-rot13",
+      "user_input": "调用 encoding.rot13",
+      "expect_tool": "encoding.rot13",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.rot13\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-detect",
+      "user_input": "调用 encoding.detect",
+      "expect_tool": "encoding.detect",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.detect\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-charset-detect",
+      "user_input": "调用 charset.detect",
+      "expect_tool": "charset.detect",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"charset.detect\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-charset-convert_text",
+      "user_input": "调用 charset.convert_text",
+      "expect_tool": "charset.convert_text",
+      "expect_args": {
+        "input": "hi",
+        "from": "UTF-8",
+        "to": "GBK"
+      },
+      "model_output": "<tool_call>{\"name\": \"charset.convert_text\", \"arguments\": {\"input\": \"hi\", \"from\": \"UTF-8\", \"to\": \"GBK\"}}</tool_call>"
+    },
+    {
+      "id": "page-jwt-generate",
+      "user_input": "调用 jwt.generate",
+      "expect_tool": "jwt.generate",
+      "expect_args": {
+        "payload": "{}",
+        "secret": "s"
+      },
+      "model_output": "<tool_call>{\"name\": \"jwt.generate\", \"arguments\": {\"payload\": \"{}\", \"secret\": \"s\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm3",
+      "user_input": "调用 gm.sm3",
+      "expect_tool": "gm.sm3",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.sm3\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-hmac_sm3",
+      "user_input": "调用 gm.hmac_sm3",
+      "expect_tool": "gm.hmac_sm3",
+      "expect_args": {
+        "message": "m",
+        "key": "k"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.hmac_sm3\", \"arguments\": {\"message\": \"m\", \"key\": \"k\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm2_sign",
+      "user_input": "调用 gm.sm2_sign",
+      "expect_tool": "gm.sm2_sign",
+      "expect_args": {
+        "message": "m",
+        "private_key": "k"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.sm2_sign\", \"arguments\": {\"message\": \"m\", \"private_key\": \"k\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm2_verify",
+      "user_input": "调用 gm.sm2_verify",
+      "expect_tool": "gm.sm2_verify",
+      "expect_args": {
+        "message": "m",
+        "signature": "s",
+        "public_key": "p"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.sm2_verify\", \"arguments\": {\"message\": \"m\", \"signature\": \"s\", \"public_key\": \"p\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm4_key",
+      "user_input": "调用 gm.sm4_key",
+      "expect_tool": "gm.sm4_key",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"gm.sm4_key\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm2_keypair",
+      "user_input": "调用 gm.sm2_keypair",
+      "expect_tool": "gm.sm2_keypair",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"gm.sm2_keypair\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-v7",
+      "user_input": "调用 uuid.v7",
+      "expect_tool": "uuid.v7",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.v7\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-nil",
+      "user_input": "调用 uuid.nil",
+      "expect_tool": "uuid.nil",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"uuid.nil\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-v5",
+      "user_input": "调用 uuid.v5",
+      "expect_tool": "uuid.v5",
+      "expect_args": {
+        "namespace": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+        "name": "a"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.v5\", \"arguments\": {\"namespace\": \"6ba7b810-9dad-11d1-80b4-00c04fd430c8\", \"name\": \"a\"}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-validate",
+      "user_input": "调用 uuid.validate",
+      "expect_tool": "uuid.validate",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.validate\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-to_base64",
+      "user_input": "调用 uuid.to_base64",
+      "expect_tool": "uuid.to_base64",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.to_base64\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-from_base64",
+      "user_input": "调用 uuid.from_base64",
+      "expect_tool": "uuid.from_base64",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.from_base64\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-version",
+      "user_input": "调用 uuid.version",
+      "expect_tool": "uuid.version",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.version\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-cron-validate",
+      "user_input": "调用 cron.validate",
+      "expect_tool": "cron.validate",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.validate\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-cron-to_natural",
+      "user_input": "调用 cron.to_natural",
+      "expect_tool": "cron.to_natural",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.to_natural\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-number-scientific",
+      "user_input": "调用 number.scientific",
+      "expect_tool": "number.scientific",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"number.scientific\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-xml-minify",
+      "user_input": "调用 xml.minify",
+      "expect_tool": "xml.minify",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.minify\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-xml-to_json",
+      "user_input": "调用 xml.to_json",
+      "expect_tool": "xml.to_json",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.to_json\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_xml",
+      "user_input": "调用 json.to_xml",
+      "expect_tool": "json.to_xml",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_xml\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-xml-to_yaml",
+      "user_input": "调用 xml.to_yaml",
+      "expect_tool": "xml.to_yaml",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"xml.to_yaml\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-yaml-to_xml",
+      "user_input": "调用 yaml.to_xml",
+      "expect_tool": "yaml.to_xml",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.to_xml\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-yaml-validate",
+      "user_input": "调用 yaml.validate",
+      "expect_tool": "yaml.validate",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.validate\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-yaml-to_json",
+      "user_input": "调用 yaml.to_json",
+      "expect_tool": "yaml.to_json",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.to_json\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_yaml",
+      "user_input": "调用 json.to_yaml",
+      "expect_tool": "json.to_yaml",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_yaml\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-yaml-merge",
+      "user_input": "调用 yaml.merge",
+      "expect_tool": "yaml.merge",
+      "expect_args": {
+        "left": "a: 1",
+        "right": "b: 2"
+      },
+      "model_output": "<tool_call>{\"name\": \"yaml.merge\", \"arguments\": {\"left\": \"a: 1\", \"right\": \"b: 2\"}}</tool_call>"
+    },
+    {
+      "id": "page-sql-format",
+      "user_input": "调用 sql.format",
+      "expect_tool": "sql.format",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"sql.format\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-sql-minify",
+      "user_input": "调用 sql.minify",
+      "expect_tool": "sql.minify",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"sql.minify\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-sql-escape",
+      "user_input": "调用 sql.escape",
+      "expect_tool": "sql.escape",
+      "expect_args": {
+        "input": "a",
+        "db_type": "mysql"
+      },
+      "model_output": "<tool_call>{\"name\": \"sql.escape\", \"arguments\": {\"input\": \"a\", \"db_type\": \"mysql\"}}</tool_call>"
+    },
+    {
+      "id": "page-sql-unescape",
+      "user_input": "调用 sql.unescape",
+      "expect_tool": "sql.unescape",
+      "expect_args": {
+        "input": "a",
+        "db_type": "mysql"
+      },
+      "model_output": "<tool_call>{\"name\": \"sql.unescape\", \"arguments\": {\"input\": \"a\", \"db_type\": \"mysql\"}}</tool_call>"
+    },
+    {
+      "id": "page-csv-stats",
+      "user_input": "调用 csv.stats",
+      "expect_tool": "csv.stats",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"csv.stats\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-log-count_errors",
+      "user_input": "调用 log.count_errors",
+      "expect_tool": "log.count_errors",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"log.count_errors\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-log-levels",
+      "user_input": "调用 log.levels",
+      "expect_tool": "log.levels",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"log.levels\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-image-info",
+      "user_input": "调用 image.info",
+      "expect_tool": "image.info",
+      "expect_args": {
+        "path": "/tmp/a.png"
+      },
+      "model_output": "<tool_call>{\"name\": \"image.info\", \"arguments\": {\"path\": \"/tmp/a.png\"}}</tool_call>"
+    },
+    {
+      "id": "page-image-to_base64",
+      "user_input": "调用 image.to_base64",
+      "expect_tool": "image.to_base64",
+      "expect_args": {
+        "path": "/tmp/a.png"
+      },
+      "model_output": "<tool_call>{\"name\": \"image.to_base64\", \"arguments\": {\"path\": \"/tmp/a.png\"}}</tool_call>"
+    },
+    {
+      "id": "page-qrcode-parse",
+      "user_input": "调用 qrcode.parse",
+      "expect_tool": "qrcode.parse",
+      "expect_args": {
+        "image_data": "x"
+      },
+      "model_output": "<tool_call>{\"name\": \"qrcode.parse\", \"arguments\": {\"image_data\": \"x\"}}</tool_call>"
+    },
+    {
+      "id": "page-color-random",
+      "user_input": "调用 color.random",
+      "expect_tool": "color.random",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"color.random\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-password-generate",
+      "user_input": "调用 password.generate",
+      "expect_tool": "password.generate",
+      "expect_args": {
+        "length": 8
+      },
+      "model_output": "<tool_call>{\"name\": \"password.generate\", \"arguments\": {\"length\": 8}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-caesar",
+      "user_input": "调用 encoding.caesar",
+      "expect_tool": "encoding.caesar",
+      "expect_args": {
+        "input": "ab",
+        "shift": 1,
+        "direction": "encode"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.caesar\", \"arguments\": {\"input\": \"ab\", \"shift\": 1, \"direction\": \"encode\"}}</tool_call>"
+    },
+    {
+      "id": "page-encoding-case",
+      "user_input": "调用 encoding.case",
+      "expect_tool": "encoding.case",
+      "expect_args": {
+        "input": "ab",
+        "mode": "upper"
+      },
+      "model_output": "<tool_call>{\"name\": \"encoding.case\", \"arguments\": {\"input\": \"ab\", \"mode\": \"upper\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm4_encrypt",
+      "user_input": "调用 gm.sm4_encrypt",
+      "expect_tool": "gm.sm4_encrypt",
+      "expect_args": {
+        "plaintext": "m",
+        "key": "k"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.sm4_encrypt\", \"arguments\": {\"plaintext\": \"m\", \"key\": \"k\"}}</tool_call>"
+    },
+    {
+      "id": "page-gm-sm4_decrypt",
+      "user_input": "调用 gm.sm4_decrypt",
+      "expect_tool": "gm.sm4_decrypt",
+      "expect_args": {
+        "ciphertext": "c",
+        "key": "k"
+      },
+      "model_output": "<tool_call>{\"name\": \"gm.sm4_decrypt\", \"arguments\": {\"ciphertext\": \"c\", \"key\": \"k\"}}</tool_call>"
+    },
+    {
+      "id": "page-uuid-batch",
+      "user_input": "调用 uuid.batch",
+      "expect_tool": "uuid.batch",
+      "expect_args": {
+        "count": 1,
+        "version": "v4"
+      },
+      "model_output": "<tool_call>{\"name\": \"uuid.batch\", \"arguments\": {\"count\": 1, \"version\": \"v4\"}}</tool_call>"
+    },
+    {
+      "id": "page-cron-generate",
+      "user_input": "调用 cron.generate",
+      "expect_tool": "cron.generate",
+      "expect_args": {
+        "minute": "0",
+        "hour": "*",
+        "day": "*",
+        "month": "*",
+        "dow": "*"
+      },
+      "model_output": "<tool_call>{\"name\": \"cron.generate\", \"arguments\": {\"minute\": \"0\", \"hour\": \"*\", \"day\": \"*\", \"month\": \"*\", \"dow\": \"*\"}}</tool_call>"
+    },
+    {
+      "id": "page-number-roman",
+      "user_input": "调用 number.roman",
+      "expect_tool": "number.roman",
+      "expect_args": {
+        "input": 4
+      },
+      "model_output": "<tool_call>{\"name\": \"number.roman\", \"arguments\": {\"input\": 4}}</tool_call>"
+    },
+    {
+      "id": "page-number-fraction",
+      "user_input": "调用 number.fraction",
+      "expect_tool": "number.fraction",
+      "expect_args": {
+        "mode": "to_decimal",
+        "numerator": 1,
+        "denominator": 2
+      },
+      "model_output": "<tool_call>{\"name\": \"number.fraction\", \"arguments\": {\"mode\": \"to_decimal\", \"numerator\": 1, \"denominator\": 2}}</tool_call>"
+    },
+    {
+      "id": "page-code-format",
+      "user_input": "调用 code.format",
+      "expect_tool": "code.format",
+      "expect_args": {
+        "input": "{}",
+        "language": "json"
+      },
+      "model_output": "<tool_call>{\"name\": \"code.format\", \"arguments\": {\"input\": \"{}\", \"language\": \"json\"}}</tool_call>"
+    },
+    {
+      "id": "page-regex-test",
+      "user_input": "调用 regex.test",
+      "expect_tool": "regex.test",
+      "expect_args": {
+        "pattern": "a",
+        "text": "ab"
+      },
+      "model_output": "<tool_call>{\"name\": \"regex.test\", \"arguments\": {\"pattern\": \"a\", \"text\": \"ab\"}}</tool_call>"
+    },
+    {
+      "id": "page-text-compare",
+      "user_input": "调用 text.compare",
+      "expect_tool": "text.compare",
+      "expect_args": {
+        "left": "a",
+        "right": "b"
+      },
+      "model_output": "<tool_call>{\"name\": \"text.compare\", \"arguments\": {\"left\": \"a\", \"right\": \"b\"}}</tool_call>"
+    },
+    {
+      "id": "page-text-dedupe",
+      "user_input": "调用 text.dedupe",
+      "expect_tool": "text.dedupe",
+      "expect_args": {
+        "input": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"text.dedupe\", \"arguments\": {\"input\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-text-sort",
+      "user_input": "调用 text.sort",
+      "expect_tool": "text.sort",
+      "expect_args": {
+        "input": "b\na",
+        "order": "asc"
+      },
+      "model_output": "<tool_call>{\"name\": \"text.sort\", \"arguments\": {\"input\": \"b\\na\", \"order\": \"asc\"}}</tool_call>"
+    },
+    {
+      "id": "page-db-test",
+      "user_input": "调用 db.test",
+      "expect_tool": "db.test",
+      "expect_args": {
+        "engine": "sqlite",
+        "file_path": "/tmp/x.db"
+      },
+      "model_output": "<tool_call>{\"name\": \"db.test\", \"arguments\": {\"engine\": \"sqlite\", \"file_path\": \"/tmp/x.db\"}}</tool_call>"
+    },
+    {
+      "id": "page-csv-to_json",
+      "user_input": "调用 csv.to_json",
+      "expect_tool": "csv.to_json",
+      "expect_args": {
+        "input": "a,b",
+        "has_header": true
+      },
+      "model_output": "<tool_call>{\"name\": \"csv.to_json\", \"arguments\": {\"input\": \"a,b\", \"has_header\": true}}</tool_call>"
+    },
+    {
+      "id": "page-json-to_csv",
+      "user_input": "调用 json.to_csv",
+      "expect_tool": "json.to_csv",
+      "expect_args": {
+        "input": "[]",
+        "has_header": true
+      },
+      "model_output": "<tool_call>{\"name\": \"json.to_csv\", \"arguments\": {\"input\": \"[]\", \"has_header\": true}}</tool_call>"
+    },
+    {
+      "id": "page-csv-format",
+      "user_input": "调用 csv.format",
+      "expect_tool": "csv.format",
+      "expect_args": {
+        "input": "a,b",
+        "delimiter": ","
+      },
+      "model_output": "<tool_call>{\"name\": \"csv.format\", \"arguments\": {\"input\": \"a,b\", \"delimiter\": \",\"}}</tool_call>"
+    },
+    {
+      "id": "page-log-analyze",
+      "user_input": "调用 log.analyze",
+      "expect_tool": "log.analyze",
+      "expect_args": {
+        "input": "err",
+        "pattern": "err"
+      },
+      "model_output": "<tool_call>{\"name\": \"log.analyze\", \"arguments\": {\"input\": \"err\", \"pattern\": \"err\"}}</tool_call>"
+    },
+    {
+      "id": "page-log-filter",
+      "user_input": "调用 log.filter",
+      "expect_tool": "log.filter",
+      "expect_args": {
+        "input": "err",
+        "keyword": "err"
+      },
+      "model_output": "<tool_call>{\"name\": \"log.filter\", \"arguments\": {\"input\": \"err\", \"keyword\": \"err\"}}</tool_call>"
+    },
+    {
+      "id": "page-qrcode-generate",
+      "user_input": "调用 qrcode.generate",
+      "expect_tool": "qrcode.generate",
+      "expect_args": {
+        "text": "hi"
+      },
+      "model_output": "<tool_call>{\"name\": \"qrcode.generate\", \"arguments\": {\"text\": \"hi\"}}</tool_call>"
+    },
+    {
+      "id": "page-barcode-generate",
+      "user_input": "调用 barcode.generate",
+      "expect_tool": "barcode.generate",
+      "expect_args": {
+        "text": "123",
+        "barcode_type": "CODE128"
+      },
+      "model_output": "<tool_call>{\"name\": \"barcode.generate\", \"arguments\": {\"text\": \"123\", \"barcode_type\": \"CODE128\"}}</tool_call>"
+    },
+    {
+      "id": "page-color-rgb_hex",
+      "user_input": "调用 color.rgb_hex",
+      "expect_tool": "color.rgb_hex",
+      "expect_args": {
+        "mode": "rgb_to_hex",
+        "r": 1,
+        "g": 2,
+        "b": 3
+      },
+      "model_output": "<tool_call>{\"name\": \"color.rgb_hex\", \"arguments\": {\"mode\": \"rgb_to_hex\", \"r\": 1, \"g\": 2, \"b\": 3}}</tool_call>"
+    },
+    {
+      "id": "page-color-to_hsl",
+      "user_input": "调用 color.to_hsl",
+      "expect_tool": "color.to_hsl",
+      "expect_args": {
+        "r": 1,
+        "g": 2,
+        "b": 3
+      },
+      "model_output": "<tool_call>{\"name\": \"color.to_hsl\", \"arguments\": {\"r\": 1, \"g\": 2, \"b\": 3}}</tool_call>"
+    },
+    {
+      "id": "page-color-to_hsv",
+      "user_input": "调用 color.to_hsv",
+      "expect_tool": "color.to_hsv",
+      "expect_args": {
+        "r": 1,
+        "g": 2,
+        "b": 3
+      },
+      "model_output": "<tool_call>{\"name\": \"color.to_hsv\", \"arguments\": {\"r\": 1, \"g\": 2, \"b\": 3}}</tool_call>"
+    },
+    {
+      "id": "page-color-brightness",
+      "user_input": "调用 color.brightness",
+      "expect_tool": "color.brightness",
+      "expect_args": {
+        "hex": "#ffffff",
+        "percent": 10
+      },
+      "model_output": "<tool_call>{\"name\": \"color.brightness\", \"arguments\": {\"hex\": \"#ffffff\", \"percent\": 10}}</tool_call>"
+    },
+    {
+      "id": "page-geo-convert",
+      "user_input": "调用 geo.convert",
+      "expect_tool": "geo.convert",
+      "expect_args": {
+        "lat": 39.9,
+        "lng": 116.4,
+        "from": "WGS84",
+        "to": "GCJ02"
+      },
+      "model_output": "<tool_call>{\"name\": \"geo.convert\", \"arguments\": {\"lat\": 39.9, \"lng\": 116.4, \"from\": \"WGS84\", \"to\": \"GCJ02\"}}</tool_call>"
+    },
+    {
+      "id": "page-geo-distance",
+      "user_input": "调用 geo.distance",
+      "expect_tool": "geo.distance",
+      "expect_args": {
+        "lat1": 0,
+        "lng1": 0,
+        "lat2": 0,
+        "lng2": 1,
+        "system": "WGS84",
+        "method": "haversine"
+      },
+      "model_output": "<tool_call>{\"name\": \"geo.distance\", \"arguments\": {\"lat1\": 0, \"lng1\": 0, \"lat2\": 0, \"lng2\": 1, \"system\": \"WGS84\", \"method\": \"haversine\"}}</tool_call>"
+    },
+    {
+      "id": "page-http-request",
+      "user_input": "调用 http.request",
+      "expect_tool": "http.request",
+      "expect_args": {
+        "method": "GET",
+        "url": "https://example.com"
+      },
+      "model_output": "<tool_call>{\"name\": \"http.request\", \"arguments\": {\"method\": \"GET\", \"url\": \"https://example.com\"}}</tool_call>"
+    },
+    {
+      "id": "page-password-list",
+      "user_input": "调用 password.list",
+      "expect_tool": "password.list",
+      "expect_args": {},
+      "model_output": "<tool_call>{\"name\": \"password.list\", \"arguments\": {}}</tool_call>"
+    },
+    {
+      "id": "page-password-get",
+      "user_input": "调用 password.get",
+      "expect_tool": "password.get",
+      "expect_args": {
+        "id": "1"
+      },
+      "model_output": "<tool_call>{\"name\": \"password.get\", \"arguments\": {\"id\": \"1\"}}</tool_call>"
+    },
+    {
+      "id": "page-password-save",
+      "user_input": "调用 password.save",
+      "expect_tool": "password.save",
+      "expect_args": {
+        "name": "n",
+        "password": "p"
+      },
+      "model_output": "<tool_call>{\"name\": \"password.save\", \"arguments\": {\"name\": \"n\", \"password\": \"p\"}}</tool_call>"
+    },
+    {
+      "id": "page-password-delete",
+      "user_input": "调用 password.delete",
+      "expect_tool": "password.delete",
+      "expect_args": {
+        "id": "1"
+      },
+      "model_output": "<tool_call>{\"name\": \"password.delete\", \"arguments\": {\"id\": \"1\"}}</tool_call>"
     }
   ]
 }

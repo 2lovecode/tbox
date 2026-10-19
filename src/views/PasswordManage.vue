@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { ref, computed } from 'vue'
+import { invoke } from '@tauri-apps/api/core';
 import PageHeader from '@/components/PageHeader.vue';
 import CopyButton from '@/components/CopyButton.vue';
 import { useToast } from '@/composables/useToast';
@@ -44,48 +45,33 @@ const { confirm: confirmDialog } = useConfirm();
 // 复制按钮都走 CopyButton 组件，useClipboard 不再需要在此处显式调用。
 
 // 生成强密码
-const generatePassword = (length: number = 16) => {
-  const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*'
-  let password = ''
-  for (let i = 0; i < length; i++) {
-    password += charset.charAt(Math.floor(Math.random() * charset.length))
-  }
-  newEntry.value.password = password
+const generatePassword = async (length: number = 16) => {
+  newEntry.value.password = await invoke<string>('password_generate', { length })
 }
 
 // 添加/更新密码条目
-const saveEntry = () => {
+const saveEntry = async () => {
   if (!newEntry.value.name || !newEntry.value.password) {
     toast.warning('请填写名称和密码')
     return
   }
 
-  if (editingId.value) {
-    // 更新
-    const index = entries.value.findIndex(e => e.id === editingId.value)
-    if (index !== -1) {
-      entries.value[index] = {
-        ...entries.value[index],
-        ...newEntry.value
-      }
-    }
-    editingId.value = null
-  } else {
-    // 新增
-    entries.value.push({
-      id: Date.now().toString(),
-      ...newEntry.value,
-      createdAt: new Date().toISOString()
-    })
-  }
-
-  // 保存到本地存储 - 添加错误处理
   try {
-    localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
+    const saved = await invoke<PasswordEntry>('password_save', {
+      id: editingId.value,
+      name: newEntry.value.name,
+      username: newEntry.value.username,
+      password: newEntry.value.password,
+      url: newEntry.value.url,
+      notes: newEntry.value.notes,
+    })
+    const index = entries.value.findIndex(e => e.id === saved.id)
+    if (index === -1) entries.value.push(saved)
+    else entries.value[index] = saved
     toast.success('保存成功')
   } catch (error) {
     console.error('保存失败:', error)
-    toast.error('保存失败，可能是存储空间不足')
+    toast.error('保存失败')
     return
   }
 
@@ -98,6 +84,7 @@ const saveEntry = () => {
     notes: ''
   }
   showAddForm.value = false
+  editingId.value = null
 }
 
 // 编辑条目
@@ -117,7 +104,7 @@ const deleteEntry = async (id: string) => {
   if (ok) {
     entries.value = entries.value.filter(e => e.id !== id)
     try {
-      localStorage.setItem('passwordEntries', JSON.stringify(entries.value))
+      await invoke('password_delete', { id })
       toast.success('删除成功')
     } catch (error) {
       console.error('删除失败:', error)
@@ -134,15 +121,24 @@ const togglePassword = (id: string) => {
 }
 
 // 加载保存的密码 - 添加错误处理
-const loadEntries = () => {
+const loadEntries = async () => {
   try {
+    const remote = await invoke<PasswordEntry[]>('password_list')
+    if (remote.length > 0) {
+      entries.value = remote
+      return
+    }
     const saved = localStorage.getItem('passwordEntries')
     if (saved) {
       const parsed = JSON.parse(saved)
-      if (Array.isArray(parsed)) {
-        entries.value = parsed
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        await invoke('password_import', { entries: parsed })
+        localStorage.removeItem('passwordEntries')
+        entries.value = await invoke<PasswordEntry[]>('password_list')
+        return
       }
     }
+    entries.value = remote
   } catch (error) {
     console.error('加载密码记录失败:', error)
     toast.error('加载密码记录失败')
