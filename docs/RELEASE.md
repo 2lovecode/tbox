@@ -9,7 +9,7 @@
 |----|------|
 | 触发 | 仅推送匹配 `v*` 的 git tag（如 `v0.0.3`、`v0.2.0-beta.1`） |
 | 版本对齐 | tag 必须等于 `v` + `src-tauri/tauri.conf.json` 的 `version`，否则 Release job 直接失败 |
-| 产物矩阵 | Windows x64 / Linux x64：**CI/Release 为 CPU**（本机仍可用 CUDA/Vulkan conf）；macOS arm64（Metal）；macOS x64（交叉编译，CPU） |
+| 产物矩阵 | Windows x64 / Linux x64：**CI/Release 为 CPU**（本机仍可用 CUDA/Vulkan conf）；macOS arm64（Metal）。**无 macOS Intel**：`ort` 无 `x86_64-apple-darwin` 预编译包 |
 | Release 形态 | **Draft**；含 `-` 的 tag（如 `-beta`）会标为 prerelease |
 | 签名 / 公证 | 暂无 Apple / Authenticode / Tauri updater 签名；用户首次安装可能被 Gatekeeper / SmartScreen 拦截 |
 | Updater | 未启用；待 Secrets + `tauri.conf` updater 配置就绪后再开 |
@@ -21,8 +21,8 @@
 ## 0. 发版前（代码就绪）
 
 - [ ] 相关 OpenSpec change 已实现并归档（或确认本次为豁免类小改）
-- [ ] `main` 上 CI 四格全绿：`macos-arm64` / `macos-x64` / `linux-x64` / `windows-x64`  
-  （workflow：`.github/workflows/ci.yml`，与 Release 同矩阵）
+- [ ] `main` 上 CI 三格全绿：`macos-arm64` / `linux-x64` / `windows-x64`  
+  （workflow：`.github/workflows/ci.yml`，与 Release 同矩阵；无 macOS Intel）
 - [ ] 本地至少跑过：`make check && make test`（有 make）或等价的 cargo / vue-tsc
 - [ ] 无未提交的「必须进本版」的改动；发版 commit 已在 `main`
 - [ ] Changelog / 用户可见说明心里有数（Release body 会用 tag 间 `git log` 自动生成，可事后在 Draft 里改）
@@ -78,9 +78,8 @@ Actions → **Release** → 本次 tag 的 run：
 | Job | 预期 |
 |-----|------|
 | `release (macos-arm64)` | 原生 arm64 安装包 → 上传 Draft |
-| `release (macos-x64)` | `--target x86_64-apple-darwin` → 上传 Draft |
-| `release (linux-x64)` | deb/AppImage 等 → 上传 Draft |
-| `release (windows-x64)` | 安装 CUDA + Ninja 后打包 → 上传 Draft（最久，timeout 90m） |
+| `release (linux-x64)` | deb/AppImage 等 → 上传 Draft（runner：`ubuntu-24.04`，满足 ort/glibc） |
+| `release (windows-x64)` | CPU 构建打包 → 上传 Draft（最久，timeout 90m） |
 
 每个 job 还会上传 `SHA256SUMS-<platform>.txt`。
 
@@ -91,7 +90,8 @@ Actions → **Release** → 本次 tag 的 run：
 | tag / version 不匹配 | 改 conf 或重打正确 tag |
 | Windows CUDA 安装失败 | `Jimver/cuda-toolkit` 版本 / 子包；看 job log |
 | Linux Vulkan / WebKit | apt 依赖是否装全（workflow 已列） |
-| macOS x64 交叉失败 | rustup target、`MACOSX_DEPLOYMENT_TARGET`（见 `src-tauri/.cargo/config.toml`） |
+| macOS Intel / ort 预编译缺失 | 已从矩阵移除；勿再交叉编 `x86_64-apple-darwin`，除非自备 ORT |
+| Linux ort 链接失败（`__isoc23_strtol` 等） | runner 须 ≥ Ubuntu 24.04（glibc 2.38+）；勿退回 22.04 |
 | 找不到 bundle 目录 | 看 `bundle_subdir` 与 `src-tauri/target/...` 实际布局 |
 
 `fail-fast: false`：一格挂了其它平台仍会继续上传；最终可能出现「半套资产」的 Draft，需人工判断是否发布或重跑。
@@ -118,7 +118,7 @@ Actions → **Release** → 本次 tag 的 run：
 - [ ] 各平台各下一份安装包，干净环境装一遍、启动、打开对话页
 - [ ] Windows：确认 CUDA 构建的二进制在无 NVIDIA 机器上仍能启动（推理可回退 CPU / 报错路径可接受）
 - [ ] Linux：有/无独显各测一次 Vulkan 路径是否可接受
-- [ ] macOS arm：Metal；macOS Intel（若有机器）：交叉产物能开
+- [ ] macOS arm：Metal（Intel 已不发）
 
 ---
 

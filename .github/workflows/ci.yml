@@ -33,14 +33,12 @@ jobs:
             rust_target: ''
             timeout_minutes: 45
 
-          - name: macos-x64
-            platform: macos-latest
-            args: '--no-bundle --target x86_64-apple-darwin'
-            rust_target: x86_64-apple-darwin
-            timeout_minutes: 45
+          # macos-x64 omitted: ort-sys has no x86_64-apple-darwin prebuilts
+          # (same reason as release.yml).
 
           - name: linux-x64
-            platform: ubuntu-22.04
+            # ubuntu-24.04: ort prebuilts need glibc ≥ 2.38 (22.04 is 2.35).
+            platform: ubuntu-24.04
             # CPU build on hosted runners (see tauri.ci-linux.conf.json).
             args: '--no-bundle --config src-tauri/tauri.ci-linux.conf.json'
             rust_target: ''

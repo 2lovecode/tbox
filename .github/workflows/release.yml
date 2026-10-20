@@ -1,7 +1,8 @@
 name: Release
 
-# Push a `v*` tag → build Windows / macOS (arm64 + x86_64) / Linux installers
+# Push a `v*` tag → build Windows / macOS arm64 / Linux installers
 # and attach them to one draft GitHub Release via `tauri-apps/tauri-action`.
+# (No macOS Intel: ort-sys has no x86_64-apple-darwin prebuilts.)
 # Review notes + assets, then publish the draft manually.
 #
 # Platform GPU backends for *local* builds (see tauri.*.conf.json):
@@ -43,16 +44,15 @@ jobs:
             bundle_subdir: release/bundle
             timeout_minutes: 60
 
-          # Intel Mac via cross-compile on the arm64 runner (macos-13 retired).
-          - name: macos-x64
-            platform: macos-latest
-            args: '--target x86_64-apple-darwin'
-            rust_target: x86_64-apple-darwin
-            bundle_subdir: x86_64-apple-darwin/release/bundle
-            timeout_minutes: 60
+          # macos-x64 dropped: ort-sys download-binaries has no
+          # x86_64-apple-darwin prebuilts (ONNX Runtime dropped Intel Mac).
+          # Cross-compile fails with: "no prebuilt binaries available for
+          # target x86_64-apple-darwin". Re-add only with a custom ORT link
+          # (ORT_LIB_LOCATION) or if pyke ships that target again.
 
           - name: linux-x64
-            platform: ubuntu-22.04
+            # ubuntu-24.04: ort prebuilts need glibc ≥ 2.38 (22.04 is 2.35).
+            platform: ubuntu-24.04
             # CPU build on hosted runners (see tauri.ci-linux.conf.json).
             args: '--config src-tauri/tauri.ci-linux.conf.json'
             rust_target: ''
